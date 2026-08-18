@@ -65,29 +65,36 @@ export function SectionPageLayout(props: SectionPageLayoutProps) {
   let breadcrumb: ReactNode = null
 
   Children.forEach(props.children, (node) => {
-    if (!isValidElement(node)) return
+    if (!isValidElement(node)) {
+      return
+    }
     const child = node as ReactElement<SlotProps>
-    if (child.type === SectionPageLayoutTitle) title = child.props.children
-    else if (child.type === SectionPageLayoutActions)
+    if (child.type === SectionPageLayoutTitle) {
+      title = child.props.children
+    } else if (child.type === SectionPageLayoutActions) {
       actions = child.props.children
-    else if (child.type === SectionPageLayoutContent)
+    } else if (child.type === SectionPageLayoutContent) {
       content = child.props.children
-    else if (child.type === SectionPageLayoutBreadcrumb)
+    } else if (child.type === SectionPageLayoutBreadcrumb) {
       breadcrumb = child.props.children
+    }
   })
 
   return (
     <PageFooterProvider container={footerContainer}>
       <Main>
-        <div className='shrink-0 px-3 pt-3 pb-2.5 sm:px-4 sm:pt-5 sm:pb-3'>
+        <div
+          data-slot='page-heading'
+          className='bg-background/92 shrink-0 border-b px-3 py-3 sm:px-5 sm:py-4'
+        >
           {breadcrumb != null && (
             <div className='mb-2 sm:mb-3'>{breadcrumb}</div>
           )}
           <div className='flex flex-wrap items-center justify-between gap-x-3 gap-y-2 sm:gap-x-4'>
             <div className='min-w-0 flex-1'>
-              <h2 className='truncate text-base font-bold tracking-tight sm:text-lg'>
+              <h1 className='truncate font-serif text-lg leading-tight font-semibold sm:text-2xl'>
                 {title}
-              </h2>
+              </h1>
             </div>
             {actions != null && (
               <div className='flex shrink-0 flex-wrap items-center justify-end gap-2 sm:gap-x-4'>
@@ -98,10 +105,11 @@ export function SectionPageLayout(props: SectionPageLayoutProps) {
         </div>
 
         <div
+          data-slot='page-content'
           className={
             props.fixedContent
-              ? 'min-h-0 flex-1 overflow-hidden px-3 pt-1 pb-3 sm:px-4 sm:pt-1.5 sm:pb-4'
-              : 'min-h-0 flex-1 overflow-auto px-3 pt-1 pb-3 sm:px-4 sm:pt-1.5 sm:pb-4'
+              ? 'min-h-0 flex-1 overflow-hidden px-3 py-3 sm:px-5 sm:py-4'
+              : 'min-h-0 flex-1 overflow-auto px-3 py-3 sm:px-5 sm:py-4'
           }
         >
           {content}

@@ -31,31 +31,48 @@ export function AuthLayout({ children }: AuthLayoutProps) {
   const { systemName, logo, loading } = useSystemConfig()
 
   return (
-    <div className='relative grid h-svh max-w-none'>
+    <div
+      data-auth-layout='gothic'
+      className='bg-background relative grid min-h-svh max-w-none overflow-x-hidden'
+    >
+      <div
+        aria-hidden='true'
+        className='border-primary/20 pointer-events-none absolute inset-x-0 top-20 border-t'
+      />
       <Link
         to='/'
-        className='absolute top-4 left-4 z-10 flex items-center gap-2 transition-opacity hover:opacity-80 sm:top-8 sm:left-8'
+        className='hover:text-primary absolute top-4 left-4 z-10 flex items-center gap-3 transition-colors sm:top-6 sm:left-8'
       >
-        <div className='relative h-8 w-8'>
+        <div className='border-primary/35 bg-card relative grid h-9 w-9 place-items-center rounded-sm border shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--primary)_8%,transparent)]'>
           {loading ? (
-            <Skeleton className='absolute inset-0 rounded-full' />
+            <Skeleton className='absolute inset-1 rounded-sm' />
           ) : (
             <img
               src={logo}
               alt={t('Logo')}
-              className='h-8 w-8 rounded-full object-cover'
+              className='h-7 w-7 rounded-sm object-cover'
             />
           )}
         </div>
         {loading ? (
           <Skeleton className='h-6 w-24' />
         ) : (
-          <h1 className='text-xl font-medium'>{systemName}</h1>
+          <span className='font-serif text-xl font-semibold'>{systemName}</span>
         )}
       </Link>
-      <div className='container flex items-center pt-16 sm:pt-0'>
-        <div className='mx-auto flex w-full flex-col justify-center space-y-2 px-4 py-8 sm:w-[480px] sm:p-8'>
-          {children}
+      <div className='flex min-h-svh items-center justify-center px-4 pt-24 pb-8 sm:px-8 sm:pt-28'>
+        <div className='relative w-full max-w-[520px]'>
+          <div
+            aria-hidden='true'
+            className='border-primary/35 absolute -top-3 left-8 h-6 w-20 border-t border-l'
+          />
+          <div
+            aria-hidden='true'
+            className='border-primary/35 absolute right-8 -bottom-3 h-6 w-20 border-r border-b'
+          />
+          <div className='bg-card/70 border-border rounded-md border px-5 py-7 shadow-2xl shadow-black/25 sm:px-10 sm:py-10'>
+            {children}
+          </div>
         </div>
       </div>
     </div>

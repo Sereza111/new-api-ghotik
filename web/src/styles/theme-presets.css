@@ -643,8 +643,8 @@ For commercial licensing, please contact support@quantumnous.com
  *          Tailwind preflight (specificity wins over body inheritance).
  *        - `.font-mono` and `.tabular-nums` utilities declare their own
  *          font-family / font-variant-numeric on the element itself.
- *   3. Headings adopt the Anthropic display setting (medium weight, slight
- *      negative tracking).
+ *   3. Headings adopt the Anthropic display weight while retaining neutral
+ *      tracking for predictable layout across scripts.
  *
  * All keyed off `[data-theme-font='serif']` so they apply to any preset
  * paired with the serif font — not just Anthropic. */
@@ -666,16 +666,15 @@ For commercial licensing, please contact support@quantumnous.com
 [data-theme-font='serif'] [data-slot='drawer-title'],
 [data-theme-font='serif'] [data-slot='card-title'] {
   font-weight: 500;
-  letter-spacing: -0.012em;
+  letter-spacing: 0;
 }
 
-/* Larger displays earn tighter tracking, matching Copernicus/Tiempos
- * editorial display setting (~ -0.02em at 30px+). */
+/* Keep display tracking neutral so long translated headings remain stable. */
 [data-theme-font='serif'] h1,
 [data-theme-font='serif'] .text-3xl,
 [data-theme-font='serif'] .text-4xl,
 [data-theme-font='serif'] .text-5xl {
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 /* ── Border radius ────────────────────────────────────────────────────── */

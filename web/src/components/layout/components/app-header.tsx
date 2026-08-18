@@ -16,16 +16,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Link } from '@tanstack/react-router'
+import { WalletCards } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+
 import { ConfigDrawer } from '@/components/config-drawer'
 import { LanguageSwitcher } from '@/components/language-switcher'
 import { NotificationPopover } from '@/components/notification-popover'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { Search } from '@/components/search'
+import { Button } from '@/components/ui/button'
 import { useNotifications } from '@/hooks/use-notifications'
 import { useTopNavLinks } from '@/hooks/use-top-nav-links'
+import { formatQuota } from '@/lib/format'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { defaultTopNavLinks } from '../config/top-nav.config'
-import { type TopNavLink } from '../types'
+import type { TopNavLink } from '../types'
 import { Header } from './header'
 import { SystemBrand } from './system-brand'
 import { TopNav } from './top-nav'
@@ -93,6 +100,24 @@ type AppHeaderProps = {
   showProfileDropdown?: boolean
 }
 
+function HeaderBalance() {
+  const { t } = useTranslation()
+  const quota = useAuthStore((state) => state.auth.user?.quota ?? 0)
+
+  return (
+    <Button
+      variant='ghost'
+      size='sm'
+      className='hidden border-l pl-3 font-mono tabular-nums xl:inline-flex'
+      aria-label={t('Wallet')}
+      render={<Link to='/wallet' />}
+    >
+      <WalletCards data-icon='inline-start' />
+      {formatQuota(quota)}
+    </Button>
+  )
+}
+
 export function AppHeader({
   navLinks = defaultTopNavLinks,
   showTopNav = true,
@@ -111,40 +136,39 @@ export function AppHeader({
   const notifications = useNotifications()
 
   return (
-    <>
-      <Header>
-        <SystemBrand variant='inline' />
+    <Header>
+      <SystemBrand variant='inline' />
 
-        {leftContent ? (
-          <div className='ms-2 flex items-center'>{leftContent}</div>
-        ) : null}
+      {leftContent ? (
+        <div className='ms-2 flex items-center'>{leftContent}</div>
+      ) : null}
 
-        {rightContent ?? (
-          <div className='ms-auto flex items-center gap-1 sm:gap-2'>
-            {showTopNav && (
-              <div className='me-1 hidden lg:block'>
-                <TopNav links={links} />
-              </div>
-            )}
-            {showSearch && <Search />}
-            {showNotifications && (
-              <NotificationPopover
-                open={notifications.popoverOpen}
-                onOpenChange={notifications.setPopoverOpen}
-                unreadCount={notifications.unreadCount}
-                activeTab={notifications.activeTab}
-                onTabChange={notifications.setActiveTab}
-                notice={notifications.notice}
-                announcements={notifications.announcements}
-                loading={notifications.loading}
-              />
-            )}
-            <LanguageSwitcher />
-            {showConfigDrawer && <ConfigDrawer />}
-            {showProfileDropdown && <ProfileDropdown />}
-          </div>
-        )}
-      </Header>
-    </>
+      {rightContent ?? (
+        <div className='ms-auto flex items-center gap-1 sm:gap-2'>
+          {showTopNav && (
+            <div className='me-1 hidden lg:block'>
+              <TopNav links={links} />
+            </div>
+          )}
+          <HeaderBalance />
+          {showSearch && <Search />}
+          {showNotifications && (
+            <NotificationPopover
+              open={notifications.popoverOpen}
+              onOpenChange={notifications.setPopoverOpen}
+              unreadCount={notifications.unreadCount}
+              activeTab={notifications.activeTab}
+              onTabChange={notifications.setActiveTab}
+              notice={notifications.notice}
+              announcements={notifications.announcements}
+              loading={notifications.loading}
+            />
+          )}
+          <LanguageSwitcher />
+          {showConfigDrawer && <ConfigDrawer />}
+          {showProfileDropdown && <ProfileDropdown />}
+        </div>
+      )}
+    </Header>
   )
 }

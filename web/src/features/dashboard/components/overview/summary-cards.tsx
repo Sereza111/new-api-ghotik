@@ -250,7 +250,7 @@ export function SummaryCards() {
   })
 
   return (
-    <div className='bg-card overflow-hidden rounded-2xl border shadow-xs'>
+    <div className='bg-card overflow-hidden rounded-md border shadow-[inset_0_1px_0_color-mix(in_oklch,var(--foreground)_3%,transparent)]'>
       <div className='grid xl:grid-cols-[minmax(0,1fr)_19rem]'>
         <div className='flex flex-col gap-2.5 p-3 sm:gap-3 sm:p-5'>
           <div className='flex flex-wrap items-start justify-between gap-3'>
@@ -285,7 +285,7 @@ export function SummaryCards() {
           </StaggerContainer>
         </div>
 
-        <div className='flex flex-col justify-between gap-3 border-t bg-[linear-gradient(135deg,color-mix(in_oklch,var(--overview-accent-2)_12%,var(--background))_0%,color-mix(in_oklch,oklch(0.82_0.04_155)_8%,var(--background))_48%,color-mix(in_oklch,var(--overview-accent-1)_7%,var(--background))_100%)] p-3 sm:gap-4 sm:p-5 xl:border-t-0 xl:border-l'>
+        <div className='bg-muted/25 flex flex-col justify-between gap-3 border-t p-3 sm:gap-4 sm:p-5 xl:border-t-0 xl:border-l'>
           <div className='flex flex-col gap-2 sm:gap-3'>
             <div className='flex items-center justify-between'>
               <span className='text-muted-foreground text-xs font-medium'>
@@ -302,7 +302,7 @@ export function SummaryCards() {
               </span>
             </div>
 
-            <div className='font-mono text-xl font-semibold tracking-tight sm:text-2xl'>
+            <div className='font-mono text-xl font-semibold sm:text-2xl'>
               {formatQuota(remainQuota)}
             </div>
 

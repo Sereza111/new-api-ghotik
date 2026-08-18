@@ -92,7 +92,7 @@ export function PerformanceHealthPanel() {
   const hasData = models.length > 0
 
   return (
-    <section className='bg-card h-full overflow-hidden rounded-2xl border shadow-xs'>
+    <section className='bg-card h-full overflow-hidden rounded-md border shadow-[inset_0_1px_0_color-mix(in_oklch,var(--foreground)_3%,transparent)]'>
       <div className='flex items-center gap-2 border-b px-4 py-3 sm:px-5'>
         <IconBadge tone='success' size='sm'>
           <HeartPulse />

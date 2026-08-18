@@ -185,7 +185,7 @@ function SetupGuideBackdrop(props: { compact?: boolean }) {
     <>
       <div
         className={cn(
-          'pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_48%_120%_at_78%_0%,color-mix(in_oklch,var(--overview-accent-1)_14%,transparent)_0%,transparent_62%),linear-gradient(112deg,color-mix(in_oklch,var(--card)_94%,var(--overview-accent-2)_6%)_0%,color-mix(in_oklch,var(--card)_94%,var(--overview-accent-3)_6%)_48%,color-mix(in_oklch,var(--background)_90%,var(--overview-accent-1)_10%)_100%)] dark:opacity-60',
+          'bg-card pointer-events-none absolute inset-0',
           props.compact
             ? '[mask-image:linear-gradient(90deg,black_0%,black_48%,transparent_74%)] opacity-55'
             : 'opacity-85'
@@ -322,7 +322,7 @@ function RequestPreview(props: {
       initial={shouldReduceMotion ? false : { opacity: 0, y: 10, scale: 0.98 }}
       animate={shouldReduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
       transition={MOTION_TRANSITION.slow}
-      className='bg-background/75 relative overflow-hidden rounded-2xl border p-3 shadow-sm backdrop-blur'
+      className='bg-background/75 relative overflow-hidden rounded-md border p-3 shadow-sm backdrop-blur'
     >
       {!shouldReduceMotion && (
         <motion.div
@@ -621,7 +621,7 @@ export function OverviewDashboard() {
     <div className='flex flex-col gap-4'>
       {setupGuideExpanded ? (
         <CardStaggerContainer className='grid items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]'>
-          <CardStaggerItem className='bg-card h-full overflow-hidden rounded-2xl border shadow-xs'>
+          <CardStaggerItem className='bg-card h-full overflow-hidden rounded-md border shadow-xs'>
             <div className='relative h-full overflow-hidden p-4 sm:p-5'>
               <SetupGuideBackdrop />
               <div className='relative grid gap-5 lg:grid-cols-[minmax(0,1fr)_21rem]'>
@@ -632,7 +632,7 @@ export function OverviewDashboard() {
                         <ListChecks className='size-3.5' aria-hidden='true' />
                         {t('Get started')}
                       </div>
-                      <h3 className='text-xl font-semibold tracking-tight sm:text-2xl'>
+                      <h3 className='text-xl font-semibold sm:text-2xl'>
                         {t('Build on your API gateway in minutes')}
                       </h3>
                       <p className='text-muted-foreground max-w-xl text-sm leading-relaxed'>
@@ -657,7 +657,7 @@ export function OverviewDashboard() {
                     </div>
                   </div>
 
-                  <ol className='bg-background/45 rounded-2xl border p-2 backdrop-blur'>
+                  <ol className='bg-background/45 rounded-md border p-2 backdrop-blur'>
                     {startSteps.map((step, index) => (
                       <StartStepItem
                         key={step.title}
@@ -677,13 +677,13 @@ export function OverviewDashboard() {
             </div>
           </CardStaggerItem>
 
-          <CardStaggerItem className='bg-card h-full rounded-2xl border p-4 shadow-xs sm:p-5'>
+          <CardStaggerItem className='bg-card h-full rounded-md border p-4 shadow-xs sm:p-5'>
             <div className='flex h-full flex-col gap-4'>
               <div className='flex flex-col gap-1'>
                 <div className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>
                   {t('Recommended actions')}
                 </div>
-                <h3 className='text-lg font-semibold tracking-tight'>
+                <h3 className='text-lg font-semibold'>
                   {t('Keep the platform ready')}
                 </h3>
               </div>
@@ -697,7 +697,7 @@ export function OverviewDashboard() {
         </CardStaggerContainer>
       ) : (
         <CardStaggerContainer>
-          <CardStaggerItem className='bg-card overflow-hidden rounded-2xl border shadow-xs'>
+          <CardStaggerItem className='bg-card overflow-hidden rounded-md border shadow-xs'>
             <div className='relative overflow-hidden px-4 py-3 sm:px-5'>
               <SetupGuideBackdrop compact />
               <div className='relative flex flex-wrap items-center justify-between gap-3'>
