@@ -67,7 +67,7 @@ export function SystemBrand(props: SystemBrandProps) {
       >
         <div className='vl-brand-mark flex size-7 items-center justify-center rounded-sm border'>
           <img
-            src='/service-mark.svg'
+            src='/service-mark.svg?v=2'
             alt='VL'
             className='size-5 object-contain'
           />

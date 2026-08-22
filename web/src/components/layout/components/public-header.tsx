@@ -228,7 +228,7 @@ export function PublicHeader(props: PublicHeaderProps) {
             >
               <div className='vl-brand-mark flex size-8 shrink-0 items-center justify-center rounded-md border transition-all duration-300 group-hover:scale-105'>
                 <img
-                  src='/service-mark.svg'
+                  src='/service-mark.svg?v=2'
                   alt='VL'
                   className='size-6 object-contain'
                 />
