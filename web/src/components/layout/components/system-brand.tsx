@@ -65,7 +65,7 @@ export function SystemBrand(props: SystemBrandProps) {
           'hover:bg-accent focus-visible:ring-ring/40 focus-visible:ring-2'
         )}
       >
-        <div className='border-primary/30 bg-primary/5 flex size-7 items-center justify-center rounded-sm border'>
+        <div className='vl-brand-mark flex size-7 items-center justify-center rounded-sm border'>
           <img
             src='/service-mark.svg'
             alt='VL'

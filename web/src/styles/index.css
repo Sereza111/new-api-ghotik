@@ -562,6 +562,17 @@ For commercial licensing, please contact support@quantumnous.com
   }
 }
 
+.vl-public-surface {
+  --primary: oklch(0.82 0.055 230);
+  --primary-foreground: oklch(0.15 0.018 235);
+  --ring: oklch(0.74 0.06 230);
+}
+
+.vl-brand-mark {
+  border-color: color-mix(in oklch, oklch(0.82 0.055 230) 48%, var(--border));
+  background: color-mix(in oklch, oklch(0.82 0.055 230) 7%, transparent);
+}
+
 .fortune-wheel-rotor {
   animation: fortune-wheel-turn 36s linear infinite;
   transform-origin: center;

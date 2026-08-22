@@ -206,7 +206,7 @@ export function PublicHeader(props: PublicHeaderProps) {
 
   return (
     <>
-      <header className='pointer-events-none fixed inset-x-0 top-0 z-50'>
+      <header className='vl-public-surface pointer-events-none fixed inset-x-0 top-0 z-50'>
         <div
           className={cn(
             'pointer-events-auto mx-auto transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]',
@@ -226,7 +226,7 @@ export function PublicHeader(props: PublicHeaderProps) {
               to={homeUrl}
               className='group flex shrink-0 items-center gap-2'
             >
-              <div className='border-primary/30 bg-primary/5 flex size-8 shrink-0 items-center justify-center rounded-md border transition-all duration-300 group-hover:scale-105'>
+              <div className='vl-brand-mark flex size-8 shrink-0 items-center justify-center rounded-md border transition-all duration-300 group-hover:scale-105'>
                 <img
                   src='/service-mark.svg'
                   alt='VL'

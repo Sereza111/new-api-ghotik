@@ -44,8 +44,11 @@ describe('gothic fortune wheel', () => {
       name: 'Gothic Wheel of Fortune',
     })
     const rotor = screen.getByTestId('fortune-wheel-rotor')
+    const staticFrame = screen.getByTestId('fortune-wheel-frame')
 
     expect(frame).not.toHaveClass('fortune-wheel-rotor')
+    expect(staticFrame).toHaveClass('absolute')
+    expect(staticFrame).not.toHaveClass('fortune-wheel-rotor')
     expect(rotor).toHaveClass('fortune-wheel-rotor')
     expect(rotor).toHaveClass('motion-reduce:animate-none')
   })

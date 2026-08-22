@@ -63,7 +63,7 @@ export function DefaultAboutContent() {
   ]
 
   return (
-    <div className='px-1 pt-8 pb-16 sm:px-4 md:pt-16 md:pb-24'>
+    <div className='vl-public-surface px-1 pt-8 pb-16 sm:px-4 md:pt-16 md:pb-24'>
       <section className='border-border/60 mx-auto grid max-w-6xl gap-10 border-b pb-16 lg:grid-cols-[0.72fr_1.28fr] lg:items-end'>
         <div>
           <p className='text-primary text-xs font-semibold tracking-[0.14em] uppercase'>
