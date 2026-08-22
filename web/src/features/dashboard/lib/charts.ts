@@ -265,7 +265,7 @@ export function processChartData(
   const modelColorRange = getDashboardChartColors(modelColorDomain.length)
   const otherColor = modelColorRange[modelColorDomain.indexOf(otherLabel)]
   const otherTooltipColor =
-    typeof otherColor === 'string' ? otherColor : '#FF8A00'
+    typeof otherColor === 'string' ? otherColor : '#38BDF8'
   const modelColor = {
     type: 'ordinal',
     domain: modelColorDomain,
@@ -691,11 +691,11 @@ export function processChartData(
 const USER_COLORS = [
   '#5B8FF9',
   '#5AD8A6',
-  '#F6BD16',
+  '#93C5FD',
   '#E8684A',
   '#6DC8EC',
   '#9270CA',
-  '#FF9D4D',
+  '#FB7185',
   '#269A99',
   '#FF99C3',
   '#5D7092',
