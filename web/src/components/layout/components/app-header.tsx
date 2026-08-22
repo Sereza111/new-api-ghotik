@@ -29,6 +29,7 @@ import { Button } from '@/components/ui/button'
 import { useNotifications } from '@/hooks/use-notifications'
 import { useTopNavLinks } from '@/hooks/use-top-nav-links'
 import { formatQuota } from '@/lib/format'
+import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { defaultTopNavLinks } from '../config/top-nav.config'
@@ -102,7 +103,9 @@ type AppHeaderProps = {
 
 function HeaderBalance() {
   const { t } = useTranslation()
-  const quota = useAuthStore((state) => state.auth.user?.quota ?? 0)
+  const user = useAuthStore((state) => state.auth.user)
+  const balance =
+    user?.role === ROLE.SUPER_ADMIN ? '∞' : formatQuota(user?.quota ?? 0)
 
   return (
     <Button
@@ -113,7 +116,7 @@ function HeaderBalance() {
       render={<Link to='/wallet' />}
     >
       <WalletCards data-icon='inline-start' />
-      {formatQuota(quota)}
+      {balance}
     </Button>
   )
 }

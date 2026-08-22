@@ -26,7 +26,7 @@ import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
 import { formatCompactNumber, formatQuota } from '@/lib/format'
-import { getRoleLabel } from '@/lib/roles'
+import { getRoleLabel, ROLE } from '@/lib/roles'
 
 import { getDisplayName } from '../lib'
 import type { UserProfile } from '../types'
@@ -93,7 +93,10 @@ export function ProfileHeader({ profile, loading }: ProfileHeaderProps) {
   }[] = [
     {
       label: t('Current Balance'),
-      value: formatQuota(profile.quota),
+      value:
+        profile.role === ROLE.SUPER_ADMIN
+          ? t('Unlimited')
+          : formatQuota(profile.quota),
       description: t('Remaining quota'),
       icon: WalletCards,
       tone: 'success',

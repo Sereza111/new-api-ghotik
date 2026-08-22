@@ -30,6 +30,7 @@ import type { QuotaDataItem } from '@/features/dashboard/types'
 import { useStatus } from '@/hooks/use-status'
 import { getCurrencyLabel, isCurrencyDisplayEnabled } from '@/lib/currency'
 import { formatNumber, formatQuota } from '@/lib/format'
+import { ROLE } from '@/lib/roles'
 import { computeTimeRange } from '@/lib/time'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
@@ -145,6 +146,7 @@ export function SummaryCards() {
   const remainQuota = Number(user?.quota ?? 0)
   const usedQuota = Number(user?.used_quota ?? 0)
   const requestCount = Number(user?.request_count ?? 0)
+  const hasUnlimitedQuota = user?.role === ROLE.SUPER_ADMIN
 
   const usageTrendQuery = useQuery({
     queryKey: [
@@ -206,13 +208,17 @@ export function SummaryCards() {
     [usageTrendQuery.data?.data]
   )
 
-  const healthLevel = getHealthLevel(remainQuota, recentUsage)
+  const healthLevel = hasUnlimitedQuota
+    ? ('healthy' as const)
+    : getHealthLevel(remainQuota, recentUsage)
   const healthCfg = HEALTH_CONFIG[healthLevel]
   const runwayDays = getRunwayDays(remainQuota, recentUsage)
 
   const todayUsageDisplay = formatQuota(recentUsage)
   let runwayDisplay: string
-  if (runwayDays !== null) {
+  if (hasUnlimitedQuota) {
+    runwayDisplay = t('Unlimited')
+  } else if (runwayDays !== null) {
     if (runwayDays < 1) {
       runwayDisplay = t('Less than 1 day left')
     } else if (runwayDays > 999) {
@@ -303,7 +309,7 @@ export function SummaryCards() {
             </div>
 
             <div className='font-mono text-xl font-semibold sm:text-2xl'>
-              {formatQuota(remainQuota)}
+              {hasUnlimitedQuota ? t('Unlimited') : formatQuota(remainQuota)}
             </div>
 
             <div className='grid grid-cols-2 gap-2'>
