@@ -24,7 +24,6 @@ import {
   BadgeListCell,
   DataTableColumnHeader,
 } from '@/components/data-table'
-import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge } from '@/components/status-badge'
 import { getLobeIcon } from '@/lib/lobe-icon'
 
@@ -33,7 +32,6 @@ import {
   getDynamicDisplayGroupRatio,
   getDynamicPricingSummary,
 } from '../lib/dynamic-price'
-import { parseTags } from '../lib/filters'
 import { isTokenBasedModel } from '../lib/model-helpers'
 import {
   formatPrice,
@@ -343,30 +341,6 @@ export function usePricingColumns(
       enableSorting: false,
     },
 
-    // Tags column
-    {
-      accessorKey: 'tags',
-      header: t('Tags'),
-      cell: ({ row }) => {
-        const tags = parseTags(row.original.tags)
-        return (
-          <BadgeListCell
-            items={tags.map((tag) => (
-              <StatusBadge
-                key={tag}
-                label={tag}
-                autoColor={tag}
-                size='sm'
-                copyable={false}
-              />
-            ))}
-          />
-        )
-      },
-      size: 140,
-      enableSorting: false,
-    },
-
     // Endpoints column
     {
       accessorKey: 'supported_endpoint_types',
@@ -384,25 +358,6 @@ export function usePricingColumns(
                 copyable={false}
               />
             ))}
-          />
-        )
-      },
-      size: 130,
-      enableSorting: false,
-    },
-
-    // Enable Groups column
-    {
-      accessorKey: 'enable_groups',
-      header: t('Groups'),
-      cell: ({ row }) => {
-        const groups = row.original.enable_groups || []
-        return (
-          <BadgeListCell
-            items={groups.map((group) => (
-              <GroupBadge key={group} group={group} size='sm' />
-            ))}
-            tooltipClassName='max-w-[280px] p-2'
           />
         )
       },

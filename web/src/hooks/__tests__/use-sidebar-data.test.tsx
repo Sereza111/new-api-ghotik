@@ -43,4 +43,17 @@ describe('useSidebarData', () => {
       )
     ).toBe(false)
   })
+
+  test('shows routing in the personal navigation group', () => {
+    const { result } = renderHook(() => useSidebarData())
+    const personalGroup = result.current.navGroups.find(
+      (group) => group.id === 'personal'
+    )
+
+    expect(personalGroup?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'Routing', url: '/routing' }),
+      ])
+    )
+  })
 })

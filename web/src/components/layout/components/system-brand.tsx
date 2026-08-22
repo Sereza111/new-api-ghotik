@@ -69,6 +69,12 @@ export function SystemBrand(props: SystemBrandProps) {
           <img src={logo} alt={t('Logo')} className='size-full object-cover' />
         </div>
         <span className='max-w-[12rem] truncate'>{name}</span>
+        <img
+          src='/service-mark.svg'
+          alt=''
+          aria-hidden='true'
+          className='size-3.5 opacity-80'
+        />
       </Link>
     )
   }
