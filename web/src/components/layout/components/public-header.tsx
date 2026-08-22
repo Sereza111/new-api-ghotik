@@ -224,20 +224,23 @@ export function PublicHeader(props: PublicHeaderProps) {
             {/* Logo */}
             <Link
               to={homeUrl}
-              className='group flex shrink-0 items-center gap-2.5'
+              className='group flex shrink-0 items-center gap-2'
             >
-              <div className='flex size-7 shrink-0 items-center justify-center transition-all duration-300 group-hover:scale-105'>
+              <div className='border-primary/30 bg-primary/5 flex size-8 shrink-0 items-center justify-center rounded-md border transition-all duration-300 group-hover:scale-105'>
+                <img
+                  src='/service-mark.svg'
+                  alt='VL'
+                  className='size-6 object-contain'
+                />
+              </div>
+              <span className='font-serif text-base font-semibold'>VL</span>
+              <span className='bg-border mx-1 h-5 w-px' aria-hidden='true' />
+              <div className='flex size-5 shrink-0 items-center justify-center'>
                 {displayedLogo}
               </div>
-              <span className='text-sm font-semibold tracking-tight'>
-                {loading ? <Skeleton className='h-4 w-16' /> : displaySiteName}
+              <span className='text-muted-foreground hidden text-xs font-medium lg:inline'>
+                {loading ? <Skeleton className='h-3 w-14' /> : displaySiteName}
               </span>
-              <img
-                src='/service-mark.svg'
-                alt=''
-                aria-hidden='true'
-                className='size-3.5 opacity-80'
-              />
             </Link>
 
             {/* Desktop nav */}

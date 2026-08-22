@@ -65,16 +65,21 @@ export function SystemBrand(props: SystemBrandProps) {
           'hover:bg-accent focus-visible:ring-ring/40 focus-visible:ring-2'
         )}
       >
+        <div className='border-primary/30 bg-primary/5 flex size-7 items-center justify-center rounded-sm border'>
+          <img
+            src='/service-mark.svg'
+            alt='VL'
+            className='size-5 object-contain'
+          />
+        </div>
+        <span className='font-serif text-base'>VL</span>
+        <span className='bg-border h-4 w-px' aria-hidden='true' />
         <div className='ring-border flex size-5 items-center justify-center overflow-hidden rounded-sm ring-1'>
           <img src={logo} alt={t('Logo')} className='size-full object-cover' />
         </div>
-        <span className='max-w-[12rem] truncate'>{name}</span>
-        <img
-          src='/service-mark.svg'
-          alt=''
-          aria-hidden='true'
-          className='size-3.5 opacity-80'
-        />
+        <span className='text-muted-foreground max-w-[9rem] truncate font-sans text-xs'>
+          {name}
+        </span>
       </Link>
     )
   }

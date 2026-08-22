@@ -16,57 +16,82 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Activity, Database, Route, Server } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { Activity } from 'lucide-react'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { PublicLayout } from '@/components/layout/components/public-layout'
 import { PageTransition } from '@/components/page-transition'
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
+import { getPerfMetricsSummary } from '@/features/performance-metrics/api'
+import { formatUptimePct } from '@/features/performance-metrics/lib/format'
+import type { PerfModelSummary } from '@/features/performance-metrics/types'
 import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
 import { useStatus } from '@/hooks/use-status'
+
+import { getUptimeStatus } from './api'
+import { ModelStatusTable } from './components/model-status-table'
+import { StatusSummary } from './components/status-summary'
+
+const PERFORMANCE_WINDOW_HOURS = 24
+
+function averageMetric(
+  models: PerfModelSummary[],
+  readValue: (model: PerfModelSummary) => number
+): number {
+  const values = models.map(readValue).filter(Number.isFinite)
+  if (values.length === 0) return Number.NaN
+  return values.reduce((sum, value) => sum + value, 0) / values.length
+}
 
 export function ServiceStatus() {
   const { t } = useTranslation()
   const statusQuery = useStatus()
   const pricingQuery = usePricingData()
-  const gatewayReady = !statusQuery.loading && !statusQuery.error
-  const catalogReady = !pricingQuery.isLoading && !pricingQuery.error
-  const modelsReady = catalogReady && pricingQuery.models.length > 0
-  const allOperational = gatewayReady && catalogReady && modelsReady
+  const metricsQuery = useQuery({
+    queryKey: ['perf-metrics-summary', PERFORMANCE_WINDOW_HOURS],
+    queryFn: () => getPerfMetricsSummary(PERFORMANCE_WINDOW_HOURS),
+    staleTime: 60 * 1000,
+    retry: false,
+  })
+  const uptimeQuery = useQuery({
+    queryKey: ['uptime-status'],
+    queryFn: getUptimeStatus,
+    staleTime: 60 * 1000,
+    retry: false,
+  })
 
-  const checks = [
-    {
-      title: t('API gateway'),
-      description: t('Authentication, billing, and request processing'),
-      ready: gatewayReady,
-      icon: Server,
-      detail: gatewayReady ? t('Operational') : t('Unavailable'),
-    },
-    {
-      title: t('Model catalog'),
-      description: t('Pricing and available model metadata'),
-      ready: catalogReady,
-      icon: Database,
-      detail: catalogReady
-        ? t('{{count}} models available', { count: pricingQuery.models.length })
-        : t('Unavailable'),
-    },
-    {
-      title: t('Model routing'),
-      description: t('Routes requests to configured provider channels'),
-      ready: modelsReady,
-      icon: Route,
-      detail: modelsReady ? t('Operational') : t('Degraded'),
-    },
-  ]
+  const metrics = useMemo(
+    () => metricsQuery.data?.data.models ?? [],
+    [metricsQuery.data]
+  )
+  const metricsByModel = useMemo(
+    () => new Map(metrics.map((metric) => [metric.model_name, metric])),
+    [metrics]
+  )
+  const monitors = useMemo(
+    () => uptimeQuery.data?.data.flatMap((group) => group.monitors) ?? [],
+    [uptimeQuery.data]
+  )
+
+  const gatewayReady = !statusQuery.loading && !statusQuery.error
+  const catalogReady =
+    !pricingQuery.isLoading &&
+    !pricingQuery.error &&
+    pricingQuery.models.length > 0
+  const metricsReady = !metricsQuery.isLoading && !metricsQuery.error
+  const allOperational = gatewayReady && catalogReady && metricsReady
+  const averageSuccess = averageMetric(metrics, (model) => model.success_rate)
+  const averageLatency = averageMetric(metrics, (model) => model.avg_latency_ms)
+  const averageTps = averageMetric(metrics, (model) => model.avg_tps)
 
   return (
     <PublicLayout showMainContainer={false}>
-      <PageTransition className='mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 pt-24 pb-14 sm:px-6 lg:px-8'>
+      <PageTransition className='mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 pt-24 pb-14 sm:px-6 lg:px-8'>
         <header className='flex flex-col gap-4'>
           <div className='flex flex-wrap items-center gap-3'>
-            <Activity className='text-primary size-6' aria-hidden='true' />
+            <Activity className='text-primary size-7' aria-hidden='true' />
             <h1 className='font-serif text-3xl font-semibold sm:text-4xl'>
               {t('Service Status')}
             </h1>
@@ -75,52 +100,66 @@ export function ServiceStatus() {
                 ? t('All systems operational')
                 : t('Some systems are degraded')}
             </Badge>
+            <Badge variant='outline'>{t('Last 24 hours')}</Badge>
           </div>
-          <p className='text-muted-foreground max-w-2xl text-sm leading-6'>
+          <p className='text-muted-foreground max-w-3xl text-sm leading-6'>
             {t(
-              'Live checks show whether the gateway and model catalog are responding right now.'
+              'Live metrics from the last 24 hours. Models without recent traffic are shown as configured, not falsely operational.'
             )}
           </p>
         </header>
 
-        <section className='overflow-hidden rounded-md border'>
-          {checks.map((check, index) => {
-            const Icon = check.icon
-            return (
-              <div key={check.title}>
-                {index > 0 && <Separator />}
-                <div className='grid gap-4 p-4 sm:grid-cols-[2rem_minmax(0,1fr)_auto] sm:items-center'>
-                  <div className='bg-muted flex size-8 items-center justify-center rounded-sm'>
-                    <Icon className='size-4' aria-hidden='true' />
-                  </div>
-                  <div>
-                    <h2 className='font-medium'>{check.title}</h2>
-                    <p className='text-muted-foreground mt-0.5 text-sm'>
-                      {check.description}
-                    </p>
-                  </div>
-                  <div className='flex items-center gap-2 text-sm sm:justify-self-end'>
-                    <span
-                      className={
-                        check.ready
-                          ? 'bg-success size-2 rounded-full'
-                          : 'bg-warning size-2 rounded-full'
-                      }
-                      aria-hidden='true'
-                    />
-                    <span>{check.detail}</span>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-        </section>
+        <StatusSummary
+          gatewayReady={gatewayReady}
+          gatewayLoading={statusQuery.loading}
+          metricsLoading={metricsQuery.isLoading}
+          catalogLoading={pricingQuery.isLoading}
+          metricModelCount={metrics.length}
+          catalogModelCount={pricingQuery.models.length}
+          averageSuccess={averageSuccess}
+          averageLatency={averageLatency}
+          averageTps={averageTps}
+        />
 
-        <p className='text-muted-foreground text-xs'>
-          {t(
-            'This page reports current application availability and does not claim historical uptime.'
-          )}
-        </p>
+        <ModelStatusTable
+          models={pricingQuery.models}
+          metricsByModel={metricsByModel}
+          loading={pricingQuery.isLoading}
+        />
+
+        {monitors.length > 0 ? (
+          <section className='overflow-hidden rounded-md border'>
+            <div className='bg-muted/20 border-b px-4 py-3'>
+              <h2 className='text-sm font-semibold'>{t('Uptime')}</h2>
+            </div>
+            {monitors.map((monitor) => (
+              <div
+                key={`${monitor.group ?? 'default'}:${monitor.name}`}
+                className='flex items-center justify-between gap-4 border-b px-4 py-3 last:border-b-0'
+              >
+                <div className='min-w-0'>
+                  <div className='truncate text-sm font-medium'>
+                    {monitor.name}
+                  </div>
+                  {monitor.group && (
+                    <div className='text-muted-foreground text-xs'>
+                      {monitor.group}
+                    </div>
+                  )}
+                </div>
+                <span className='font-mono text-sm tabular-nums'>
+                  {formatUptimePct(monitor.uptime * 100)}
+                </span>
+              </div>
+            ))}
+          </section>
+        ) : (
+          !uptimeQuery.isLoading && (
+            <p className='text-muted-foreground text-xs'>
+              {t('Historical uptime monitoring is not configured yet.')}
+            </p>
+          )
+        )}
       </PageTransition>
     </PublicLayout>
   )

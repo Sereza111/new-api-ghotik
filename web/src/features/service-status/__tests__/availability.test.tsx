@@ -23,13 +23,20 @@ import { ServiceStatus } from '../index'
 
 const useStatusMock = vi.fn()
 const usePricingDataMock = vi.fn()
+const useQueryMock = vi.fn()
+
+vi.mock('@tanstack/react-query', () => ({
+  useQuery: (options: { queryKey: string[] }) => useQueryMock(options),
+}))
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, values?: { count?: number }) =>
-      values?.count === undefined
-        ? key
-        : key.replace('{{count}}', String(values.count)),
+    t: (key: string, values?: { count?: number; total?: number }) => {
+      if (!values) return key
+      return key
+        .replace('{{count}}', String(values.count))
+        .replace('{{total}}', String(values.total))
+    },
   }),
 }))
 
@@ -49,21 +56,63 @@ vi.mock('@/features/pricing/hooks/use-pricing-data', () => ({
   usePricingData: () => usePricingDataMock(),
 }))
 
+vi.mock('@/lib/lobe-icon', () => ({
+  getLobeIcon: () => null,
+}))
+
 describe('ServiceStatus', () => {
   beforeEach(() => {
     useStatusMock.mockReturnValue({ loading: false, error: null })
     usePricingDataMock.mockReturnValue({
       isLoading: false,
       error: null,
-      models: [{ id: 1 }, { id: 2 }],
+      models: [
+        {
+          model_name: 'gpt-5.6-sol',
+          vendor_name: 'OpenAI',
+        },
+        {
+          model_name: 'gpt-5.6-terra',
+          vendor_name: 'OpenAI',
+        },
+      ],
+    })
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => {
+      if (options.queryKey[0] === 'perf-metrics-summary') {
+        return {
+          isLoading: false,
+          error: null,
+          data: {
+            data: {
+              models: [
+                {
+                  model_name: 'gpt-5.6-sol',
+                  avg_latency_ms: 20_300,
+                  success_rate: 100,
+                  avg_tps: 35.44,
+                  recent_success_rates: [100, 100, 100],
+                },
+              ],
+            },
+          },
+        }
+      }
+      return {
+        isLoading: false,
+        error: null,
+        data: { data: [] },
+      }
     })
   })
 
-  test('reports operational state only when live checks and models are available', () => {
+  test('shows measured performance and distinguishes models without traffic', () => {
     render(<ServiceStatus />)
 
     expect(screen.getByText('All systems operational')).toBeInTheDocument()
-    expect(screen.getByText('2 models available')).toBeInTheDocument()
+    expect(screen.getByText('1 of 2 models')).toBeInTheDocument()
+    expect(screen.getAllByText('100.00%').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('20.30s').length).toBeGreaterThan(0)
+    expect(screen.getByText('No recent traffic')).toBeInTheDocument()
   })
 
   test('reports degradation when the catalog check fails', () => {
@@ -76,6 +125,41 @@ describe('ServiceStatus', () => {
     render(<ServiceStatus />)
 
     expect(screen.getByText('Some systems are degraded')).toBeInTheDocument()
-    expect(screen.getAllByText('Unavailable').length).toBeGreaterThan(0)
+  })
+
+  test('renders configured historical uptime monitors when available', () => {
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => {
+      if (options.queryKey[0] === 'perf-metrics-summary') {
+        return {
+          isLoading: false,
+          error: null,
+          data: { data: { models: [] } },
+        }
+      }
+      return {
+        isLoading: false,
+        error: null,
+        data: {
+          data: [
+            {
+              categoryName: 'Core',
+              monitors: [
+                {
+                  name: 'Gateway',
+                  group: 'Public API',
+                  status: 1,
+                  uptime: 0.995,
+                },
+              ],
+            },
+          ],
+        },
+      }
+    })
+
+    render(<ServiceStatus />)
+
+    expect(screen.getByText('Gateway')).toBeInTheDocument()
+    expect(screen.getByText('99.50%')).toBeInTheDocument()
   })
 })
