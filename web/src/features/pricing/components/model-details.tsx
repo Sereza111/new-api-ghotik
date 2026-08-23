@@ -79,6 +79,7 @@ import { DynamicPricingBreakdown } from './dynamic-pricing-breakdown'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelDetailsApi } from './model-details-api'
 import { ModelDetailsPerformance } from './model-details-performance'
+import { PurchasePlaceholder } from './purchase-placeholder'
 
 // ----------------------------------------------------------------------------
 // Local UI helpers
@@ -1177,6 +1178,10 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
               usdExchangeRate={props.usdExchangeRate}
               tokenUnit={props.tokenUnit}
               showRechargePrice={showRechargePrice}
+            />
+            <PurchasePlaceholder
+              modelName={props.model.model_name}
+              className='w-full sm:w-auto'
             />
             {isDynamic && (
               <DynamicPricingBreakdown billingExpr={props.model.billing_expr} />

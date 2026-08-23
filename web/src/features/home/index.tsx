@@ -121,7 +121,7 @@ export function Home() {
   }
 
   return (
-    <PublicLayout showMainContainer={false}>
+    <PublicLayout showMainContainer={false} showFooter={false}>
       <div className='vl-public-surface'>
         <Hero isAuthenticated={isAuthenticated} />
         <PlatformOverview />

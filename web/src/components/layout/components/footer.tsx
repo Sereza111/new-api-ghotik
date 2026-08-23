@@ -82,7 +82,13 @@ function FooterLinkItem(props: { link: FooterLink }) {
 function LegalLinks(props: { leadingSeparator?: boolean }) {
   const { t } = useTranslation()
   const { status } = useStatus()
-  const items: { key: string; label: string; href: string }[] = []
+  const items: { key: string; label: string; href: string }[] = [
+    {
+      key: 'support',
+      label: t('Support'),
+      href: '/support',
+    },
+  ]
   if (status?.user_agreement_enabled) {
     items.push({
       key: 'user-agreement',
@@ -96,9 +102,6 @@ function LegalLinks(props: { leadingSeparator?: boolean }) {
       label: t('Privacy Policy'),
       href: '/privacy-policy',
     })
-  }
-  if (items.length === 0) {
-    return null
   }
   return (
     <>
@@ -118,6 +121,16 @@ function LegalLinks(props: { leadingSeparator?: boolean }) {
         </Fragment>
       ))}
     </>
+  )
+}
+
+function PaymentReviewCode() {
+  const { t } = useTranslation()
+
+  return (
+    <span className='border-border/60 bg-muted/30 text-muted-foreground inline-flex items-center rounded-md border px-2 py-1 font-mono text-[11px]'>
+      {t('Payment review code')}: Platega test
+    </span>
   )
 }
 
@@ -238,6 +251,7 @@ export function Footer(props: FooterProps) {
             />
             <div className='border-border/60 text-muted-foreground/45 flex w-full flex-wrap items-center justify-center gap-x-3 gap-y-1 border-t pt-4 text-xs sm:w-auto sm:justify-end sm:border-t-0 sm:border-l sm:pt-0 sm:pl-5'>
               <LegalLinks />
+              <PaymentReviewCode />
               <ProjectAttribution currentYear={currentYear} inline />
             </div>
           </div>
@@ -272,14 +286,14 @@ export function Footer(props: FooterProps) {
           {/* Links columns */}
           {isDemoSiteMode && (
             <div className='grid grid-cols-3 gap-8 md:gap-16'>
-              {displayColumns.map((column, index) => (
-                <div key={index}>
+              {displayColumns.map((column) => (
+                <div key={column.title}>
                   <p className='text-muted-foreground/50 mb-3 text-xs font-medium tracking-wider uppercase'>
                     {t(column.title)}
                   </p>
                   <ul className='space-y-2.5'>
-                    {column.links.map((link, linkIndex) => (
-                      <li key={linkIndex}>
+                    {column.links.map((link) => (
+                      <li key={`${link.href}:${link.text}`}>
                         <FooterLinkItem link={link} />
                       </li>
                     ))}
@@ -299,6 +313,7 @@ export function Footer(props: FooterProps) {
               {props.copyright ?? t('footer.defaultCopyright')}
             </span>
             <LegalLinks leadingSeparator />
+            <PaymentReviewCode />
           </div>
           <ProjectAttribution currentYear={currentYear} />
         </div>

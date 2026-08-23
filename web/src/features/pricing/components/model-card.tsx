@@ -20,6 +20,7 @@ import { ChevronRight, Copy } from 'lucide-react'
 import { memo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { Button } from '@/components/ui/button'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
@@ -35,6 +36,7 @@ import { formatPrice, formatRequestPrice } from '../lib/price'
 import type { PricingModel, TokenUnit } from '../types'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelPerfBadge, type ModelPerfBadgeData } from './model-perf-badge'
+import { PurchasePlaceholder } from './purchase-placeholder'
 
 export interface ModelCardProps {
   model: PricingModel
@@ -221,22 +223,19 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         </div>
 
         <div className='flex shrink-0 items-center gap-1.5'>
-          <button
-            type='button'
-            onClick={props.onClick}
-            className='text-muted-foreground hover:text-foreground hover:bg-muted inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors sm:px-2.5 sm:py-1.5'
-          >
+          <PurchasePlaceholder modelName={props.model.model_name} size='sm' />
+          <Button variant='outline' size='sm' onClick={props.onClick}>
             {t('Details')}
             <ChevronRight className='size-3.5' />
-          </button>
-          <button
-            type='button'
+          </Button>
+          <Button
+            variant='outline'
+            size='icon-sm'
             onClick={handleCopy}
-            className='text-muted-foreground hover:text-foreground hover:bg-muted rounded-md border p-1.5 transition-colors'
             title={t('Copy')}
           >
             <Copy className='size-3.5' />
-          </button>
+          </Button>
         </div>
       </div>
 
