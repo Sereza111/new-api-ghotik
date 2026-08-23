@@ -40,6 +40,7 @@ import {
 } from '../lib/price'
 import type { PricingModel, TokenUnit } from '../types'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
+import { PurchasePlaceholder } from './purchase-placeholder'
 
 // ----------------------------------------------------------------------------
 // Pricing Table Columns
@@ -362,6 +363,15 @@ export function usePricingColumns(
         )
       },
       size: 130,
+      enableSorting: false,
+    },
+    {
+      id: 'purchase',
+      header: t('Purchase'),
+      cell: ({ row }) => (
+        <PurchasePlaceholder modelName={row.original.model_name} size='xs' />
+      ),
+      size: 86,
       enableSorting: false,
     },
   ]

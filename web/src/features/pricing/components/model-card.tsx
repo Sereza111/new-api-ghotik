@@ -36,6 +36,7 @@ import { formatPrice, formatRequestPrice } from '../lib/price'
 import type { PricingModel, TokenUnit } from '../types'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelPerfBadge, type ModelPerfBadgeData } from './model-perf-badge'
+import { PurchasePlaceholder } from './purchase-placeholder'
 
 export interface ModelCardProps {
   model: PricingModel
@@ -222,6 +223,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         </div>
 
         <div className='flex shrink-0 items-center gap-1.5'>
+          <PurchasePlaceholder modelName={props.model.model_name} size='sm' />
           <Button variant='outline' size='sm' onClick={props.onClick}>
             {t('Details')}
             <ChevronRight className='size-3.5' />
