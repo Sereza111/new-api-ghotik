@@ -39,10 +39,12 @@ import { cn } from '@/lib/utils'
 
 import {
   formatCurrency,
+  formatUsdAmount,
   getDiscountLabel,
   getPaymentIcon,
   getMinTopupAmount,
   calculatePresetPricing,
+  isCryptoPayPayment,
 } from '../lib'
 import type {
   PaymentMethod,
@@ -62,6 +64,7 @@ interface RechargeFormCardProps {
   onTopupAmountChange: (amount: number) => void
   paymentAmount: number
   calculating: boolean
+  paymentType: string
   onPaymentMethodSelect: (method: PaymentMethod) => void
   paymentLoading: string | null
   redemptionCode: string
@@ -92,6 +95,7 @@ export function RechargeFormCard({
   onTopupAmountChange,
   paymentAmount,
   calculating,
+  paymentType,
   onPaymentMethodSelect,
   paymentLoading,
   redemptionCode,
@@ -143,6 +147,7 @@ export function RechargeFormCard({
     Array.isArray(waffoPayMethods) && waffoPayMethods.length > 0
   const minTopup = getMinTopupAmount(topupInfo)
   const redemptionEnabled = topupInfo?.enable_redemption !== false
+  const isCryptoPay = isCryptoPayPayment(paymentType)
 
   if (loading) {
     return (
@@ -258,23 +263,27 @@ export function RechargeFormCard({
                         >
                           <div className='flex w-full items-center justify-between'>
                             <div className='text-base font-semibold sm:text-lg'>
-                              {formatNumber(displayValue)}
+                              {isCryptoPay
+                                ? formatUsdAmount(preset.value)
+                                : formatNumber(displayValue)}
                             </div>
-                            {hasDiscount && (
+                            {!isCryptoPay && hasDiscount && (
                               <div className='text-xs font-medium text-green-600'>
                                 {getDiscountLabel(discount)}
                               </div>
                             )}
                           </div>
-                          <div className='text-muted-foreground mt-1.5 w-full text-xs sm:mt-2'>
-                            Pay {formatCurrency(actualPrice)}
-                            {hasDiscount && savedAmount > 0 && (
-                              <span className='text-green-600'>
-                                {' '}
-                                • Save {formatCurrency(savedAmount)}
-                              </span>
-                            )}
-                          </div>
+                          {!isCryptoPay && (
+                            <div className='text-muted-foreground mt-1.5 w-full text-xs sm:mt-2'>
+                              Pay {formatCurrency(actualPrice)}
+                              {hasDiscount && savedAmount > 0 && (
+                                <span className='text-green-600'>
+                                  {' '}
+                                  • Save {formatCurrency(savedAmount)}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </Button>
                       )
                     })}
@@ -290,15 +299,25 @@ export function RechargeFormCard({
                   {t('Custom Amount')}
                 </Label>
                 <div className='grid grid-cols-[minmax(0,1fr)_minmax(110px,0.55fr)] gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center'>
-                  <Input
-                    id='topup-amount'
-                    type='number'
-                    value={localAmount}
-                    onChange={(e) => handleAmountChange(e.target.value)}
-                    min={minTopup}
-                    placeholder={`Minimum ${minTopup}`}
-                    className='h-9 text-base sm:h-10 sm:text-lg'
-                  />
+                  <div className='relative'>
+                    {isCryptoPay && (
+                      <span className='text-muted-foreground pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-base font-medium sm:text-lg'>
+                        $
+                      </span>
+                    )}
+                    <Input
+                      id='topup-amount'
+                      type='number'
+                      value={localAmount}
+                      onChange={(e) => handleAmountChange(e.target.value)}
+                      min={minTopup}
+                      placeholder={`Minimum ${minTopup}`}
+                      className={cn(
+                        'h-9 text-base sm:h-10 sm:text-lg',
+                        isCryptoPay && 'pl-7'
+                      )}
+                    />
+                  </div>
                   <div className='bg-muted/30 flex min-h-9 items-center justify-between gap-2 rounded-md border px-3 lg:min-w-52'>
                     <span className='text-muted-foreground truncate text-xs'>
                       {t('Amount to pay:')}
@@ -307,7 +326,9 @@ export function RechargeFormCard({
                       <Skeleton className='h-5 w-16' />
                     ) : (
                       <span className='text-sm font-semibold'>
-                        {formatCurrency(paymentAmount)}
+                        {isCryptoPay
+                          ? formatUsdAmount(paymentAmount)
+                          : formatCurrency(paymentAmount)}
                       </span>
                     )}
                   </div>

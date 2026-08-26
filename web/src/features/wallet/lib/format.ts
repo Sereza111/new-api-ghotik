@@ -62,6 +62,13 @@ export function formatCurrency(amount: number | string): string {
 }
 
 /**
+ * Format an amount that Crypto Pay charges directly in USD.
+ */
+export function formatUsdAmount(amount: number | string): string {
+  return `$${formatCurrency(amount)}`
+}
+
+/**
  * Get discount label for display (e.g., "20% OFF")
  */
 export function getDiscountLabel(discount: number): string {
