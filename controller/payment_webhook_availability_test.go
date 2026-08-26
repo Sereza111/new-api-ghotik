@@ -67,6 +67,36 @@ func TestCreemWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 	require.False(t, isCreemWebhookEnabled())
 }
 
+func TestCryptoPayWebhookEnabledRequiresComplianceToggleAndToken(t *testing.T) {
+	paymentSetting := operation_setting.GetPaymentSetting()
+	originalConfirmed := paymentSetting.ComplianceConfirmed
+	originalTermsVersion := paymentSetting.ComplianceTermsVersion
+	originalEnabled := setting.CryptoPayEnabled
+	originalToken := setting.CryptoPayAPIToken
+	t.Cleanup(func() {
+		paymentSetting.ComplianceConfirmed = originalConfirmed
+		paymentSetting.ComplianceTermsVersion = originalTermsVersion
+		setting.CryptoPayEnabled = originalEnabled
+		setting.CryptoPayAPIToken = originalToken
+	})
+
+	paymentSetting.ComplianceConfirmed = false
+	paymentSetting.ComplianceTermsVersion = ""
+	setting.CryptoPayEnabled = true
+	setting.CryptoPayAPIToken = "crypto-pay-token"
+	require.False(t, isCryptoPayWebhookEnabled())
+
+	confirmPaymentComplianceForTest(t)
+	setting.CryptoPayAPIToken = ""
+	require.False(t, isCryptoPayWebhookEnabled())
+
+	setting.CryptoPayAPIToken = "crypto-pay-token"
+	require.True(t, isCryptoPayWebhookEnabled())
+
+	setting.CryptoPayEnabled = false
+	require.False(t, isCryptoPayWebhookEnabled())
+}
+
 func TestWaffoWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 	confirmPaymentComplianceForTest(t)
 	originalEnabled := setting.WaffoEnabled

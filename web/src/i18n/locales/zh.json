@@ -5377,6 +5377,20 @@
     "Zero retention": "零数据保留",
     "Zhipu": "智谱",
     "Zhipu V4": "智谱 V4",
-    "Zoom": "缩放"
+    "Zoom": "缩放",
+    "Crypto Bot": "Crypto Bot",
+    "Accept cryptocurrency payments through Telegram Crypto Bot.": "通过 Telegram Crypto Bot 接受加密货币付款。",
+    "Configure this HTTPS URL in Crypto Bot under Crypto Pay, My Apps, Webhooks.": "在 Crypto Bot 的 Crypto Pay、My Apps、Webhooks 中配置此 HTTPS 地址。",
+    "Crypto Pay API documentation": "Crypto Pay API 文档",
+    "Enable Crypto Bot payments": "启用 Crypto Bot 支付",
+    "Show Crypto Bot as a wallet top-up method.": "将 Crypto Bot 显示为钱包充值方式。",
+    "Testnet": "测试网",
+    "Use Crypto Pay testnet instead of mainnet.": "使用 Crypto Pay 测试网而不是主网。",
+    "Crypto Pay API token": "Crypto Pay API 令牌",
+    "Leave blank unless rotating the token.": "除非更换令牌，否则请留空。",
+    "Accepted assets": "接受的资产",
+    "Comma-separated assets users may select when paying a USD invoice.": "用户支付美元账单时可选择的资产，以逗号分隔。",
+    "USD charged per USD of balance": "每美元余额收取的美元金额",
+    "Use 1 for a one-to-one balance top-up.": "一比一充值请填写 1。"
   }
 }

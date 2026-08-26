@@ -93,6 +93,12 @@ func InitOptionMap() {
 	common.OptionMap["CreemProducts"] = setting.CreemProducts
 	common.OptionMap["CreemTestMode"] = strconv.FormatBool(setting.CreemTestMode)
 	common.OptionMap["CreemWebhookSecret"] = setting.CreemWebhookSecret
+	common.OptionMap["CryptoPayEnabled"] = strconv.FormatBool(setting.CryptoPayEnabled)
+	common.OptionMap["CryptoPayAPIToken"] = setting.CryptoPayAPIToken
+	common.OptionMap["CryptoPayTestnet"] = strconv.FormatBool(setting.CryptoPayTestnet)
+	common.OptionMap["CryptoPayAcceptedAssets"] = setting.CryptoPayAcceptedAssets
+	common.OptionMap["CryptoPayUnitPrice"] = strconv.FormatFloat(setting.CryptoPayUnitPrice, 'f', -1, 64)
+	common.OptionMap["CryptoPayMinTopUp"] = strconv.Itoa(setting.CryptoPayMinTopUp)
 	common.OptionMap["WaffoEnabled"] = strconv.FormatBool(setting.WaffoEnabled)
 	common.OptionMap["WaffoApiKey"] = setting.WaffoApiKey
 	common.OptionMap["WaffoPrivateKey"] = setting.WaffoPrivateKey
@@ -451,6 +457,18 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.CreemTestMode = value == "true"
 	case "CreemWebhookSecret":
 		setting.CreemWebhookSecret = value
+	case "CryptoPayEnabled":
+		setting.CryptoPayEnabled = value == "true"
+	case "CryptoPayAPIToken":
+		setting.CryptoPayAPIToken = value
+	case "CryptoPayTestnet":
+		setting.CryptoPayTestnet = value == "true"
+	case "CryptoPayAcceptedAssets":
+		setting.CryptoPayAcceptedAssets = value
+	case "CryptoPayUnitPrice":
+		setting.CryptoPayUnitPrice, _ = strconv.ParseFloat(value, 64)
+	case "CryptoPayMinTopUp":
+		setting.CryptoPayMinTopUp, _ = strconv.Atoi(value)
 	case "WaffoEnabled":
 		setting.WaffoEnabled = value == "true"
 	case "WaffoApiKey":

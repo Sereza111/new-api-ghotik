@@ -153,6 +153,14 @@ const BILLING_SECTIONS = [
           CreemWebhookSecret: settings.CreemWebhookSecret,
           CreemTestMode: settings.CreemTestMode,
           CreemProducts: settings.CreemProducts,
+          CryptoPayEnabled: settings.CryptoPayEnabled ?? false,
+          CryptoPayAPIToken: settings.CryptoPayAPIToken ?? '',
+          CryptoPayTestnet: settings.CryptoPayTestnet ?? false,
+          CryptoPayAcceptedAssets:
+            settings.CryptoPayAcceptedAssets ??
+            'USDT,TON,BTC,ETH,LTC,BNB,TRX,USDC',
+          CryptoPayUnitPrice: settings.CryptoPayUnitPrice ?? 1,
+          CryptoPayMinTopUp: settings.CryptoPayMinTopUp ?? 1,
         }}
         waffoDefaultValues={{
           WaffoEnabled: settings.WaffoEnabled ?? false,

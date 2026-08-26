@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -211,6 +212,32 @@ func TestRechargeEpayCreditsQuotaExactlyOnce(t *testing.T) {
 	assert.NotZero(t, reloaded.CompleteTime)
 
 	alreadyDone, err = RechargeEpay(order.TradeNo, "alipay", "127.0.0.1")
+	require.NoError(t, err)
+	assert.True(t, alreadyDone)
+	assert.Equal(t, 2*500000, getUserQuotaForPaymentGuardTest(t, user.Id))
+}
+
+func TestRechargeCryptoPayValidatesAmountAndCreditsExactlyOnce(t *testing.T) {
+	truncateTables(t)
+
+	oldQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 500000
+	t.Cleanup(func() { common.QuotaPerUnit = oldQuotaPerUnit })
+
+	user := insertUserForPaymentGuardTest(t, 506, 0)
+	order := createEpayTestOrder(t, user.Id, "CRYPTOPAYTESTONCE", PaymentProviderCryptoPay, common.TopUpStatusPending)
+
+	_, err := RechargeCryptoPay(order.TradeNo, decimal.NewFromFloat(9.99), "USD", "127.0.0.1")
+	require.ErrorIs(t, err, ErrPaymentAmountMismatch)
+	assert.Equal(t, 0, getUserQuotaForPaymentGuardTest(t, user.Id))
+	assert.Equal(t, common.TopUpStatusPending, getTopUpStatusForPaymentGuardTest(t, order.TradeNo))
+
+	alreadyDone, err := RechargeCryptoPay(order.TradeNo, decimal.NewFromFloat(10), "USD", "127.0.0.1")
+	require.NoError(t, err)
+	assert.False(t, alreadyDone)
+	assert.Equal(t, 2*500000, getUserQuotaForPaymentGuardTest(t, user.Id))
+
+	alreadyDone, err = RechargeCryptoPay(order.TradeNo, decimal.NewFromFloat(10), "USD", "127.0.0.1")
 	require.NoError(t, err)
 	assert.True(t, alreadyDone)
 	assert.Equal(t, 2*500000, getUserQuotaForPaymentGuardTest(t, user.Id))

@@ -5377,6 +5377,20 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Crypto Bot": "Crypto Bot",
+    "Accept cryptocurrency payments through Telegram Crypto Bot.": "Принимайте платежи в криптовалюте через Telegram Crypto Bot.",
+    "Configure this HTTPS URL in Crypto Bot under Crypto Pay, My Apps, Webhooks.": "Укажите этот HTTPS-адрес в Crypto Bot: Crypto Pay, My Apps, Webhooks.",
+    "Crypto Pay API documentation": "Документация Crypto Pay API",
+    "Enable Crypto Bot payments": "Включить платежи через Crypto Bot",
+    "Show Crypto Bot as a wallet top-up method.": "Показывать Crypto Bot как способ пополнения кошелька.",
+    "Testnet": "Тестовая сеть",
+    "Use Crypto Pay testnet instead of mainnet.": "Использовать тестовую сеть Crypto Pay вместо основной.",
+    "Crypto Pay API token": "Токен Crypto Pay API",
+    "Leave blank unless rotating the token.": "Оставьте пустым, если не меняете токен.",
+    "Accepted assets": "Принимаемые активы",
+    "Comma-separated assets users may select when paying a USD invoice.": "Активы через запятую, доступные пользователю при оплате счета в USD.",
+    "USD charged per USD of balance": "Цена одного USD баланса в USD",
+    "Use 1 for a one-to-one balance top-up.": "Укажите 1 для пополнения баланса один к одному."
   }
 }

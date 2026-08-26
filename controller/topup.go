@@ -96,12 +96,23 @@ func GetTopUpInfo(c *gin.Context) {
 		}
 	}
 
+	enableCryptoPay := isCryptoPayTopUpEnabled()
+	if enableCryptoPay {
+		payMethods = append(payMethods, map[string]string{
+			"name":      "Crypto Bot",
+			"type":      model.PaymentMethodCryptoPay,
+			"color":     "#8CCEF0",
+			"min_topup": strconv.Itoa(setting.CryptoPayMinTopUp),
+		})
+	}
+
 	data := gin.H{
 		"enable_online_topup":              isEpayTopUpEnabled(),
 		"enable_stripe_topup":              isStripeTopUpEnabled(),
 		"enable_creem_topup":               isCreemTopUpEnabled(),
 		"enable_waffo_topup":               enableWaffo,
 		"enable_waffo_pancake_topup":       enableWaffoPancake,
+		"enable_crypto_pay_topup":          enableCryptoPay,
 		"enable_redemption":                complianceConfirmed,
 		"payment_compliance_confirmed":     complianceConfirmed,
 		"payment_compliance_terms_version": operation_setting.CurrentComplianceTermsVersion,
@@ -117,6 +128,7 @@ func GetTopUpInfo(c *gin.Context) {
 		"stripe_min_topup":        setting.StripeMinTopUp,
 		"waffo_min_topup":         setting.WaffoMinTopUp,
 		"waffo_pancake_min_topup": setting.WaffoPancakeMinTopUp,
+		"crypto_pay_min_topup":    setting.CryptoPayMinTopUp,
 		"amount_options":          operation_setting.GetPaymentSetting().AmountOptions,
 		"discount":                operation_setting.GetPaymentSetting().AmountDiscount,
 		"topup_link":              common.TopUpLink,

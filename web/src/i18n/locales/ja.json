@@ -5377,6 +5377,20 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Crypto Bot": "Crypto Bot",
+    "Accept cryptocurrency payments through Telegram Crypto Bot.": "Telegram Crypto Bot 経由で暗号資産決済を受け付けます。",
+    "Configure this HTTPS URL in Crypto Bot under Crypto Pay, My Apps, Webhooks.": "Crypto Bot の Crypto Pay、My Apps、Webhooks でこの HTTPS URL を設定してください。",
+    "Crypto Pay API documentation": "Crypto Pay API ドキュメント",
+    "Enable Crypto Bot payments": "Crypto Bot 決済を有効にする",
+    "Show Crypto Bot as a wallet top-up method.": "ウォレットのチャージ方法として Crypto Bot を表示します。",
+    "Testnet": "テストネット",
+    "Use Crypto Pay testnet instead of mainnet.": "メインネットではなく Crypto Pay テストネットを使用します。",
+    "Crypto Pay API token": "Crypto Pay API トークン",
+    "Leave blank unless rotating the token.": "トークンを変更しない場合は空欄にしてください。",
+    "Accepted assets": "受け付ける資産",
+    "Comma-separated assets users may select when paying a USD invoice.": "USD 請求書の支払い時に選択できる資産をカンマ区切りで指定します。",
+    "USD charged per USD of balance": "残高 1 USD あたりの請求額（USD）",
+    "Use 1 for a one-to-one balance top-up.": "等価チャージには 1 を指定します。"
   }
 }

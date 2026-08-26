@@ -23,14 +23,18 @@ import { toast } from 'sonner'
 import {
   calculateAmount,
   calculateStripeAmount,
+  calculateCryptoPayAmount,
   calculateWaffoAmount,
   calculateWaffoPancakeAmount,
   requestPayment,
   requestStripePayment,
+  requestCryptoPayPayment,
   isApiSuccess,
 } from '../api'
+import { PAYMENT_TYPES } from '../constants'
 import {
   isStripePayment,
+  isCryptoPayPayment,
   isWaffoPayment,
   isWaffoPancakePayment,
   submitPaymentForm,
@@ -46,6 +50,7 @@ type AmountCalculator = (request: AmountRequest) => Promise<AmountResponse>
 export interface PaymentAmountCalculators {
   regular: AmountCalculator
   stripe: AmountCalculator
+  cryptoPay: AmountCalculator
   waffo: AmountCalculator
   waffoPancake: AmountCalculator
 }
@@ -53,6 +58,7 @@ export interface PaymentAmountCalculators {
 const defaultPaymentAmountCalculators: PaymentAmountCalculators = {
   regular: calculateAmount,
   stripe: calculateStripeAmount,
+  cryptoPay: calculateCryptoPayAmount,
   waffo: calculateWaffoAmount,
   waffoPancake: calculateWaffoPancakeAmount,
 }
@@ -65,6 +71,8 @@ export async function requestPaymentAmount(
   let calculator = calculators.regular
   if (isStripePayment(paymentType)) {
     calculator = calculators.stripe
+  } else if (isCryptoPayPayment(paymentType)) {
+    calculator = calculators.cryptoPay
   } else if (isWaffoPayment(paymentType)) {
     calculator = calculators.waffo
   } else if (isWaffoPancakePayment(paymentType)) {
@@ -112,32 +120,43 @@ export function usePayment() {
         setProcessing(true)
 
         const isStripe = isStripePayment(paymentType)
+        const isCryptoPay = isCryptoPayPayment(paymentType)
         const amount = Math.floor(topupAmount)
 
-        const response = isStripe
-          ? await requestStripePayment({
-              amount,
-              payment_method: 'stripe',
-            })
-          : await requestPayment({
-              amount,
-              payment_method: paymentType,
-            })
+        let response
+        if (isStripe) {
+          response = await requestStripePayment({
+            amount,
+            payment_method: 'stripe',
+          })
+        } else if (isCryptoPay) {
+          response = await requestCryptoPayPayment({
+            amount,
+            payment_method: PAYMENT_TYPES.CRYPTO_PAY,
+          })
+        } else {
+          response = await requestPayment({
+            amount,
+            payment_method: paymentType,
+          })
+        }
 
         if (!isApiSuccess(response)) {
           toast.error(response.message || i18next.t('Payment request failed'))
           return false
         }
 
-        // Handle Stripe payment
-        if (isStripe && response.data?.pay_link) {
-          window.open(response.data.pay_link as string, '_blank')
+        // Handle hosted checkout links.
+        const payLink = (response.data as { pay_link?: string } | undefined)
+          ?.pay_link
+        if ((isStripe || isCryptoPay) && payLink) {
+          window.open(payLink, '_blank', 'noopener,noreferrer')
           toast.success(i18next.t('Redirecting to payment page...'))
           return true
         }
 
         // Handle non-Stripe payment
-        if (!isStripe && response.data) {
+        if (!isStripe && !isCryptoPay && response.data) {
           const url = (response as unknown as { url?: string }).url
           if (url) {
             submitPaymentForm(url, response.data)

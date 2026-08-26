@@ -33,6 +33,10 @@ describe('payment amount routing', () => {
         calls.push('stripe')
         return { success: true, data: '2' }
       },
+      cryptoPay: async () => {
+        calls.push('crypto-pay')
+        return { success: true, data: '3' }
+      },
       waffo: async (request) => {
         calls.push(`waffo:${request.amount}`)
         return { success: true, data: '18.75' }
@@ -45,5 +49,28 @@ describe('payment amount routing', () => {
 
     expect(amount).toBe(18.75)
     expect(calls).toEqual(['waffo:120'])
+  })
+
+  test('uses the dedicated Crypto Bot amount calculator', async () => {
+    const calls: string[] = []
+    const calculators = {
+      regular: async () => ({ success: true, data: '1' }),
+      stripe: async () => ({ success: true, data: '2' }),
+      cryptoPay: async (request: { amount: number }) => {
+        calls.push(`crypto-pay:${request.amount}`)
+        return { success: true, data: '10.50' }
+      },
+      waffo: async () => ({ success: true, data: '4' }),
+      waffoPancake: async () => ({ success: true, data: '5' }),
+    }
+
+    const amount = await requestPaymentAmount(
+      10,
+      PAYMENT_TYPES.CRYPTO_PAY,
+      calculators
+    )
+
+    expect(amount).toBe(10.5)
+    expect(calls).toEqual(['crypto-pay:10'])
   })
 })

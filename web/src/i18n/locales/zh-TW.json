@@ -1708,7 +1708,7 @@
     "Enter new key to update, or leave empty to keep current key": "輸入新金鑰以更新，或留空以保留目前金鑰",
     "Enter new tag name (leave empty to disband tag)": "輸入新標籤名稱（留空以解散標籤）",
     "Enter new tag name or leave empty": "輸入新標籤名稱或留空",
-    "Enter new token to update": "輸入新令牌以更新",
+    "Enter new token to update": "輸入新權杖以更新",
     "Enter one API key per line for batch creation": "每行輸入一個 API 金鑰進行大量建立",
     "Enter one key per line for batch creation": "每行輸入一個金鑰進行大量建立",
     "Enter one keyword per line": "每行輸入一個關鍵詞",
@@ -5377,6 +5377,20 @@
     "Zero retention": "零數據保留",
     "Zhipu": "智譜",
     "Zhipu V4": "智譜 V4",
-    "Zoom": "縮放"
+    "Zoom": "縮放",
+    "Crypto Bot": "Crypto Bot",
+    "Accept cryptocurrency payments through Telegram Crypto Bot.": "透過 Telegram Crypto Bot 接受加密貨幣付款。",
+    "Configure this HTTPS URL in Crypto Bot under Crypto Pay, My Apps, Webhooks.": "在 Crypto Bot 的 Crypto Pay、My Apps、Webhooks 中設定此 HTTPS 網址。",
+    "Crypto Pay API documentation": "Crypto Pay API 文件",
+    "Enable Crypto Bot payments": "啟用 Crypto Bot 付款",
+    "Show Crypto Bot as a wallet top-up method.": "將 Crypto Bot 顯示為錢包儲值方式。",
+    "Testnet": "測試網",
+    "Use Crypto Pay testnet instead of mainnet.": "使用 Crypto Pay 測試網而非主網。",
+    "Crypto Pay API token": "Crypto Pay API 權杖",
+    "Leave blank unless rotating the token.": "除非更換權杖，否則請留空。",
+    "Accepted assets": "接受的資產",
+    "Comma-separated assets users may select when paying a USD invoice.": "使用者支付美元帳單時可選擇的資產，以逗號分隔。",
+    "USD charged per USD of balance": "每美元餘額收取的美元金額",
+    "Use 1 for a one-to-one balance top-up.": "一比一儲值請填寫 1。"
   }
 }

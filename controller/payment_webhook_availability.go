@@ -46,6 +46,15 @@ func isCreemWebhookEnabled() bool {
 	return isCreemTopUpEnabled() && isCreemWebhookConfigured()
 }
 
+func isCryptoPayTopUpEnabled() bool {
+	return isPaymentComplianceConfirmed() && setting.CryptoPayEnabled &&
+		strings.TrimSpace(setting.CryptoPayAPIToken) != ""
+}
+
+func isCryptoPayWebhookEnabled() bool {
+	return isCryptoPayTopUpEnabled()
+}
+
 func isWaffoTopUpEnabled() bool {
 	if !isPaymentComplianceConfirmed() {
 		return false

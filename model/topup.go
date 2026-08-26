@@ -29,6 +29,7 @@ const (
 	PaymentMethodCreem        = "creem"
 	PaymentMethodWaffo        = "waffo"
 	PaymentMethodWaffoPancake = "waffo_pancake"
+	PaymentMethodCryptoPay    = "crypto_pay"
 	PaymentMethodBalance      = "balance"
 )
 
@@ -38,6 +39,7 @@ const (
 	PaymentProviderCreem        = "creem"
 	PaymentProviderWaffo        = "waffo"
 	PaymentProviderWaffoPancake = "waffo_pancake"
+	PaymentProviderCryptoPay    = "crypto_pay"
 	PaymentProviderBalance      = "balance"
 )
 
@@ -47,6 +49,7 @@ var (
 	ErrTopUpStatusInvalid      = errors.New("topup status invalid")
 	ErrInvalidTopUpQuota       = errors.New("invalid top-up quota")
 	ErrTopUpQuotaLimitExceeded = errors.New("top-up quota limit exceeded")
+	ErrPaymentAmountMismatch   = errors.New("payment amount mismatch")
 )
 
 func (topUp *TopUp) Insert() error {
@@ -229,6 +232,72 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (
 
 	common.SysLog(fmt.Sprintf("易支付充值成功 trade_no=%s user_id=%d quota_to_add=%d money=%.2f", topUp.TradeNo, topUp.UserId, quotaToAdd, topUp.Money))
 	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.LogQuota(quotaToAdd), topUp.Money), callerIp, topUp.PaymentMethod, PaymentProviderEpay)
+	return false, nil
+}
+
+// RechargeCryptoPay completes a signed Crypto Pay invoice exactly once.
+func RechargeCryptoPay(tradeNo string, paidAmount decimal.Decimal, fiat string, callerIp string) (alreadyDone bool, err error) {
+	if tradeNo == "" {
+		return false, errors.New("未提供支付单号")
+	}
+	if fiat != "USD" || paidAmount.LessThanOrEqual(decimal.Zero) {
+		return false, ErrPaymentAmountMismatch
+	}
+
+	refCol := "`trade_no`"
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		refCol = `"trade_no"`
+	}
+
+	var quotaToAdd int
+	topUp := &TopUp{}
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
+			return ErrTopUpNotFound
+		}
+		if topUp.PaymentProvider != PaymentProviderCryptoPay {
+			return ErrPaymentMethodMismatch
+		}
+		if topUp.Status == common.TopUpStatusSuccess {
+			alreadyDone = true
+			return nil
+		}
+		if topUp.Status != common.TopUpStatusPending {
+			return ErrTopUpStatusInvalid
+		}
+		expectedAmount := decimal.NewFromFloat(topUp.Money).Round(2)
+		if !expectedAmount.Equal(paidAmount.Round(2)) {
+			return ErrPaymentAmountMismatch
+		}
+
+		var quotaErr error
+		quotaToAdd, quotaErr = common.QuotaFromDecimalStrict(
+			decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
+		)
+		if quotaErr != nil || quotaToAdd <= 0 {
+			return ErrInvalidTopUpQuota
+		}
+		topUp.CompleteTime = common.GetTimestamp()
+		topUp.Status = common.TopUpStatusSuccess
+		if err := tx.Save(topUp).Error; err != nil {
+			return err
+		}
+		return creditTopUpQuota(tx, topUp.UserId, quotaToAdd, nil)
+	})
+	if err != nil {
+		if !errors.Is(err, ErrTopUpNotFound) && !errors.Is(err, ErrPaymentMethodMismatch) &&
+			!errors.Is(err, ErrTopUpStatusInvalid) && !errors.Is(err, ErrPaymentAmountMismatch) {
+			common.SysError("crypto pay topup failed: " + err.Error())
+		}
+		return false, err
+	}
+	if alreadyDone {
+		return true, nil
+	}
+
+	syncCreditUserQuotaCache(topUp.UserId, quotaToAdd, "crypto pay topup")
+	common.SysLog(fmt.Sprintf("Crypto Pay 充值成功 trade_no=%s user_id=%d quota_to_add=%d money=%.2f", topUp.TradeNo, topUp.UserId, quotaToAdd, topUp.Money))
+	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用 Crypto Pay 充值成功，充值金额: %v，支付金额：%.2f USD", logger.LogQuota(quotaToAdd), topUp.Money), callerIp, PaymentMethodCryptoPay, PaymentProviderCryptoPay)
 	return false, nil
 }
 
