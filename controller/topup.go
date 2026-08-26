@@ -106,6 +106,38 @@ func GetTopUpInfo(c *gin.Context) {
 		})
 	}
 
+	enablePlatega := isPlategaTopUpEnabled()
+	if enablePlatega {
+		group := c.GetString("group")
+		if group == "" {
+			group = "default"
+		}
+		topupGroupRatio := common.GetTopupGroupRatio(group)
+		if topupGroupRatio <= 0 {
+			topupGroupRatio = 1
+		}
+		plategaExchangeRate := operation_setting.USDExchangeRate * topupGroupRatio
+		formattedExchangeRate := strconv.FormatFloat(plategaExchangeRate, 'f', -1, 64)
+		plategaMethods := []map[string]string{
+			{
+				"name": "SBP (QR)", "type": model.PaymentMethodPlategaSBP,
+				"color": "#8CCEF0", "min_topup": strconv.Itoa(setting.PlategaMinTopUp),
+				"currency": "RUB", "exchange_rate": formattedExchangeRate,
+			},
+			{
+				"name": "Bank card", "type": model.PaymentMethodPlategaCard,
+				"color": "#8CCEF0", "min_topup": strconv.Itoa(setting.PlategaMinTopUp),
+				"currency": "RUB", "exchange_rate": formattedExchangeRate,
+			},
+			{
+				"name": "Cryptocurrency", "type": model.PaymentMethodPlategaCrypto,
+				"color": "#8CCEF0", "min_topup": strconv.Itoa(setting.PlategaMinTopUp),
+				"currency": "RUB", "exchange_rate": formattedExchangeRate,
+			},
+		}
+		payMethods = append(payMethods, plategaMethods...)
+	}
+
 	data := gin.H{
 		"enable_online_topup":              isEpayTopUpEnabled(),
 		"enable_stripe_topup":              isStripeTopUpEnabled(),
@@ -113,6 +145,7 @@ func GetTopUpInfo(c *gin.Context) {
 		"enable_waffo_topup":               enableWaffo,
 		"enable_waffo_pancake_topup":       enableWaffoPancake,
 		"enable_crypto_pay_topup":          enableCryptoPay,
+		"enable_platega_topup":             enablePlatega,
 		"enable_redemption":                complianceConfirmed,
 		"payment_compliance_confirmed":     complianceConfirmed,
 		"payment_compliance_terms_version": operation_setting.CurrentComplianceTermsVersion,
@@ -129,6 +162,7 @@ func GetTopUpInfo(c *gin.Context) {
 		"waffo_min_topup":         setting.WaffoMinTopUp,
 		"waffo_pancake_min_topup": setting.WaffoPancakeMinTopUp,
 		"crypto_pay_min_topup":    setting.CryptoPayMinTopUp,
+		"platega_min_topup":       setting.PlategaMinTopUp,
 		"amount_options":          operation_setting.GetPaymentSetting().AmountOptions,
 		"discount":                operation_setting.GetPaymentSetting().AmountDiscount,
 		"topup_link":              common.TopUpLink,

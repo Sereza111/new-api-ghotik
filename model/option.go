@@ -99,6 +99,10 @@ func InitOptionMap() {
 	common.OptionMap["CryptoPayAcceptedAssets"] = setting.CryptoPayAcceptedAssets
 	common.OptionMap["CryptoPayUnitPrice"] = strconv.FormatFloat(setting.CryptoPayUnitPrice, 'f', -1, 64)
 	common.OptionMap["CryptoPayMinTopUp"] = strconv.Itoa(setting.CryptoPayMinTopUp)
+	common.OptionMap["PlategaEnabled"] = strconv.FormatBool(setting.PlategaEnabled)
+	common.OptionMap["PlategaMerchantID"] = setting.PlategaMerchantID
+	common.OptionMap["PlategaAPISecret"] = setting.PlategaAPISecret
+	common.OptionMap["PlategaMinTopUp"] = strconv.Itoa(setting.PlategaMinTopUp)
 	common.OptionMap["WaffoEnabled"] = strconv.FormatBool(setting.WaffoEnabled)
 	common.OptionMap["WaffoApiKey"] = setting.WaffoApiKey
 	common.OptionMap["WaffoPrivateKey"] = setting.WaffoPrivateKey
@@ -469,6 +473,16 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.CryptoPayUnitPrice, _ = strconv.ParseFloat(value, 64)
 	case "CryptoPayMinTopUp":
 		setting.CryptoPayMinTopUp, _ = strconv.Atoi(value)
+	case "PlategaEnabled":
+		setting.PlategaEnabled = value == "true"
+	case "PlategaMerchantID":
+		setting.PlategaMerchantID = value
+	case "PlategaAPISecret":
+		setting.PlategaAPISecret = value
+	case "PlategaMinTopUp":
+		if minTopUp, parseErr := strconv.Atoi(value); parseErr == nil && minTopUp > 0 {
+			setting.PlategaMinTopUp = minTopUp
+		}
 	case "WaffoEnabled":
 		setting.WaffoEnabled = value == "true"
 	case "WaffoApiKey":

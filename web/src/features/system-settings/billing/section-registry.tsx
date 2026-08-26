@@ -140,6 +140,7 @@ const BILLING_SECTIONS = [
           Price: settings.Price,
           MinTopUp: settings.MinTopUp,
           CustomCallbackAddress: settings.CustomCallbackAddress,
+          USDExchangeRate: settings.USDExchangeRate,
           PayMethods: settings.PayMethods,
           AmountOptions: settings['payment_setting.amount_options'],
           AmountDiscount: settings['payment_setting.amount_discount'],
@@ -161,6 +162,10 @@ const BILLING_SECTIONS = [
             'USDT,TON,BTC,ETH,LTC,BNB,TRX,USDC',
           CryptoPayUnitPrice: settings.CryptoPayUnitPrice ?? 1,
           CryptoPayMinTopUp: settings.CryptoPayMinTopUp ?? 1,
+          PlategaEnabled: settings.PlategaEnabled ?? false,
+          PlategaMerchantID: settings.PlategaMerchantID ?? '',
+          PlategaAPISecret: settings.PlategaAPISecret ?? '',
+          PlategaMinTopUp: settings.PlategaMinTopUp ?? 1,
         }}
         waffoDefaultValues={{
           WaffoEnabled: settings.WaffoEnabled ?? false,

@@ -55,6 +55,16 @@ func isCryptoPayWebhookEnabled() bool {
 	return isCryptoPayTopUpEnabled()
 }
 
+func isPlategaTopUpEnabled() bool {
+	return isPaymentComplianceConfirmed() && setting.PlategaEnabled &&
+		strings.TrimSpace(setting.PlategaMerchantID) != "" &&
+		strings.TrimSpace(setting.PlategaAPISecret) != ""
+}
+
+func isPlategaWebhookEnabled() bool {
+	return isPlategaTopUpEnabled()
+}
+
 func isWaffoTopUpEnabled() bool {
 	if !isPaymentComplianceConfirmed() {
 		return false

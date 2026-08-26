@@ -314,6 +314,10 @@ export type BillingSettings = {
   CryptoPayAcceptedAssets: string
   CryptoPayUnitPrice: number
   CryptoPayMinTopUp: number
+  PlategaEnabled: boolean
+  PlategaMerchantID: string
+  PlategaAPISecret: string
+  PlategaMinTopUp: number
   WaffoEnabled: boolean
   WaffoApiKey: string
   WaffoPrivateKey: string

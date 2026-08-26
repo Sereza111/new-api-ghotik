@@ -39,12 +39,15 @@ import { cn } from '@/lib/utils'
 
 import {
   formatCurrency,
+  formatPaymentAmount,
   formatUsdAmount,
+  formatRubAmount,
   getDiscountLabel,
   getPaymentIcon,
   getMinTopupAmount,
   calculatePresetPricing,
   isCryptoPayPayment,
+  isPlategaPayment,
 } from '../lib'
 import type {
   PaymentMethod,
@@ -138,6 +141,7 @@ export function RechargeFormCard({
     topupInfo?.enable_online_topup ||
     topupInfo?.enable_stripe_topup ||
     topupInfo?.enable_crypto_pay_topup ||
+    topupInfo?.enable_platega_topup ||
     enableWaffoTopup ||
     enableWaffoPancakeTopup
   const hasAnyTopup = hasConfigurableTopup || enableCreemTopup
@@ -148,6 +152,11 @@ export function RechargeFormCard({
   const minTopup = getMinTopupAmount(topupInfo)
   const redemptionEnabled = topupInfo?.enable_redemption !== false
   const isCryptoPay = isCryptoPayPayment(paymentType)
+  const isPlatega = isPlategaPayment(paymentType)
+  const selectedPaymentMethod = topupInfo?.pay_methods?.find(
+    (method) => method.type === paymentType
+  )
+  const plategaExchangeRate = Number(selectedPaymentMethod?.exchange_rate) || 1
 
   if (loading) {
     return (
@@ -245,7 +254,7 @@ export function RechargeFormCard({
                         hasDiscount,
                       } = calculatePresetPricing(
                         preset.value,
-                        priceRatio,
+                        isPlatega ? 1 : priceRatio,
                         discount,
                         usdExchangeRate
                       )
@@ -263,7 +272,7 @@ export function RechargeFormCard({
                         >
                           <div className='flex w-full items-center justify-between'>
                             <div className='text-base font-semibold sm:text-lg'>
-                              {isCryptoPay
+                              {isCryptoPay || isPlatega
                                 ? formatUsdAmount(preset.value)
                                 : formatNumber(displayValue)}
                             </div>
@@ -275,11 +284,21 @@ export function RechargeFormCard({
                           </div>
                           {!isCryptoPay && (
                             <div className='text-muted-foreground mt-1.5 w-full text-xs sm:mt-2'>
-                              Pay {formatCurrency(actualPrice)}
+                              {t('Pay')}{' '}
+                              {isPlatega
+                                ? formatRubAmount(
+                                    actualPrice * plategaExchangeRate
+                                  )
+                                : formatCurrency(actualPrice)}
                               {hasDiscount && savedAmount > 0 && (
                                 <span className='text-green-600'>
                                   {' '}
-                                  • Save {formatCurrency(savedAmount)}
+                                  • {t('Save')}{' '}
+                                  {isPlatega
+                                    ? formatRubAmount(
+                                        savedAmount * plategaExchangeRate
+                                      )
+                                    : formatCurrency(savedAmount)}
                                 </span>
                               )}
                             </div>
@@ -300,7 +319,7 @@ export function RechargeFormCard({
                 </Label>
                 <div className='grid grid-cols-[minmax(0,1fr)_minmax(110px,0.55fr)] gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center'>
                   <div className='relative'>
-                    {isCryptoPay && (
+                    {(isCryptoPay || isPlatega) && (
                       <span className='text-muted-foreground pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-base font-medium sm:text-lg'>
                         $
                       </span>
@@ -314,7 +333,7 @@ export function RechargeFormCard({
                       placeholder={`Minimum ${minTopup}`}
                       className={cn(
                         'h-9 text-base sm:h-10 sm:text-lg',
-                        isCryptoPay && 'pl-7'
+                        (isCryptoPay || isPlatega) && 'pl-7'
                       )}
                     />
                   </div>
@@ -326,9 +345,7 @@ export function RechargeFormCard({
                       <Skeleton className='h-5 w-16' />
                     ) : (
                       <span className='text-sm font-semibold'>
-                        {isCryptoPay
-                          ? formatUsdAmount(paymentAmount)
-                          : formatCurrency(paymentAmount)}
+                        {formatPaymentAmount(paymentAmount, paymentType)}
                       </span>
                     )}
                   </div>
@@ -382,7 +399,7 @@ export function RechargeFormCard({
                           )}
                           <span className='flex min-w-0 flex-col items-start gap-0.5'>
                             <span className='max-w-full truncate'>
-                              {method.name}
+                              {t(method.name)}
                             </span>
                             {disabledLabel && (
                               <span className='text-muted-foreground max-w-full truncate text-[11px] leading-4 font-normal'>

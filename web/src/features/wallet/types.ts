@@ -40,6 +40,11 @@ export type PaymentResponse = ApiResponse<Record<string, unknown>> & {
 }
 export type StripePaymentResponse = ApiResponse<{ pay_link: string }>
 export type CryptoPayPaymentResponse = ApiResponse<{ pay_link: string }>
+export type PlategaPaymentResponse = ApiResponse<{
+  pay_link: string
+  amount: string
+  currency: 'RUB'
+}>
 export type AffiliateCodeResponse = ApiResponse<string>
 export type AffiliateTransferResponse = ApiResponse
 export type CreemPaymentResponse = ApiResponse<{ checkout_url: string }>
@@ -101,6 +106,10 @@ export interface PaymentMethod {
   min_topup?: number
   /** Optional react-icons component name or safe icon URL */
   icon?: string
+  /** Currency charged by this payment method */
+  currency?: 'USD' | 'RUB'
+  /** Units of payment currency charged for one USD */
+  exchange_rate?: number | string
 }
 
 /**
@@ -127,6 +136,8 @@ export interface TopupInfo {
   enable_stripe_topup: boolean
   /** Whether Telegram Crypto Bot topup is enabled */
   enable_crypto_pay_topup?: boolean
+  /** Whether Platega topup is enabled */
+  enable_platega_topup?: boolean
   /** Available payment methods */
   pay_methods: PaymentMethod[]
   /** Minimum topup amount for online topup */
@@ -135,6 +146,8 @@ export interface TopupInfo {
   stripe_min_topup: number
   /** Minimum topup amount for Crypto Bot */
   crypto_pay_min_topup?: number
+  /** Minimum topup amount for Platega */
+  platega_min_topup?: number
   /** Preset amount options */
   amount_options: number[]
   /** Discount rates by amount */
@@ -270,6 +283,8 @@ export interface TopupRecord {
   trade_no: string
   /** Payment method type */
   payment_method: string
+  /** Payment provider used by the order */
+  payment_provider?: string
   /** Creation timestamp */
   create_time: number
   /** Completion timestamp */

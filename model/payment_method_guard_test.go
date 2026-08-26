@@ -243,6 +243,61 @@ func TestRechargeCryptoPayValidatesAmountAndCreditsExactlyOnce(t *testing.T) {
 	assert.Equal(t, 2*500000, getUserQuotaForPaymentGuardTest(t, user.Id))
 }
 
+func TestRechargePlategaValidatesRUBAmountAndCreditsExactlyOnce(t *testing.T) {
+	truncateTables(t)
+
+	oldQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 500000
+	t.Cleanup(func() { common.QuotaPerUnit = oldQuotaPerUnit })
+
+	user := insertUserForPaymentGuardTest(t, 507, 0)
+	order := TopUp{
+		UserId:          user.Id,
+		Amount:          2,
+		Money:           160,
+		TradeNo:         "PLATEGATESTONCE",
+		PaymentMethod:   PaymentMethodPlategaSBP,
+		PaymentProvider: PaymentProviderPlatega,
+		ProviderTradeNo: "platega-transaction-123",
+		CreateTime:      common.GetTimestamp(),
+		Status:          common.TopUpStatusPending,
+	}
+	require.NoError(t, DB.Create(&order).Error)
+
+	_, err := RechargePlatega(
+		order.ProviderTradeNo,
+		decimal.NewFromInt(159),
+		"RUB",
+		PaymentMethodPlategaSBP,
+		"127.0.0.1",
+	)
+	require.ErrorIs(t, err, ErrPaymentAmountMismatch)
+	assert.Equal(t, 0, getUserQuotaForPaymentGuardTest(t, user.Id))
+	assert.Equal(t, common.TopUpStatusPending, getTopUpStatusForPaymentGuardTest(t, order.TradeNo))
+
+	alreadyDone, err := RechargePlatega(
+		order.ProviderTradeNo,
+		decimal.NewFromInt(160),
+		"RUB",
+		PaymentMethodPlategaSBP,
+		"127.0.0.1",
+	)
+	require.NoError(t, err)
+	assert.False(t, alreadyDone)
+	assert.Equal(t, 2*500000, getUserQuotaForPaymentGuardTest(t, user.Id))
+
+	alreadyDone, err = RechargePlatega(
+		order.ProviderTradeNo,
+		decimal.NewFromInt(160),
+		"RUB",
+		PaymentMethodPlategaSBP,
+		"127.0.0.1",
+	)
+	require.NoError(t, err)
+	assert.True(t, alreadyDone)
+	assert.Equal(t, 2*500000, getUserQuotaForPaymentGuardTest(t, user.Id))
+}
+
 func TestRechargeEpayKeepsRedisAndDatabaseCreditInSync(t *testing.T) {
 	truncateTables(t)
 	useUserCacheMiniRedis(t)

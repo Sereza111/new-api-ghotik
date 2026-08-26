@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import i18next from 'i18next'
-import { CreditCard, Landmark } from 'lucide-react'
+import { Bitcoin, CreditCard, Landmark, QrCode } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { SiAlipay, SiTelegram, SiWechat, SiStripe } from 'react-icons/si'
 
@@ -131,6 +131,27 @@ export function getPaymentIcon(
         <SiTelegram
           className={className}
           style={{ color: PAYMENT_ICON_COLORS[PAYMENT_TYPES.CRYPTO_PAY] }}
+        />
+      )
+    case PAYMENT_TYPES.PLATEGA_SBP:
+      return (
+        <QrCode
+          className={className}
+          style={{ color: PAYMENT_ICON_COLORS[PAYMENT_TYPES.PLATEGA_SBP] }}
+        />
+      )
+    case PAYMENT_TYPES.PLATEGA_CARD:
+      return (
+        <CreditCard
+          className={className}
+          style={{ color: PAYMENT_ICON_COLORS[PAYMENT_TYPES.PLATEGA_CARD] }}
+        />
+      )
+    case PAYMENT_TYPES.PLATEGA_CRYPTO:
+      return (
+        <Bitcoin
+          className={className}
+          style={{ color: PAYMENT_ICON_COLORS[PAYMENT_TYPES.PLATEGA_CRYPTO] }}
         />
       )
     case PAYMENT_TYPES.WAFFO:

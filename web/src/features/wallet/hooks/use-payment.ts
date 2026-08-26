@@ -24,17 +24,20 @@ import {
   calculateAmount,
   calculateStripeAmount,
   calculateCryptoPayAmount,
+  calculatePlategaAmount,
   calculateWaffoAmount,
   calculateWaffoPancakeAmount,
   requestPayment,
   requestStripePayment,
   requestCryptoPayPayment,
+  requestPlategaPayment,
   isApiSuccess,
 } from '../api'
 import { PAYMENT_TYPES } from '../constants'
 import {
   isStripePayment,
   isCryptoPayPayment,
+  isPlategaPayment,
   isWaffoPayment,
   isWaffoPancakePayment,
   submitPaymentForm,
@@ -51,6 +54,7 @@ export interface PaymentAmountCalculators {
   regular: AmountCalculator
   stripe: AmountCalculator
   cryptoPay: AmountCalculator
+  platega: AmountCalculator
   waffo: AmountCalculator
   waffoPancake: AmountCalculator
 }
@@ -59,6 +63,7 @@ const defaultPaymentAmountCalculators: PaymentAmountCalculators = {
   regular: calculateAmount,
   stripe: calculateStripeAmount,
   cryptoPay: calculateCryptoPayAmount,
+  platega: calculatePlategaAmount,
   waffo: calculateWaffoAmount,
   waffoPancake: calculateWaffoPancakeAmount,
 }
@@ -73,6 +78,8 @@ export async function requestPaymentAmount(
     calculator = calculators.stripe
   } else if (isCryptoPayPayment(paymentType)) {
     calculator = calculators.cryptoPay
+  } else if (isPlategaPayment(paymentType)) {
+    calculator = calculators.platega
   } else if (isWaffoPayment(paymentType)) {
     calculator = calculators.waffo
   } else if (isWaffoPancakePayment(paymentType)) {
@@ -121,6 +128,7 @@ export function usePayment() {
 
         const isStripe = isStripePayment(paymentType)
         const isCryptoPay = isCryptoPayPayment(paymentType)
+        const isPlatega = isPlategaPayment(paymentType)
         const amount = Math.floor(topupAmount)
 
         let response
@@ -133,6 +141,11 @@ export function usePayment() {
           response = await requestCryptoPayPayment({
             amount,
             payment_method: PAYMENT_TYPES.CRYPTO_PAY,
+          })
+        } else if (isPlatega) {
+          response = await requestPlategaPayment({
+            amount,
+            payment_method: paymentType,
           })
         } else {
           response = await requestPayment({
@@ -149,14 +162,14 @@ export function usePayment() {
         // Handle hosted checkout links.
         const payLink = (response.data as { pay_link?: string } | undefined)
           ?.pay_link
-        if ((isStripe || isCryptoPay) && payLink) {
+        if ((isStripe || isCryptoPay || isPlatega) && payLink) {
           window.open(payLink, '_blank', 'noopener,noreferrer')
           toast.success(i18next.t('Redirecting to payment page...'))
           return true
         }
 
         // Handle non-Stripe payment
-        if (!isStripe && !isCryptoPay && response.data) {
+        if (!isStripe && !isCryptoPay && !isPlatega && response.data) {
           const url = (response as unknown as { url?: string }).url
           if (url) {
             submitPaymentForm(url, response.data)

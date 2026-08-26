@@ -35,6 +35,9 @@ export const PAYMENT_TYPES = {
   STRIPE: 'stripe',
   CREEM: 'creem',
   CRYPTO_PAY: 'crypto_pay',
+  PLATEGA_SBP: 'platega_sbp',
+  PLATEGA_CARD: 'platega_card',
+  PLATEGA_CRYPTO: 'platega_crypto',
   WAFFO: 'waffo',
   WAFFO_PANCAKE: 'waffo_pancake',
 } as const
@@ -53,6 +56,9 @@ export const PAYMENT_ICON_COLORS = {
   [PAYMENT_TYPES.STRIPE]: '#635BFF',
   [PAYMENT_TYPES.CREEM]: '#6366F1',
   [PAYMENT_TYPES.CRYPTO_PAY]: '#8CCEF0',
+  [PAYMENT_TYPES.PLATEGA_SBP]: '#8CCEF0',
+  [PAYMENT_TYPES.PLATEGA_CARD]: '#8CCEF0',
+  [PAYMENT_TYPES.PLATEGA_CRYPTO]: '#8CCEF0',
   [PAYMENT_TYPES.WAFFO]: '#2563EB',
   [PAYMENT_TYPES.WAFFO_PANCAKE]: '#F97316',
 } as const

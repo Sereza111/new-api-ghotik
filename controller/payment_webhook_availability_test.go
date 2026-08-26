@@ -97,6 +97,39 @@ func TestCryptoPayWebhookEnabledRequiresComplianceToggleAndToken(t *testing.T) {
 	require.False(t, isCryptoPayWebhookEnabled())
 }
 
+func TestPlategaWebhookEnabledRequiresComplianceToggleAndCredentials(t *testing.T) {
+	paymentSetting := operation_setting.GetPaymentSetting()
+	originalConfirmed := paymentSetting.ComplianceConfirmed
+	originalTermsVersion := paymentSetting.ComplianceTermsVersion
+	originalEnabled := setting.PlategaEnabled
+	originalMerchantID := setting.PlategaMerchantID
+	originalSecret := setting.PlategaAPISecret
+	t.Cleanup(func() {
+		paymentSetting.ComplianceConfirmed = originalConfirmed
+		paymentSetting.ComplianceTermsVersion = originalTermsVersion
+		setting.PlategaEnabled = originalEnabled
+		setting.PlategaMerchantID = originalMerchantID
+		setting.PlategaAPISecret = originalSecret
+	})
+
+	paymentSetting.ComplianceConfirmed = false
+	paymentSetting.ComplianceTermsVersion = ""
+	setting.PlategaEnabled = true
+	setting.PlategaMerchantID = "merchant-id"
+	setting.PlategaAPISecret = "secret"
+	require.False(t, isPlategaWebhookEnabled())
+
+	confirmPaymentComplianceForTest(t)
+	setting.PlategaAPISecret = ""
+	require.False(t, isPlategaWebhookEnabled())
+
+	setting.PlategaAPISecret = "secret"
+	require.True(t, isPlategaWebhookEnabled())
+
+	setting.PlategaMerchantID = ""
+	require.False(t, isPlategaWebhookEnabled())
+}
+
 func TestWaffoWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 	confirmPaymentComplianceForTest(t)
 	originalEnabled := setting.WaffoEnabled

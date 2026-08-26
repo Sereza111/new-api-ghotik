@@ -37,6 +37,7 @@ describe('payment amount routing', () => {
         calls.push('crypto-pay')
         return { success: true, data: '3' }
       },
+      platega: async () => ({ success: true, data: '730' }),
       waffo: async (request) => {
         calls.push(`waffo:${request.amount}`)
         return { success: true, data: '18.75' }
@@ -60,6 +61,7 @@ describe('payment amount routing', () => {
         calls.push(`crypto-pay:${request.amount}`)
         return { success: true, data: '10.50' }
       },
+      platega: async () => ({ success: true, data: '730' }),
       waffo: async () => ({ success: true, data: '4' }),
       waffoPancake: async () => ({ success: true, data: '5' }),
     }

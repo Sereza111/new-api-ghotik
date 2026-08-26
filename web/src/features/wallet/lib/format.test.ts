@@ -8,11 +8,27 @@ License, or (at your option) any later version.
 */
 import { describe, expect, it } from 'vitest'
 
-import { formatUsdAmount } from './format'
+import {
+  formatPaymentAmount,
+  formatRubAmount,
+  formatTopupPaymentAmount,
+  formatUsdAmount,
+} from './format'
 
 describe('formatUsdAmount', () => {
   it('marks Crypto Pay amounts as USD', () => {
     expect(formatUsdAmount(10)).toBe('$10')
     expect(formatUsdAmount('0.25')).toMatch(/^\$0[,.]25$/)
+  })
+})
+
+describe('payment currency formatting', () => {
+  it('marks Platega checkout amounts as RUB', () => {
+    expect(formatPaymentAmount(80, 'platega_sbp')).toBe(formatRubAmount(80))
+  })
+
+  it('uses the provider currency in top-up history', () => {
+    expect(formatTopupPaymentAmount(80, 'platega')).toBe(formatRubAmount(80))
+    expect(formatTopupPaymentAmount(10, 'crypto_pay')).toBe(formatUsdAmount(10))
   })
 })

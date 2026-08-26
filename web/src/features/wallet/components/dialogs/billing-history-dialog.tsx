@@ -46,9 +46,9 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { formatCurrencyFromUSD } from '@/lib/currency'
-import { formatNumber } from '@/lib/format'
 
 import { useBillingHistory } from '../../hooks/use-billing-history'
+import { formatTopupPaymentAmount } from '../../lib'
 import {
   getStatusConfig,
   getPaymentMethodName,
@@ -59,6 +59,8 @@ interface BillingHistoryDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
 }
+
+const BILLING_HISTORY_SKELETONS = ['one', 'two', 'three', 'four', 'five']
 
 export function BillingHistoryDialog({
   open,
@@ -128,7 +130,7 @@ export function BillingHistoryDialog({
               ]}
               value={pageSize.toString()}
               onValueChange={(value) =>
-                value !== null && handlePageSizeChange(parseInt(value))
+                value !== null && handlePageSizeChange(Number.parseInt(value))
               }
             >
               <SelectTrigger className='h-9 w-[92px] sm:w-32'>
@@ -147,10 +149,13 @@ export function BillingHistoryDialog({
 
           {/* Records List */}
           <div className='max-h-[min(54vh,520px)] overflow-y-auto pr-1'>
-            {loading ? (
+            {loading && (
               <div className='space-y-3'>
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className='rounded-lg border p-3 sm:p-4'>
+                {BILLING_HISTORY_SKELETONS.map((skeletonKey) => (
+                  <div
+                    key={skeletonKey}
+                    className='rounded-lg border p-3 sm:p-4'
+                  >
                     <div className='flex items-start justify-between'>
                       <div className='flex-1 space-y-2'>
                         <Skeleton className='h-4 w-48' />
@@ -166,7 +171,8 @@ export function BillingHistoryDialog({
                   </div>
                 ))}
               </div>
-            ) : records.length === 0 ? (
+            )}
+            {!loading && records.length === 0 && (
               <div className='text-muted-foreground flex min-h-40 flex-col items-center justify-center py-10 text-center'>
                 <p className='text-sm font-medium'>
                   {t('No billing records found')}
@@ -177,7 +183,8 @@ export function BillingHistoryDialog({
                     : t('Your transaction history will appear here')}
                 </p>
               </div>
-            ) : (
+            )}
+            {!loading && records.length > 0 && (
               <div className='space-y-3'>
                 {records.map((record) => {
                   const statusConfig = getStatusConfig(record.status)
@@ -253,7 +260,10 @@ export function BillingHistoryDialog({
                             {t('Payment')}
                           </Label>
                           <div className='text-sm font-semibold text-red-600'>
-                            {formatNumber(record.money)}
+                            {formatTopupPaymentAmount(
+                              record.money,
+                              record.payment_provider
+                            )}
                           </div>
                         </div>
                       </div>

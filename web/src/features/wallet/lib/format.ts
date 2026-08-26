@@ -68,6 +68,49 @@ export function formatUsdAmount(amount: number | string): string {
   return `$${formatCurrency(amount)}`
 }
 
+/** Format an amount charged by Platega in Russian rubles. */
+export function formatRubAmount(amount: number | string): string {
+  const numeric =
+    typeof amount === 'number' ? amount : Number.parseFloat(String(amount))
+  if (!Number.isFinite(numeric)) return '-'
+
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: 'RUB',
+    currencyDisplay: 'narrowSymbol',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(numeric)
+}
+
+/** Format an amount in the currency charged by the selected gateway. */
+export function formatPaymentAmount(
+  amount: number | string,
+  paymentType: string | undefined
+): string {
+  if (paymentType?.startsWith('platega_')) {
+    return formatRubAmount(amount)
+  }
+  if (paymentType === 'crypto_pay') {
+    return formatUsdAmount(amount)
+  }
+  return formatCurrency(amount)
+}
+
+/** Format a completed top-up in the currency charged by its provider. */
+export function formatTopupPaymentAmount(
+  amount: number | string,
+  paymentProvider: string | undefined
+): string {
+  if (paymentProvider === 'platega') {
+    return formatRubAmount(amount)
+  }
+  if (paymentProvider === 'crypto_pay') {
+    return formatUsdAmount(amount)
+  }
+  return formatCurrency(amount)
+}
+
 /**
  * Get discount label for display (e.g., "20% OFF")
  */

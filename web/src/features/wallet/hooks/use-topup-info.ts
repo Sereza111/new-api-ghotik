@@ -66,12 +66,20 @@ function parsePaymentMethods(
       const rawMinTopup = Number(item.min_topup)
       const normalizedMinTopup = Number.isFinite(rawMinTopup) ? rawMinTopup : 0
       const type = typeof item.type === 'string' ? item.type : ''
+      const currency: PaymentMethod['currency'] =
+        item.currency === 'USD' || item.currency === 'RUB'
+          ? item.currency
+          : undefined
 
       return {
         name: typeof item.name === 'string' ? item.name : '',
         type,
         color: typeof item.color === 'string' ? item.color : undefined,
         icon: typeof item.icon === 'string' ? item.icon : undefined,
+        currency,
+        exchange_rate: Number.isFinite(Number(item.exchange_rate))
+          ? Number(item.exchange_rate)
+          : undefined,
         min_topup:
           type === 'stripe' && normalizedMinTopup <= 0
             ? stripeMinTopup

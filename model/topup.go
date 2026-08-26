@@ -19,18 +19,22 @@ type TopUp struct {
 	TradeNo         string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
 	PaymentMethod   string  `json:"payment_method" gorm:"type:varchar(50)"`
 	PaymentProvider string  `json:"payment_provider" gorm:"type:varchar(50);default:''"`
+	ProviderTradeNo string  `json:"provider_trade_no" gorm:"type:varchar(255);index"`
 	CreateTime      int64   `json:"create_time"`
 	CompleteTime    int64   `json:"complete_time"`
 	Status          string  `json:"status"`
 }
 
 const (
-	PaymentMethodStripe       = "stripe"
-	PaymentMethodCreem        = "creem"
-	PaymentMethodWaffo        = "waffo"
-	PaymentMethodWaffoPancake = "waffo_pancake"
-	PaymentMethodCryptoPay    = "crypto_pay"
-	PaymentMethodBalance      = "balance"
+	PaymentMethodStripe        = "stripe"
+	PaymentMethodCreem         = "creem"
+	PaymentMethodWaffo         = "waffo"
+	PaymentMethodWaffoPancake  = "waffo_pancake"
+	PaymentMethodCryptoPay     = "crypto_pay"
+	PaymentMethodPlategaSBP    = "platega_sbp"
+	PaymentMethodPlategaCard   = "platega_card"
+	PaymentMethodPlategaCrypto = "platega_crypto"
+	PaymentMethodBalance       = "balance"
 )
 
 const (
@@ -40,6 +44,7 @@ const (
 	PaymentProviderWaffo        = "waffo"
 	PaymentProviderWaffoPancake = "waffo_pancake"
 	PaymentProviderCryptoPay    = "crypto_pay"
+	PaymentProviderPlatega      = "platega"
 	PaymentProviderBalance      = "balance"
 )
 
@@ -298,6 +303,102 @@ func RechargeCryptoPay(tradeNo string, paidAmount decimal.Decimal, fiat string, 
 	syncCreditUserQuotaCache(topUp.UserId, quotaToAdd, "crypto pay topup")
 	common.SysLog(fmt.Sprintf("Crypto Pay 充值成功 trade_no=%s user_id=%d quota_to_add=%d money=%.2f", topUp.TradeNo, topUp.UserId, quotaToAdd, topUp.Money))
 	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用 Crypto Pay 充值成功，充值金额: %v，支付金额：%.2f USD", logger.LogQuota(quotaToAdd), topUp.Money), callerIp, PaymentMethodCryptoPay, PaymentProviderCryptoPay)
+	return false, nil
+}
+
+func UpdatePendingTopUpStatusByProviderTradeNo(providerTradeNo string, expectedPaymentProvider string, targetStatus string) error {
+	if providerTradeNo == "" {
+		return errors.New("未提供支付平台单号")
+	}
+
+	providerRefCol := "`provider_trade_no`"
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		providerRefCol = `"provider_trade_no"`
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		topUp := &TopUp{}
+		if err := lockForUpdate(tx).Where(providerRefCol+" = ?", providerTradeNo).First(topUp).Error; err != nil {
+			return ErrTopUpNotFound
+		}
+		if topUp.PaymentProvider != expectedPaymentProvider {
+			return ErrPaymentMethodMismatch
+		}
+		if topUp.Status != common.TopUpStatusPending {
+			return ErrTopUpStatusInvalid
+		}
+
+		topUp.Status = targetStatus
+		return tx.Save(topUp).Error
+	})
+}
+
+// RechargePlatega completes an authenticated Platega callback exactly once.
+func RechargePlatega(providerTradeNo string, paidAmount decimal.Decimal, currency string, paymentMethod string, callerIp string) (alreadyDone bool, err error) {
+	if providerTradeNo == "" {
+		return false, errors.New("未提供支付平台单号")
+	}
+	if currency != "RUB" || paidAmount.LessThanOrEqual(decimal.Zero) {
+		return false, ErrPaymentAmountMismatch
+	}
+
+	providerRefCol := "`provider_trade_no`"
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		providerRefCol = `"provider_trade_no"`
+	}
+
+	var quotaToAdd int
+	topUp := &TopUp{}
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).Where(providerRefCol+" = ?", providerTradeNo).First(topUp).Error; err != nil {
+			return ErrTopUpNotFound
+		}
+		if topUp.PaymentProvider != PaymentProviderPlatega {
+			return ErrPaymentMethodMismatch
+		}
+		if topUp.Status == common.TopUpStatusSuccess {
+			alreadyDone = true
+			return nil
+		}
+		if topUp.Status != common.TopUpStatusPending {
+			return ErrTopUpStatusInvalid
+		}
+		if paymentMethod != "" && topUp.PaymentMethod != paymentMethod {
+			return ErrPaymentMethodMismatch
+		}
+		expectedAmount := decimal.NewFromFloat(topUp.Money).Round(2)
+		if !expectedAmount.Equal(paidAmount.Round(2)) {
+			return ErrPaymentAmountMismatch
+		}
+
+		var quotaErr error
+		quotaToAdd, quotaErr = common.QuotaFromDecimalStrict(
+			decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
+		)
+		if quotaErr != nil || quotaToAdd <= 0 {
+			return ErrInvalidTopUpQuota
+		}
+		topUp.CompleteTime = common.GetTimestamp()
+		topUp.Status = common.TopUpStatusSuccess
+		if err := tx.Save(topUp).Error; err != nil {
+			return err
+		}
+		return creditTopUpQuota(tx, topUp.UserId, quotaToAdd, nil)
+	})
+	if err != nil {
+		if !errors.Is(err, ErrTopUpNotFound) && !errors.Is(err, ErrPaymentMethodMismatch) &&
+			!errors.Is(err, ErrTopUpStatusInvalid) && !errors.Is(err, ErrPaymentAmountMismatch) {
+			common.SysError("platega topup failed: " + err.Error())
+		}
+		return false, err
+	}
+	if alreadyDone {
+		return true, nil
+	}
+
+	syncCreditUserQuotaCache(topUp.UserId, quotaToAdd, "platega topup")
+	common.SysLog(fmt.Sprintf("Platega 充值成功 provider_trade_no=%s user_id=%d quota_to_add=%d money=%.2f RUB", topUp.ProviderTradeNo, topUp.UserId, quotaToAdd, topUp.Money))
+	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用 Platega 充值成功，充值金额: %v，支付金额：%.2f RUB", logger.LogQuota(quotaToAdd), topUp.Money), callerIp, topUp.PaymentMethod, PaymentProviderPlatega)
 	return false, nil
 }
 

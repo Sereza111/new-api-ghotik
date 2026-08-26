@@ -30,6 +30,7 @@ import type {
   PaymentResponse,
   StripePaymentResponse,
   CryptoPayPaymentResponse,
+  PlategaPaymentResponse,
   AffiliateCodeResponse,
   AffiliateTransferResponse,
   BillingHistoryResponse,
@@ -107,6 +108,16 @@ export async function calculateCryptoPayAmount(
   return res.data
 }
 
+/** Calculate the RUB amount for a Platega payment. */
+export async function calculatePlategaAmount(
+  request: AmountRequest
+): Promise<AmountResponse> {
+  const res = await api.post('/api/user/platega/amount', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
 /**
  * Calculate payment amount for Waffo payment
  */
@@ -153,6 +164,16 @@ export async function requestCryptoPayPayment(
   request: PaymentRequest
 ): Promise<CryptoPayPaymentResponse> {
   const res = await api.post('/api/user/crypto-pay/pay', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/** Create a Platega hosted checkout. */
+export async function requestPlategaPayment(
+  request: PaymentRequest
+): Promise<PlategaPaymentResponse> {
+  const res = await api.post('/api/user/platega/pay', request, {
     skipBusinessError: true,
   } as Record<string, unknown>)
   return res.data
