@@ -16,7 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Gift, ExternalLink, Loader2, Receipt, WalletCards } from 'lucide-react'
+import {
+  Gift,
+  ExternalLink,
+  Info,
+  Loader2,
+  Receipt,
+  WalletCards,
+} from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -351,6 +358,17 @@ export function RechargeFormCard({
                   </div>
                 </div>
               </div>
+
+              {isPlatega && (
+                <Alert className='bg-muted/20 border-border/70'>
+                  <Info />
+                  <AlertDescription>
+                    {t(
+                      'The payment amount is approximate. Payment provider fees are not included.'
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
 
               <div className='space-y-2.5 sm:space-y-3'>
                 <Label className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>
