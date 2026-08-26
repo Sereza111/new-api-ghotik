@@ -36,6 +36,32 @@ type Pricing struct {
 	BillingMode            string                  `json:"billing_mode,omitempty"`
 	BillingExpr            string                  `json:"billing_expr,omitempty"`
 	PricingVersion         string                  `json:"pricing_version,omitempty"`
+	ReferencePrice         *PricingReferencePrice  `json:"reference_price,omitempty"`
+}
+
+type PricingReferencePrice struct {
+	InputUSD   float64 `json:"input_usd,omitempty"`
+	OutputUSD  float64 `json:"output_usd,omitempty"`
+	RequestUSD float64 `json:"request_usd,omitempty"`
+}
+
+var pricingReferencePrices = map[string]PricingReferencePrice{
+	"gpt-5.4":       {InputUSD: 2.5, OutputUSD: 15},
+	"gpt-5.4-mini":  {InputUSD: 0.75, OutputUSD: 4.5},
+	"gpt-5.5":       {InputUSD: 5, OutputUSD: 30},
+	"gpt-5.6-luna":  {InputUSD: 0.2, OutputUSD: 1.2},
+	"gpt-5.6-sol":   {InputUSD: 4, OutputUSD: 20},
+	"gpt-5.6-terra": {InputUSD: 2, OutputUSD: 12},
+	"gpt-image-2":   {RequestUSD: 1},
+	"grok-4.5":      {InputUSD: 2, OutputUSD: 6},
+}
+
+func getPricingReferencePrice(modelName string) *PricingReferencePrice {
+	referencePrice, ok := pricingReferencePrices[modelName]
+	if !ok {
+		return nil
+	}
+	return &referencePrice
 }
 
 type PricingVendor struct {
@@ -360,6 +386,7 @@ func updatePricing() {
 			ModelName:              model,
 			EnableGroup:            groups.Items(),
 			SupportedEndpointTypes: modelSupportEndpointTypes[model],
+			ReferencePrice:         getPricingReferencePrice(model),
 		}
 
 		// 补充模型元数据（描述、标签、供应商、状态）

@@ -38,9 +38,14 @@ import {
   formatRequestPrice,
   stripTrailingZeros,
 } from '../lib/price'
+import {
+  formatReferencePrice,
+  getRequestDiscountPercent,
+  getTokenDiscountPercent,
+} from '../lib/reference-price'
 import type { PricingModel, TokenUnit } from '../types'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
-import { PurchasePlaceholder } from './purchase-placeholder'
+import { PriceComparison } from './price-comparison'
 
 // ----------------------------------------------------------------------------
 // Pricing Table Columns
@@ -198,18 +203,34 @@ export function usePricingColumns(
               selectedGroup
             )
           )
+          const referenceInputPrice = formatReferencePrice(
+            model,
+            'input',
+            tokenUnit
+          )
+          const referenceOutputPrice = formatReferencePrice(
+            model,
+            'output',
+            tokenUnit
+          )
+          const referencePrices =
+            referenceInputPrice && referenceOutputPrice
+              ? [referenceInputPrice, referenceOutputPrice]
+              : undefined
+          const discountPercent = getTokenDiscountPercent(model, 'input', {
+            showRechargePrice,
+            priceRate,
+            usdExchangeRate,
+            selectedGroup,
+          })
 
           return (
-            <div className='max-w-full min-w-0'>
-              <span className='font-mono text-sm tabular-nums'>
-                {inputPrice}
-                <span className='text-muted-foreground/40 mx-1'>/</span>
-                {outputPrice}
-              </span>
-              <div className='text-muted-foreground/50 text-[10px]'>
-                / {tokenUnitLabel} tokens
-              </div>
-            </div>
+            <PriceComparison
+              currentPrices={[inputPrice, outputPrice]}
+              referencePrices={referencePrices}
+              discountPercent={discountPercent}
+              unit={`/ ${tokenUnitLabel} tokens`}
+            />
           )
         }
 
@@ -222,14 +243,21 @@ export function usePricingColumns(
             selectedGroup
           )
         )
+        const referencePrice = formatReferencePrice(model, 'request')
+        const discountPercent = getRequestDiscountPercent(model, {
+          showRechargePrice,
+          priceRate,
+          usdExchangeRate,
+          selectedGroup,
+        })
 
         return (
-          <div className='max-w-full min-w-0'>
-            <span className='font-mono text-sm tabular-nums'>{price}</span>
-            <div className='text-muted-foreground/50 text-[10px]'>
-              / {t('request')}
-            </div>
-          </div>
+          <PriceComparison
+            currentPrices={[price]}
+            referencePrices={referencePrice ? [referencePrice] : undefined}
+            discountPercent={discountPercent}
+            unit={`/ ${t('request')}`}
+          />
         )
       },
       size: 180,
@@ -363,15 +391,6 @@ export function usePricingColumns(
         )
       },
       size: 130,
-      enableSorting: false,
-    },
-    {
-      id: 'purchase',
-      header: t('Purchase'),
-      cell: ({ row }) => (
-        <PurchasePlaceholder modelName={row.original.model_name} size='xs' />
-      ),
-      size: 86,
       enableSorting: false,
     },
   ]

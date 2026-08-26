@@ -37,11 +37,13 @@ function I18nWrapper(props: { children: ReactNode }) {
 }
 
 describe('pricing table columns', () => {
-  test('exposes a purchase action for each model in the catalog', () => {
+  test('does not expose payment actions in the model catalog', () => {
     const { result } = renderHook(() => usePricingColumns(), {
       wrapper: I18nWrapper,
     })
 
-    expect(result.current.some((column) => column.id === 'purchase')).toBe(true)
+    expect(result.current.some((column) => column.id === 'purchase')).toBe(
+      false
+    )
   })
 })

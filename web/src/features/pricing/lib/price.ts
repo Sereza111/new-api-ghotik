@@ -138,6 +138,41 @@ function applyRechargeRate(
   return (price * priceRate) / usdExchangeRate
 }
 
+export function calculateTokenPriceInUSD(
+  model: PricingModel,
+  type: PriceType,
+  showWithRecharge = false,
+  priceRate = 1,
+  usdExchangeRate = 1,
+  selectedGroup?: string
+): number {
+  const displayGroupRatio = getDisplayGroupRatio(model, selectedGroup)
+  const priceInUSD = calculateTokenPrice(model, type, displayGroupRatio)
+  return applyRechargeRate(
+    priceInUSD,
+    showWithRecharge,
+    priceRate,
+    usdExchangeRate
+  )
+}
+
+export function calculateRequestPriceInUSD(
+  model: PricingModel,
+  showWithRecharge = false,
+  priceRate = 1,
+  usdExchangeRate = 1,
+  selectedGroup?: string
+): number {
+  const displayGroupRatio = getDisplayGroupRatio(model, selectedGroup)
+  const priceInUSD = (model.model_price || 0) * displayGroupRatio
+  return applyRechargeRate(
+    priceInUSD,
+    showWithRecharge,
+    priceRate,
+    usdExchangeRate
+  )
+}
+
 /**
  * Format token-based price for display
  */
@@ -154,14 +189,13 @@ export function formatPrice(
     return '-'
   }
 
-  const displayGroupRatio = getDisplayGroupRatio(model, selectedGroup)
-
-  let priceInUSD = calculateTokenPrice(model, type, displayGroupRatio)
-  priceInUSD = applyRechargeRate(
-    priceInUSD,
+  const priceInUSD = calculateTokenPriceInUSD(
+    model,
+    type,
     showWithRecharge,
     priceRate,
-    usdExchangeRate
+    usdExchangeRate,
+    selectedGroup
   )
 
   const price = priceInUSD / TOKEN_UNIT_DIVISORS[tokenUnit]
@@ -253,15 +287,12 @@ export function formatRequestPrice(
     return '-'
   }
 
-  const displayGroupRatio = getDisplayGroupRatio(model, selectedGroup)
-
-  let priceInUSD = (model.model_price || 0) * displayGroupRatio
-
-  priceInUSD = applyRechargeRate(
-    priceInUSD,
+  const priceInUSD = calculateRequestPriceInUSD(
+    model,
     showWithRecharge,
     priceRate,
-    usdExchangeRate
+    usdExchangeRate,
+    selectedGroup
   )
 
   return formatCurrencyFromUSD(priceInUSD, {
