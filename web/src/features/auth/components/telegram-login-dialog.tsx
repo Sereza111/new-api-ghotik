@@ -34,14 +34,14 @@ let telegramCallbackSequence = 0
 
 export function TelegramLoginDialog(props: TelegramLoginDialogProps) {
   const { t } = useTranslation()
+  const widgetShell = useRef<HTMLDivElement | null>(null)
   const widgetContainer = useRef<HTMLDivElement | null>(null)
+  const loadingIndicator = useRef<HTMLDivElement | null>(null)
+  const errorMessage = useRef<HTMLParagraphElement | null>(null)
   const authorizationHandler = useRef(props.onAuthorization)
   const [callbackName] = useState(
     () => `newApiTelegramLogin${++telegramCallbackSequence}`
   )
-  const [widgetState, setWidgetState] = useState<
-    'idle' | 'loading' | 'ready' | 'failed'
-  >('idle')
 
   useEffect(() => {
     authorizationHandler.current = props.onAuthorization
@@ -52,7 +52,9 @@ export function TelegramLoginDialog(props: TelegramLoginDialogProps) {
     const botName = props.botName.trim().replace(/^@/, '')
     if (!props.open || !container || !botName) return
 
-    setWidgetState('loading')
+    widgetShell.current?.setAttribute('aria-busy', 'true')
+    loadingIndicator.current?.classList.remove('hidden')
+    errorMessage.current?.classList.add('hidden')
     const callback = (authorization: unknown) => {
       authorizationHandler.current(authorization)
     }
@@ -66,8 +68,15 @@ export function TelegramLoginDialog(props: TelegramLoginDialogProps) {
     script.dataset.size = 'large'
     script.dataset.radius = '8'
     script.dataset.onauth = `${callbackName}(user)`
-    const handleLoad = () => setWidgetState('ready')
-    const handleError = () => setWidgetState('failed')
+    const handleLoad = () => {
+      widgetShell.current?.setAttribute('aria-busy', 'false')
+      loadingIndicator.current?.classList.add('hidden')
+    }
+    const handleError = () => {
+      widgetShell.current?.setAttribute('aria-busy', 'false')
+      loadingIndicator.current?.classList.add('hidden')
+      errorMessage.current?.classList.remove('hidden')
+    }
     script.addEventListener('load', handleLoad)
     script.addEventListener('error', handleError)
     container.replaceChildren(script)
@@ -91,19 +100,17 @@ export function TelegramLoginDialog(props: TelegramLoginDialogProps) {
       bodyClassName='space-y-4'
     >
       <div
+        ref={widgetShell}
         className='flex min-h-12 items-center justify-center'
-        aria-busy={widgetState === 'loading' || props.pending}
+        aria-busy={props.pending}
       >
-        {(widgetState === 'loading' || props.pending) && <Spinner />}
-        {widgetState === 'failed' && (
-          <p className='text-destructive text-sm'>{t('Login failed')}</p>
-        )}
-        <div
-          ref={widgetContainer}
-          className={
-            widgetState === 'ready' && !props.pending ? 'block' : 'hidden'
-          }
-        />
+        <div ref={loadingIndicator} className='hidden'>
+          <Spinner />
+        </div>
+        <p ref={errorMessage} className='text-destructive hidden text-sm'>
+          {t('Login failed')}
+        </p>
+        <div ref={widgetContainer} />
       </div>
     </Dialog>
   )
