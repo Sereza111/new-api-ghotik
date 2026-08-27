@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://new-api.yozik.ru/</loc>
+  </url>
+  <url>
+    <loc>https://new-api.yozik.ru/pricing</loc>
+  </url>
+  <url>
+    <loc>https://new-api.yozik.ru/rankings</loc>
+  </url>
+  <url>
+    <loc>https://new-api.yozik.ru/docs</loc>
+  </url>
+  <url>
+    <loc>https://new-api.yozik.ru/service-status</loc>
+  </url>
+  <url>
+    <loc>https://new-api.yozik.ru/support</loc>
+  </url>
+  <url>
+    <loc>https://new-api.yozik.ru/about</loc>
+  </url>
+  <url>
+    <loc>https://new-api.yozik.ru/privacy-policy</loc>
+  </url>
+  <url>
+    <loc>https://new-api.yozik.ru/user-agreement</loc>
+  </url>
+</urlset>

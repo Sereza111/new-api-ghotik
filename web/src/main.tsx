@@ -34,6 +34,7 @@ import { applyFaviconToDom } from '@/lib/dom-utils'
 import '@/lib/dayjs'
 import { initializeFrontendCache } from '@/lib/frontend-cache'
 import { handleServerError } from '@/lib/handle-server-error'
+import { resolveSeoMetadata } from '@/lib/seo'
 
 import { DirectionProvider } from './context/direction-provider'
 import { FontProvider } from './context/font-provider'
@@ -118,11 +119,13 @@ if (!rootElement) {
   try {
     if (typeof window === 'undefined' || typeof document === 'undefined') return
     const apply = (name: string) => {
-      document.title = name
+      const metadata = resolveSeoMetadata(window.location.pathname)
+      const title = metadata.indexable ? metadata.title : `${name} | VL API`
+      document.title = title
       const metaTitle = document.querySelector(
         'meta[name="title"]'
       ) as HTMLMetaElement | null
-      if (metaTitle) metaTitle.setAttribute('content', name)
+      if (metaTitle) metaTitle.setAttribute('content', title)
     }
     // Cache-first
     try {

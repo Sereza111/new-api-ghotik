@@ -1,0 +1,26 @@
+User-agent: *
+Allow: /
+
+Disallow: /api/
+Disallow: /dashboard/
+Disallow: /system-settings/
+Disallow: /channels/
+Disallow: /users/
+Disallow: /keys/
+Disallow: /wallet/
+Disallow: /profile/
+Disallow: /usage-logs/
+Disallow: /redemption-codes/
+Disallow: /subscriptions/
+Disallow: /routing/
+Disallow: /playground/
+Disallow: /chat/
+Disallow: /setup/
+Disallow: /oauth/
+Disallow: /sign-in
+Disallow: /sign-up
+Disallow: /register
+Disallow: /reset
+
+Sitemap: https://new-api.yozik.ru/sitemap.xml
+Host: new-api.yozik.ru
