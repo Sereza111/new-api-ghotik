@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -49,6 +50,12 @@ func GetStatus(c *gin.Context) {
 
 	passkeySetting := system_setting.GetPasskeySettings()
 	legalSetting := system_setting.GetLegalSettings()
+	telegramBotID := ""
+	if tokenParts := strings.SplitN(common.TelegramBotToken, ":", 2); len(tokenParts) == 2 {
+		if _, err := strconv.ParseInt(tokenParts[0], 10, 64); err == nil {
+			telegramBotID = tokenParts[0]
+		}
+	}
 
 	data := gin.H{
 		"version":                     common.Version,
@@ -63,6 +70,7 @@ func GetStatus(c *gin.Context) {
 		"linuxdo_minimum_trust_level": common.LinuxDOMinimumTrustLevel,
 		"telegram_oauth":              common.TelegramOAuthEnabled,
 		"telegram_bot_name":           common.TelegramBotName,
+		"telegram_bot_id":             telegramBotID,
 		"theme":                       "default",
 		"system_name":                 common.SystemName,
 		"logo":                        common.Logo,

@@ -108,6 +108,7 @@ export interface SystemStatus {
     linuxdo_client_id?: string
     telegram_oauth?: boolean
     telegram_bot_name?: string
+    telegram_bot_id?: string
     passkey_login?: boolean
     wechat_login?: boolean
     wechat_qrcode?: string
@@ -153,6 +154,7 @@ export interface SystemStatus {
   linuxdo_client_id?: string
   telegram_oauth?: boolean
   telegram_bot_name?: string
+  telegram_bot_id?: string
   passkey_login?: boolean
   wechat_login?: boolean
   wechat_qrcode?: string

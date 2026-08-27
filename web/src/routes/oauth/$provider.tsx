@@ -27,6 +27,7 @@ import i18next from 'i18next'
 import { useEffect } from 'react'
 import { toast } from 'sonner'
 
+import { telegramLogin } from '@/features/auth/api'
 import { OAuthCallbackScreen } from '@/features/auth/components/oauth-callback-screen'
 import {
   OAUTH_BIND_CALLBACK_MESSAGE,
@@ -42,6 +43,7 @@ import {
   getOAuthSessionStorage,
   resolveOAuthCallbackMode,
 } from '@/features/auth/lib/oauth-callback-mode'
+import { pickTelegramAuthorization } from '@/features/auth/lib/telegram-login'
 import { api, applyAuthBundle, isAuthBundle } from '@/lib/api'
 import { getServerErrorMessageKey } from '@/lib/server-error-message'
 
@@ -71,6 +73,14 @@ function OAuthCallback() {
     telegram_bind?: string
     flow_token?: string
     error_code?: string
+    id?: string
+    auth_date?: string
+    hash?: string
+    first_name?: string
+    last_name?: string
+    username?: string
+    photo_url?: string
+    lang?: string
   }
   const callbackState = search.state ?? ''
   const isTelegramBindCallback =
@@ -91,6 +101,19 @@ function OAuthCallback() {
 
     const code = search.code ?? ''
     const state = callbackState
+    const telegramAuthorization =
+      provider === 'telegram'
+        ? pickTelegramAuthorization({
+            id: search.id,
+            auth_date: search.auth_date,
+            hash: search.hash,
+            first_name: search.first_name,
+            last_name: search.last_name,
+            username: search.username,
+            photo_url: search.photo_url,
+            lang: search.lang,
+          })
+        : null
     const telegramCallback =
       provider === 'telegram'
         ? parseTelegramBindCallback({
@@ -180,7 +203,7 @@ function OAuthCallback() {
       void navigate({ href, replace: true })
     }
 
-    if (!code && !search.error) {
+    if (!code && !search.error && !telegramAuthorization) {
       toast.error(i18next.t('Missing code'))
       safeNavigate('/sign-in', '/sign-in')
       return
@@ -188,27 +211,38 @@ function OAuthCallback() {
 
     void (async () => {
       try {
-        const config: OAuthRequestConfig = {
-          params: {
-            code: code || undefined,
-            state,
-            error: search.error,
-            error_description: search.error_description,
-          },
-          skipBusinessError: true,
+        let responseData: unknown
+        if (telegramAuthorization) {
+          responseData = await telegramLogin(telegramAuthorization)
+        } else {
+          const config: OAuthRequestConfig = {
+            params: {
+              code: code || undefined,
+              state,
+              error: search.error,
+              error_description: search.error_description,
+            },
+            skipBusinessError: true,
+          }
+          const response = await api.get(`/api/oauth/${provider}`, config)
+          responseData = response.data
         }
-        const response = await api.get(`/api/oauth/${provider}`, config)
-        if (response.data?.success && isAuthBundle(response.data?.data)) {
-          applyAuthBundle(response.data.data)
+        const oauthResponse = responseData as {
+          success?: boolean
+          data?: unknown
+          message?: string
+        }
+        if (oauthResponse.success && isAuthBundle(oauthResponse.data)) {
+          applyAuthBundle(oauthResponse.data)
           safeNavigate(search.redirect)
           toast.success(i18next.t('Signed in successfully!'))
           return
         }
-        const messageKey = getServerErrorMessageKey(response.data)
+        const messageKey = getServerErrorMessageKey(oauthResponse)
         toast.error(
           messageKey
             ? i18next.t(messageKey)
-            : response.data?.message || i18next.t('OAuth failed')
+            : oauthResponse.message || i18next.t('OAuth failed')
         )
       } catch (error: unknown) {
         const messageKey = getServerErrorMessageKey(error)
@@ -235,9 +269,17 @@ function OAuthCallback() {
     search.error,
     search.error_code,
     search.error_description,
+    search.first_name,
     search.flow_token,
+    search.hash,
+    search.id,
+    search.lang,
+    search.last_name,
+    search.photo_url,
     search.redirect,
     search.telegram_bind,
+    search.username,
+    search.auth_date,
   ])
 
   return <OAuthCallbackScreen provider={provider} mode={mode} />

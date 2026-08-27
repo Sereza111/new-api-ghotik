@@ -80,3 +80,15 @@ export function buildOIDCOAuthUrl(
 export function buildLinuxDOOAuthUrl(clientId: string, state: string): string {
   return `https://connect.linux.do/oauth2/authorize?response_type=code&client_id=${clientId}&state=${state}`
 }
+
+/**
+ * Build the standalone Telegram OAuth URL.
+ */
+export function buildTelegramOAuthUrl(botId: string, returnTo: string): string {
+  const url = new URL('https://oauth.telegram.org/auth')
+  url.searchParams.set('bot_id', botId)
+  url.searchParams.set('origin', window.location.origin)
+  url.searchParams.set('request_access', 'write')
+  url.searchParams.set('return_to', returnTo)
+  return url.toString()
+}
