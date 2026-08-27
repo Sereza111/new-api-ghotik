@@ -93,6 +93,87 @@ func signTelegramAuthorization(token string, params url.Values) {
 	params.Set("hash", hex.EncodeToString(mac.Sum(nil)))
 }
 
+func TestFindOrCreateTelegramUser(t *testing.T) {
+	previousDB := model.DB
+	previousType := common.MainDatabaseType()
+	previousRegisterEnabled := common.RegisterEnabled
+	previousQuota := common.QuotaForNewUser
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(
+		&model.User{},
+		&model.AuthFlow{},
+		&model.ExternalIdentityClaim{},
+	))
+	model.DB = db
+	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
+	common.RegisterEnabled = true
+	common.QuotaForNewUser = 0
+	t.Cleanup(func() {
+		model.DB = previousDB
+		common.SetMainDatabaseType(previousType)
+		common.RegisterEnabled = previousRegisterEnabled
+		common.QuotaForNewUser = previousQuota
+	})
+
+	const token = "telegram-login-test-token"
+	now := time.Now()
+	params := signedTelegramAuthorization(token, now)
+	params.Set("username", "telegram_tester")
+	params.Set("first_name", "Telegram")
+	params.Set("last_name", "Tester")
+	signTelegramAuthorization(token, params)
+
+	user, created, err := findOrCreateTelegramUser(params, "123456", now)
+	require.NoError(t, err)
+	assert.True(t, created)
+	assert.Equal(t, "telegram_tester", user.Username)
+	assert.Equal(t, "Telegram Tester", user.DisplayName)
+	assert.Equal(t, "123456", user.TelegramId)
+	assert.Empty(t, user.Password)
+	assert.Equal(t, common.RoleCommonUser, user.Role)
+	assert.Equal(t, common.UserStatusEnabled, user.Status)
+
+	var identityClaim model.ExternalIdentityClaim
+	require.NoError(t, db.Where(
+		"provider = ? AND subject = ?",
+		model.ExternalIdentityProviderTelegram,
+		"123456",
+	).First(&identityClaim).Error)
+	assert.Equal(t, user.Id, identityClaim.UserId)
+
+	reloginParams := signedTelegramAuthorization(token, now.Add(time.Second))
+	reloginParams.Set("username", "telegram_tester")
+	reloginParams.Set("first_name", "Telegram")
+	reloginParams.Set("last_name", "Tester")
+	signTelegramAuthorization(token, reloginParams)
+	reloggedUser, reloginCreated, err := findOrCreateTelegramUser(reloginParams, "123456", now.Add(time.Second))
+	require.NoError(t, err)
+	assert.False(t, reloginCreated)
+	assert.Equal(t, user.Id, reloggedUser.Id)
+
+	_, _, err = findOrCreateTelegramUser(reloginParams, "123456", now.Add(time.Second))
+	assert.ErrorIs(t, err, model.ErrAuthFlowConsumed)
+
+	common.RegisterEnabled = false
+	disabledParams := signedTelegramAuthorization(token, now.Add(2*time.Second))
+	disabledParams.Set("id", "654321")
+	signTelegramAuthorization(token, disabledParams)
+	_, _, err = findOrCreateTelegramUser(disabledParams, "654321", now.Add(2*time.Second))
+	var registrationDisabled *OAuthRegistrationDisabledError
+	assert.ErrorAs(t, err, &registrationDisabled)
+
+	common.RegisterEnabled = true
+	registeredAfterRetry, retryCreated, err := findOrCreateTelegramUser(
+		disabledParams,
+		"654321",
+		now.Add(2*time.Second),
+	)
+	require.NoError(t, err)
+	assert.True(t, retryCreated)
+	assert.Equal(t, "654321", registeredAfterRetry.TelegramId)
+}
+
 func createTelegramBindTestFlow(t *testing.T, db *gorm.DB, name string, status int, now time.Time) (*model.User, string) {
 	t.Helper()
 	user := &model.User{
