@@ -18,16 +18,19 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   Activity,
+  Bot,
+  BookOpen,
   Box,
   CreditCard,
   FileText,
-  FlaskConical,
+  Gift,
   Key,
   LayoutDashboard,
   ListTodo,
   Radio,
   Route,
   ServerCog,
+  Send,
   Settings,
   Ticket,
   User,
@@ -55,9 +58,9 @@ export function useSidebarData(): SidebarData {
         title: t('Chat'),
         items: [
           {
-            title: t('Playground'),
+            title: t('Chat with AI'),
             url: '/playground',
-            icon: FlaskConical,
+            icon: Bot,
           },
         ],
       },
@@ -92,6 +95,11 @@ export function useSidebarData(): SidebarData {
             configUrls: ['/usage-logs/drawing', '/usage-logs/task'],
             icon: ListTodo,
           },
+          {
+            title: t('Setup guide'),
+            url: '/docs',
+            icon: BookOpen,
+          },
         ],
       },
       {
@@ -112,6 +120,23 @@ export function useSidebarData(): SidebarData {
             title: t('Routing'),
             url: '/routing',
             icon: Route,
+          },
+          {
+            title: t('Referral Program'),
+            url: '/wallet#referral',
+            icon: Gift,
+          },
+        ],
+      },
+      {
+        id: 'support',
+        title: t('Support'),
+        items: [
+          {
+            title: t('Customer chat'),
+            url: 'https://t.me/new_yozik',
+            icon: Send,
+            external: true,
           },
         ],
       },

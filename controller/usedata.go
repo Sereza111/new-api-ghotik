@@ -85,6 +85,29 @@ func GetUserQuotaDates(c *gin.Context) {
 	return
 }
 
+func GetUserUsageSummary(c *gin.Context) {
+	userId := c.GetInt("id")
+	startTimestamp, endTimestamp, ok := parseFlowQuotaTimeRange(c)
+	if !ok {
+		return
+	}
+	if endTimestamp-startTimestamp > 2592000 {
+		common.ApiErrorMsg(c, "time range cannot exceed one month")
+		return
+	}
+
+	summary, err := model.GetUserUsageSummary(userId, startTimestamp, endTimestamp)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    summary,
+	})
+}
+
 func GetAllFlowQuotaDates(c *gin.Context) {
 	startTimestamp, endTimestamp, ok := parseFlowQuotaTimeRange(c)
 	if !ok {

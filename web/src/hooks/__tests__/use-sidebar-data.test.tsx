@@ -26,7 +26,7 @@ vi.mock('react-i18next', () => ({
 }))
 
 describe('useSidebarData', () => {
-  test('keeps playground but omits external chat presets', () => {
+  test('shows the AI chat but omits external chat presets', () => {
     const { result } = renderHook(() => useSidebarData())
     const chatGroup = result.current.navGroups.find(
       (group) => group.id === 'chat'
@@ -34,7 +34,7 @@ describe('useSidebarData', () => {
 
     expect(chatGroup?.items).toHaveLength(1)
     expect(chatGroup?.items[0]).toMatchObject({
-      title: 'Playground',
+      title: 'Chat with AI',
       url: '/playground',
     })
     expect(

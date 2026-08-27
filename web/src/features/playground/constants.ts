@@ -55,6 +55,7 @@ export const DEFAULT_CONFIG: PlaygroundConfig = {
   presence_penalty: 0,
   seed: null,
   stream: true,
+  reasoning_effort: 'none',
 }
 
 export const DEFAULT_PARAMETER_ENABLED: ParameterEnabled = {

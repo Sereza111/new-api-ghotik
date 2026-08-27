@@ -25,6 +25,7 @@ import {
   PromptInputTextarea,
   type PromptInputMessage,
 } from '@/components/ai-elements/prompt-input'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
 import { getSubmittableInputText } from '../../lib'
 import type {
@@ -116,6 +117,43 @@ export function PlaygroundInput({
           }
           value={text}
         />
+
+        {!isImageMode ? (
+          <div className='border-border/60 flex flex-wrap items-center gap-2 border-t px-3 py-2'>
+            <span className='text-muted-foreground mr-1 text-xs font-medium'>
+              {t('Reasoning effort')}
+            </span>
+            <ToggleGroup
+              value={[config.reasoning_effort]}
+              onValueChange={(value) => {
+                const nextValue = value.find(
+                  (item) => item !== config.reasoning_effort
+                ) as PlaygroundConfig['reasoning_effort'] | undefined
+                if (nextValue) onConfigChange('reasoning_effort', nextValue)
+              }}
+              aria-label={t('Reasoning effort')}
+              variant='outline'
+              size='sm'
+              spacing={1}
+              className='max-w-full flex-wrap'
+            >
+              {[
+                ['none', t('Off')],
+                ['low', t('Low')],
+                ['medium', t('Medium')],
+                ['high', t('High')],
+              ].map(([value, label]) => (
+                <ToggleGroupItem
+                  key={value}
+                  value={value}
+                  className='h-7 px-2.5 text-xs'
+                >
+                  {label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          </div>
+        ) : null}
 
         <PromptInputFooter className='border-border/60 bg-muted/20 dark:bg-muted/10 border-t px-3 py-2.5 backdrop-blur'>
           <PlaygroundInputControls

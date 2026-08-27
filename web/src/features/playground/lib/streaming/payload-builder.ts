@@ -106,5 +106,9 @@ export function buildChatCompletionPayload(
     payload.seed = config.seed
   }
 
+  if (config.reasoning_effort !== 'none') {
+    payload.reasoning_effort = config.reasoning_effort
+  }
+
   return payload
 }

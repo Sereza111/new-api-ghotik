@@ -24,6 +24,7 @@ import { useDashboardContentVisibility } from '@/features/dashboard/hooks/use-st
 
 import { AnnouncementsPanel } from './announcements-panel'
 import { SummaryCards } from './summary-cards'
+import { UsageInsights } from './usage-insights'
 
 export function OverviewDashboard() {
   const { announcements: showAnnouncementsPanel } =
@@ -36,6 +37,10 @@ export function OverviewDashboard() {
     >
       <CardStaggerItem>
         <SummaryCards />
+      </CardStaggerItem>
+
+      <CardStaggerItem>
+        <UsageInsights />
       </CardStaggerItem>
 
       {showAnnouncementsPanel ? (

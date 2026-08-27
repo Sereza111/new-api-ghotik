@@ -35,6 +35,10 @@ vi.mock('../announcements-panel', () => ({
   AnnouncementsPanel: () => <section aria-label='announcements' />,
 }))
 
+vi.mock('../usage-insights', () => ({
+  UsageInsights: () => <section aria-label='usage-insights' />,
+}))
+
 vi.mock('@/components/page-transition', () => ({
   CardStaggerContainer: (props: React.HTMLAttributes<HTMLDivElement>) => (
     <div {...props} />
@@ -55,6 +59,7 @@ describe('OverviewDashboard', () => {
     const regions = screen.getAllByRole('region')
     expect(regions.map((region) => region.getAttribute('aria-label'))).toEqual([
       'usage-summary',
+      'usage-insights',
       'announcements',
     ])
   })

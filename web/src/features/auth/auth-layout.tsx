@@ -20,6 +20,7 @@ import { Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 
 import { Skeleton } from '@/components/ui/skeleton'
+import { FortuneWheel } from '@/features/home/components/fortune-wheel'
 import { useSystemConfig } from '@/hooks/use-system-config'
 
 type AuthLayoutProps = {
@@ -60,8 +61,44 @@ export function AuthLayout({ children }: AuthLayoutProps) {
           <span className='font-serif text-xl font-semibold'>{systemName}</span>
         )}
       </Link>
-      <div className='flex min-h-svh items-center justify-center px-4 pt-24 pb-8 sm:px-8 sm:pt-28'>
-        <div className='relative w-full max-w-[520px]'>
+      <div className='mx-auto grid min-h-svh w-full max-w-[1280px] items-center gap-10 px-4 pt-24 pb-8 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(420px,520px)] lg:pt-28'>
+        <section className='hidden min-w-0 items-center gap-8 lg:grid lg:grid-cols-[minmax(0,1fr)_19rem]'>
+          <div className='min-w-0 space-y-6'>
+            <p className='text-primary text-xs font-semibold uppercase'>
+              {t('Secure access to your AI gateway')}
+            </p>
+            <div className='space-y-3'>
+              <h1 className='font-serif text-5xl leading-[0.98] font-semibold xl:text-6xl'>
+                {t('One key. Every model.')}
+              </h1>
+              <p className='text-muted-foreground max-w-xl text-base leading-7 xl:text-lg'>
+                {t(
+                  'Manage models, API keys, usage, and payments from one clear workspace.'
+                )}
+              </p>
+            </div>
+            <div className='grid max-w-xl grid-cols-3 border-y'>
+              {[
+                t('Unified API'),
+                t('Transparent usage'),
+                t('Live service status'),
+              ].map((label, index) => (
+                <div
+                  key={label}
+                  className='text-muted-foreground px-3 py-4 text-xs first:pl-0 [&:not(:last-child)]:border-r'
+                >
+                  <span className='text-primary mr-2 font-mono'>
+                    0{index + 1}
+                  </span>
+                  {label}
+                </div>
+              ))}
+            </div>
+          </div>
+          <FortuneWheel />
+        </section>
+
+        <div className='relative w-full'>
           <div
             aria-hidden='true'
             className='border-primary/35 absolute -top-3 left-8 h-6 w-20 border-t border-l'
@@ -70,7 +107,7 @@ export function AuthLayout({ children }: AuthLayoutProps) {
             aria-hidden='true'
             className='border-primary/35 absolute right-8 -bottom-3 h-6 w-20 border-r border-b'
           />
-          <div className='bg-card/70 border-border rounded-md border px-5 py-7 shadow-2xl shadow-black/25 sm:px-10 sm:py-10'>
+          <div className='bg-card/80 border-border rounded-md border px-5 py-7 shadow-2xl shadow-black/25 backdrop-blur sm:px-9 sm:py-9'>
             {children}
           </div>
         </div>

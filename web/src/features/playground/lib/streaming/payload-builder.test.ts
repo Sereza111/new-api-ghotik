@@ -25,6 +25,7 @@ import {
   createUserMessage,
 } from '../message/message-utils'
 import {
+  buildChatCompletionPayload,
   buildImageGenerationPayload,
   isImageGenerationModel,
 } from './payload-builder'
@@ -81,5 +82,41 @@ describe('image generation payload', () => {
         revisedPrompt: 'A winter forest',
       },
     ])
+  })
+})
+
+describe('chat completion payload', () => {
+  it('preserves the selected reasoning effort', () => {
+    const payload = buildChatCompletionPayload(
+      [createUserMessage('solve this carefully')],
+      { ...DEFAULT_CONFIG, reasoning_effort: 'high' },
+      {
+        temperature: false,
+        top_p: false,
+        max_tokens: false,
+        frequency_penalty: false,
+        presence_penalty: false,
+        seed: false,
+      }
+    )
+
+    expect(payload.reasoning_effort).toBe('high')
+  })
+
+  it('omits reasoning effort when it is disabled', () => {
+    const payload = buildChatCompletionPayload(
+      [createUserMessage('answer normally')],
+      DEFAULT_CONFIG,
+      {
+        temperature: false,
+        top_p: false,
+        max_tokens: false,
+        frequency_penalty: false,
+        presence_penalty: false,
+        seed: false,
+      }
+    )
+
+    expect(payload).not.toHaveProperty('reasoning_effort')
   })
 })

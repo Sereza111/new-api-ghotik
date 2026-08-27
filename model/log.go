@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -78,6 +79,74 @@ type Log struct {
 	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
 	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
 	Other             string `json:"other"`
+}
+
+type UserUsageSummary struct {
+	ModelName        string `json:"model_name"`
+	RequestCount     int64  `json:"request_count"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CompletionTokens int64  `json:"completion_tokens"`
+	CacheTokens      int64  `json:"cache_tokens"`
+	Quota            int64  `json:"quota"`
+}
+
+func GetUserUsageSummary(userId int, startTime int64, endTime int64) ([]UserUsageSummary, error) {
+	type usageLogRow struct {
+		ModelName        string
+		PromptTokens     int
+		CompletionTokens int
+		Quota            int
+		Other            string
+	}
+
+	rows, err := LOG_DB.Model(&Log{}).
+		Select("model_name, prompt_tokens, completion_tokens, quota, other").
+		Where("user_id = ? AND type = ? AND created_at >= ? AND created_at <= ?", userId, LogTypeConsume, startTime, endTime).
+		Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	byModel := make(map[string]*UserUsageSummary)
+	for rows.Next() {
+		var row usageLogRow
+		if err = LOG_DB.ScanRows(rows, &row); err != nil {
+			return nil, err
+		}
+
+		summary := byModel[row.ModelName]
+		if summary == nil {
+			summary = &UserUsageSummary{ModelName: row.ModelName}
+			byModel[row.ModelName] = summary
+		}
+		summary.RequestCount++
+		summary.PromptTokens += int64(row.PromptTokens)
+		summary.CompletionTokens += int64(row.CompletionTokens)
+		summary.Quota += int64(row.Quota)
+
+		other, parseErr := common.StrToMap(row.Other)
+		if parseErr != nil || other == nil {
+			continue
+		}
+		switch cacheTokens := other["cache_tokens"].(type) {
+		case float64:
+			summary.CacheTokens += int64(cacheTokens)
+		case int:
+			summary.CacheTokens += int64(cacheTokens)
+		case int64:
+			summary.CacheTokens += cacheTokens
+		}
+	}
+
+	summaries := make([]UserUsageSummary, 0, len(byModel))
+	for _, summary := range byModel {
+		summaries = append(summaries, *summary)
+	}
+	sort.Slice(summaries, func(i, j int) bool {
+		return summaries[i].ModelName < summaries[j].ModelName
+	})
+	return summaries, nil
 }
 
 // don't use iota, avoid change log type value

@@ -83,6 +83,7 @@ export interface ChatCompletionRequest {
   frequency_penalty?: number
   presence_penalty?: number
   seed?: number
+  reasoning_effort?: 'low' | 'medium' | 'high'
 }
 
 export interface ChatCompletionChunk {
@@ -151,6 +152,7 @@ export interface PlaygroundConfig {
   presence_penalty: number
   seed: number | null
   stream: boolean
+  reasoning_effort: 'none' | 'low' | 'medium' | 'high'
 }
 
 export interface ParameterEnabled {
