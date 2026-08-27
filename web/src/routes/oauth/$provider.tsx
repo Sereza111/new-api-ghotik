@@ -43,7 +43,10 @@ import {
   getOAuthSessionStorage,
   resolveOAuthCallbackMode,
 } from '@/features/auth/lib/oauth-callback-mode'
-import { pickTelegramAuthorization } from '@/features/auth/lib/telegram-login'
+import {
+  parseTelegramAuthorizationHash,
+  pickTelegramAuthorization,
+} from '@/features/auth/lib/telegram-login'
 import { api, applyAuthBundle, isAuthBundle } from '@/lib/api'
 import { getServerErrorMessageKey } from '@/lib/server-error-message'
 
@@ -103,7 +106,7 @@ function OAuthCallback() {
     const state = callbackState
     const telegramAuthorization =
       provider === 'telegram'
-        ? pickTelegramAuthorization({
+        ? (pickTelegramAuthorization({
             id: search.id,
             auth_date: search.auth_date,
             hash: search.hash,
@@ -112,8 +115,13 @@ function OAuthCallback() {
             username: search.username,
             photo_url: search.photo_url,
             lang: search.lang,
-          })
+          }) ?? parseTelegramAuthorizationHash(window.location.hash))
         : null
+    if (telegramAuthorization && window.location.hash) {
+      const callbackUrl = new URL(window.location.href)
+      callbackUrl.hash = ''
+      window.history.replaceState(null, '', callbackUrl)
+    }
     const telegramCallback =
       provider === 'telegram'
         ? parseTelegramBindCallback({

@@ -46,6 +46,10 @@ import { OAuthProviders } from '@/features/auth/components/oauth-providers'
 import { loginFormSchema } from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
+import {
+  hasAcceptedLegalConsent,
+  rememberLegalConsent,
+} from '@/features/auth/lib/storage'
 import { beginPasskeyLogin, finishPasskeyLogin } from '@/features/auth/passkey'
 import type { AuthFormProps } from '@/features/auth/types'
 import { useStatus } from '@/hooks/use-status'
@@ -117,7 +121,7 @@ export function UserAuthForm({
 
   useEffect(() => {
     if (requiresLegalConsent) {
-      setAgreedToLegal(false)
+      setAgreedToLegal(hasAcceptedLegalConsent())
     } else {
       setAgreedToLegal(true)
     }
@@ -428,7 +432,10 @@ export function UserAuthForm({
         <LegalConsent
           status={status}
           checked={agreedToLegal}
-          onCheckedChange={setAgreedToLegal}
+          onCheckedChange={(checked) => {
+            setAgreedToLegal(checked)
+            rememberLegalConsent(checked)
+          }}
           className='mt-1'
         />
 

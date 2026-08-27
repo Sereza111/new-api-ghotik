@@ -69,3 +69,26 @@ export function pickTelegramAuthorization(
 
   return authorization
 }
+
+export function parseTelegramAuthorizationHash(
+  hash: string
+): TelegramAuthorization | null {
+  const match = hash.match(/(?:^#|[?&])tgAuthResult=([^&]+)/)
+  if (!match) return null
+
+  try {
+    let encoded = decodeURIComponent(match[1])
+      .replaceAll('-', '+')
+      .replaceAll('_', '/')
+    const padding = encoded.length % 4
+    if (padding > 0) encoded += '='.repeat(4 - padding)
+
+    const bytes = Uint8Array.from(atob(encoded), (character) =>
+      character.charCodeAt(0)
+    )
+    const authorization = JSON.parse(new TextDecoder().decode(bytes))
+    return pickTelegramAuthorization(authorization)
+  } catch {
+    return null
+  }
+}

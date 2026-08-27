@@ -18,7 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { describe, expect, test } from 'vitest'
 
-import { pickTelegramAuthorization } from './telegram-login'
+import {
+  parseTelegramAuthorizationHash,
+  pickTelegramAuthorization,
+} from './telegram-login'
 
 describe('Telegram login authorization', () => {
   test('keeps only fields signed by the Telegram login contract', () => {
@@ -56,5 +59,27 @@ describe('Telegram login authorization', () => {
     expect(
       pickTelegramAuthorization({ id: {}, auth_date: 1, hash: 'hash' })
     ).toBe(null)
+  })
+
+  test('decodes the authorization returned in the Telegram URL fragment', () => {
+    const authorization = {
+      id: 12345,
+      first_name: '\u0422\u0435\u0441\u0442',
+      username: 'test_user',
+      auth_date: 1_900_000_000,
+      hash: 'signed-hash',
+    }
+    const encoded = Buffer.from(JSON.stringify(authorization), 'utf8')
+      .toString('base64url')
+      .replace(/=+$/, '')
+
+    expect(parseTelegramAuthorizationHash(`#tgAuthResult=${encoded}`)).toEqual(
+      authorization
+    )
+  })
+
+  test('rejects malformed Telegram URL fragments', () => {
+    expect(parseTelegramAuthorizationHash('')).toBe(null)
+    expect(parseTelegramAuthorizationHash('#tgAuthResult=invalid')).toBe(null)
   })
 })

@@ -26,6 +26,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 const STORAGE_KEYS = {
   AFFILIATE: 'aff',
+  LEGAL_CONSENT: 'legal_consent_v1',
   STATUS: 'status',
 } as const
 
@@ -57,5 +58,27 @@ export function saveAffiliateCode(code: string): void {
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to save affiliate code:', error)
+  }
+}
+
+export function hasAcceptedLegalConsent(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.localStorage.getItem(STORAGE_KEYS.LEGAL_CONSENT) === 'true'
+  } catch {
+    return false
+  }
+}
+
+export function rememberLegalConsent(accepted: boolean): void {
+  if (typeof window === 'undefined') return
+  try {
+    if (accepted) {
+      window.localStorage.setItem(STORAGE_KEYS.LEGAL_CONSENT, 'true')
+    } else {
+      window.localStorage.removeItem(STORAGE_KEYS.LEGAL_CONSENT)
+    }
+  } catch {
+    // Browser privacy settings may make localStorage unavailable.
   }
 }
