@@ -49,7 +49,7 @@ export function TelegramLoginDialog(props: TelegramLoginDialogProps) {
 
   useEffect(() => {
     const container = widgetContainer.current
-    const botName = props.botName.trim()
+    const botName = props.botName.trim().replace(/^@/, '')
     if (!props.open || !container || !botName) return
 
     setWidgetState('loading')
