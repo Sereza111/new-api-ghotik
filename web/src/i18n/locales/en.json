@@ -1397,6 +1397,7 @@
     "Deployments": "Deployments",
     "Desc": "Desc",
     "Describe": "Describe",
+    "Describe the image you want to create": "Describe the image you want to create",
     "Describe this model...": "Describe this model...",
     "Describe this vendor...": "Describe this vendor...",
     "Description": "Description",
@@ -1497,6 +1498,7 @@
     "Downgrade to pre-purchase group": "Downgrade to pre-purchase group",
     "Downgrade to this group after the subscription expires": "Downgrade to this group after the subscription expires",
     "Download": "Download",
+    "Download image": "Download image",
     "Drag {{group}} to reorder": "Drag {{group}} to reorder",
     "Draw": "Draw",
     "Drawing": "Drawing",
@@ -2152,6 +2154,7 @@
     "Gemini will continue to auto-detect thinking mode even with the adapter disabled. Enable this only when you need finer control over pricing and budgeting.": "Gemini will continue to auto-detect thinking mode even with the adapter disabled. Enable this only when you need finer control over pricing and budgeting.",
     "General": "General",
     "General Settings": "General Settings",
+    "Generate": "Generate",
     "Generate and manage your API access token": "Generate and manage your API access token",
     "Generate Lyrics": "Generate Lyrics",
     "Generate Music": "Generate Music",
@@ -4660,6 +4663,7 @@
     "The model you're looking for doesn't exist.": "The model you're looking for doesn't exist.",
     "The name displayed across the application": "The name displayed across the application",
     "The new token will only be shown once. Copy it and store it securely.": "The new token will only be shown once. Copy it and store it securely.",
+    "The payment amount is approximate. Payment provider fees are not included.": "The payment amount is approximate. Payment provider fees are not included.",
     "The public URL of your server, used for OAuth callbacks, webhooks, and other external integrations": "The public URL of your server, used for OAuth callbacks, webhooks, and other external integrations",
     "The requested chat preset does not exist or has been removed.": "The requested chat preset does not exist or has been removed.",
     "The reset request stays disabled until a credit is available.": "The reset request stays disabled until a credit is available.",
@@ -5408,7 +5412,6 @@
     "Zero retention": "Zero retention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom",
-    "The payment amount is approximate. Payment provider fees are not included.": "The payment amount is approximate. Payment provider fees are not included."
+    "Zoom": "Zoom"
   }
 }

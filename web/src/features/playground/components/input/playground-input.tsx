@@ -42,6 +42,7 @@ interface PlaygroundInputProps {
   onStop?: () => void
   disabled?: boolean
   isGenerating?: boolean
+  isImageMode?: boolean
   models: ModelOption[]
   modelValue: string
   onModelChange: (value: string) => void
@@ -68,6 +69,7 @@ export function PlaygroundInput({
   onStop,
   disabled,
   isGenerating,
+  isImageMode = false,
   models,
   modelValue,
   onModelChange,
@@ -107,7 +109,11 @@ export function PlaygroundInput({
           className='min-h-20 px-5 pt-4 pb-3 leading-7 md:min-h-24 md:text-base'
           disabled={disabled}
           onChange={(event) => setText(event.target.value)}
-          placeholder={t('Ask anything')}
+          placeholder={
+            isImageMode
+              ? t('Describe the image you want to create')
+              : t('Ask anything')
+          }
           value={text}
         />
 
@@ -117,6 +123,7 @@ export function PlaygroundInput({
             groups={groups}
             groupValue={groupValue}
             isGenerating={isGenerating}
+            isImageMode={isImageMode}
             isModelLoading={isModelLoading}
             models={models}
             modelValue={modelValue}
@@ -128,6 +135,7 @@ export function PlaygroundInput({
               <PlaygroundInputTools
                 config={config}
                 disabled={disabled}
+                isImageMode={isImageMode}
                 hasMessages={hasMessages}
                 onConfigChange={onConfigChange}
                 onClearMessages={onClearMessages}

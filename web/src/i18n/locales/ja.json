@@ -1397,6 +1397,7 @@
     "Deployments": "デプロイ",
     "Desc": "降順",
     "Describe": "説明",
+    "Describe the image you want to create": "生成したい画像を説明してください",
     "Describe this model...": "このモデルを説明...",
     "Describe this vendor...": "このベンダーを説明...",
     "Description": "説明",
@@ -1497,6 +1498,7 @@
     "Downgrade to pre-purchase group": "購入前のグループにダウングレード",
     "Downgrade to this group after the subscription expires": "サブスクリプションの有効期限が切れた後、このグループにダウングレードします",
     "Download": "ダウンロード",
+    "Download image": "画像をダウンロード",
     "Drag {{group}} to reorder": "{{group}} をドラッグして並べ替え",
     "Draw": "描画",
     "Drawing": "画像生成",
@@ -2152,6 +2154,7 @@
     "Gemini will continue to auto-detect thinking mode even with the adapter disabled. Enable this only when you need finer control over pricing and budgeting.": "アダプターが無効になっていても、Geminiは思考モードを自動検出します。価格設定と予算編成をより細かく制御する必要がある場合にのみ、これを有効にしてください。",
     "General": "一般",
     "General Settings": "一般設定",
+    "Generate": "生成",
     "Generate and manage your API access token": "API アクセス トークンを生成および管理",
     "Generate Lyrics": "歌詞を生成",
     "Generate Music": "音楽を生成",
@@ -4660,6 +4663,7 @@
     "The model you're looking for doesn't exist.": "お探しのモデルは存在しません。",
     "The name displayed across the application": "アプリケーション全体に表示される名前",
     "The new token will only be shown once. Copy it and store it securely.": "新しいトークンは一度だけ表示されます。コピーして安全に保管してください。",
+    "The payment amount is approximate. Payment provider fees are not included.": "お支払い金額は概算です。決済サービスの手数料は含まれていません。",
     "The public URL of your server, used for OAuth callbacks, webhooks, and other external integrations": "OAuthコールバック、Webhook、その他の外部統合に使用されるサーバーの公開URL",
     "The requested chat preset does not exist or has been removed.": "要求されたチャットプリセットは存在しないか、削除されました。",
     "The reset request stays disabled until a credit is available.": "リセット回数が利用可能になるまで、リセット要求は無効です。",
@@ -5408,7 +5412,6 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム",
-    "The payment amount is approximate. Payment provider fees are not included.": "お支払い金額は概算です。決済サービスの手数料は含まれていません。"
+    "Zoom": "ズーム"
   }
 }

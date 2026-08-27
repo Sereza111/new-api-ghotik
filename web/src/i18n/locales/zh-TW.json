@@ -1397,6 +1397,7 @@
     "Deployments": "部署",
     "Desc": "降序",
     "Describe": "圖生文",
+    "Describe the image you want to create": "描述您想要生成的圖片",
     "Describe this model...": "描述此模型...",
     "Describe this vendor...": "描述此供應商...",
     "Description": "說明資訊",
@@ -1497,6 +1498,7 @@
     "Downgrade to pre-purchase group": "降級到購買前分組",
     "Downgrade to this group after the subscription expires": "訂閱過期後降級到該分組",
     "Download": "下載",
+    "Download image": "下載圖片",
     "Drag {{group}} to reorder": "拖曳 {{group}} 以重新排序",
     "Draw": "繪圖",
     "Drawing": "繪圖",
@@ -2152,13 +2154,14 @@
     "Gemini will continue to auto-detect thinking mode even with the adapter disabled. Enable this only when you need finer control over pricing and budgeting.": "即使停用配接器，Gemini 也會繼續自動偵測思考模式。僅當您需要對定價和預算進行更精細的控制時才啟用此選項。",
     "General": "常規",
     "General Settings": "通用設定",
+    "Generate": "生成",
     "Generate and manage your API access token": "生成和管理您的 API 存取令牌",
     "Generate Lyrics": "生成歌詞",
     "Generate Music": "生成音樂",
     "Generate new backup codes for account recovery": "生成新的備份代碼用於用戶恢復",
     "Generate New Codes": "生成新代碼",
     "Generate tokens from the Tokens page; you can scope them to specific models, groups, IPs, and rate-limits.": "在「令牌」頁面生成 API Key，可以按模型、分組、IP、速率等維度精細化授權。",
-    "Generated image": "生成的圖像",
+    "Generated image": "生成的圖片",
     "Generating new codes will invalidate all existing backup codes.": "生成新代碼將使所有現有備份代碼失效。",
     "Generating...": "生成中...",
     "Generation quality preset": "生成品質預設",
@@ -4660,6 +4663,7 @@
     "The model you're looking for doesn't exist.": "您查找的模型不存在。",
     "The name displayed across the application": "在整個套用程式中顯示的名稱",
     "The new token will only be shown once. Copy it and store it securely.": "新令牌僅顯示一次。請複製並妥善保存。",
+    "The payment amount is approximate. Payment provider fees are not included.": "付款金額為預估金額，不包含支付服務商收取的手續費。",
     "The public URL of your server, used for OAuth callbacks, webhooks, and other external integrations": "伺服器的公開URL，用於OAuthCallback、Webhook和其他外部整合",
     "The requested chat preset does not exist or has been removed.": "請求的聊天預設不存在或已被刪除。",
     "The reset request stays disabled until a credit is available.": "沒有可用次數時，重置請求會保持停用。",
@@ -5408,7 +5412,6 @@
     "Zero retention": "零數據保留",
     "Zhipu": "智譜",
     "Zhipu V4": "智譜 V4",
-    "Zoom": "縮放",
-    "The payment amount is approximate. Payment provider fees are not included.": "付款金額為預估金額，不包含支付服務商收取的手續費。"
+    "Zoom": "縮放"
   }
 }

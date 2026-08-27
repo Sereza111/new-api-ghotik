@@ -24,6 +24,7 @@ import {
   usePlaygroundOptions,
   usePlaygroundState,
 } from './hooks'
+import { isImageGenerationModel } from './lib'
 
 export function Playground() {
   const {
@@ -40,6 +41,7 @@ export function Playground() {
     updateParameterEnabled,
     clearMessages,
   } = usePlaygroundState()
+  const isImageMode = isImageGenerationModel(config.model)
 
   const { sendChat, stopGeneration, isGenerating } = useChatHandler({
     config,
@@ -101,6 +103,7 @@ export function Playground() {
           groups={groups}
           groupValue={config.group}
           isGenerating={isGenerating}
+          isImageMode={isImageMode}
           isModelLoading={isLoadingModels}
           modelValue={config.model}
           models={models}

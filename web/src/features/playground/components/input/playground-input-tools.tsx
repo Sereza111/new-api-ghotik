@@ -50,6 +50,7 @@ type PlaygroundInputToolsProps = {
   config: PlaygroundConfig
   disabled?: boolean
   hasMessages?: boolean
+  isImageMode?: boolean
   onClearMessages?: () => void
   onConfigChange: <K extends keyof PlaygroundConfig>(
     key: K,
@@ -66,6 +67,7 @@ export function PlaygroundInputTools({
   config,
   disabled,
   hasMessages = false,
+  isImageMode = false,
   onClearMessages,
   onConfigChange,
   onParameterEnabledChange,
@@ -149,13 +151,15 @@ export function PlaygroundInputTools({
           </TooltipContent>
         </Tooltip>
 
-        <PlaygroundParameterPanel
-          config={config}
-          disabled={disabled}
-          onConfigChange={onConfigChange}
-          onParameterEnabledChange={onParameterEnabledChange}
-          parameterEnabled={parameterEnabled}
-        />
+        {!isImageMode && (
+          <PlaygroundParameterPanel
+            config={config}
+            disabled={disabled}
+            onConfigChange={onConfigChange}
+            onParameterEnabledChange={onParameterEnabledChange}
+            parameterEnabled={parameterEnabled}
+          />
+        )}
 
         <Tooltip>
           <TooltipTrigger

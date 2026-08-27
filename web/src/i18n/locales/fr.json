@@ -1397,6 +1397,7 @@
     "Deployments": "Déploiements",
     "Desc": "Desc.",
     "Describe": "Décrire",
+    "Describe the image you want to create": "Décrivez l’image que vous souhaitez créer",
     "Describe this model...": "Décrire ce modèle...",
     "Describe this vendor...": "Décrire ce fournisseur...",
     "Description": "Description",
@@ -1497,6 +1498,7 @@
     "Downgrade to pre-purchase group": "Rétrograder vers le groupe d'avant l'achat",
     "Downgrade to this group after the subscription expires": "Rétrograder vers ce groupe après l'expiration de l'abonnement",
     "Download": "Télécharger",
+    "Download image": "Télécharger l’image",
     "Drag {{group}} to reorder": "Faites glisser {{group}} pour réorganiser",
     "Draw": "Dessin",
     "Drawing": "Dessin",
@@ -2152,6 +2154,7 @@
     "Gemini will continue to auto-detect thinking mode even with the adapter disabled. Enable this only when you need finer control over pricing and budgeting.": "Gemini continuera à détecter automatiquement le mode de pensée même avec l'adaptateur désactivé. Activez ceci uniquement lorsque vous avez besoin d'un contrôle plus fin sur la tarification et le budget.",
     "General": "Général",
     "General Settings": "Paramètres généraux",
+    "Generate": "Générer",
     "Generate and manage your API access token": "Générer et gérer votre jeton d'accès API",
     "Generate Lyrics": "Générer des paroles",
     "Generate Music": "Générer de la musique",
@@ -4660,6 +4663,7 @@
     "The model you're looking for doesn't exist.": "Le modèle que vous recherchez n'existe pas.",
     "The name displayed across the application": "Le nom affiché dans l'application",
     "The new token will only be shown once. Copy it and store it securely.": "Le nouveau jeton ne sera affiché qu’une seule fois. Copiez-le et conservez-le en lieu sûr.",
+    "The payment amount is approximate. Payment provider fees are not included.": "Le montant à payer est approximatif. Les frais du prestataire de paiement ne sont pas inclus.",
     "The public URL of your server, used for OAuth callbacks, webhooks, and other external integrations": "L'URL publique de votre serveur, utilisée pour les rappels OAuth, les webhooks et autres intégrations externes",
     "The requested chat preset does not exist or has been removed.": "Le préréglage de discussion demandé n'existe pas ou a été supprimé.",
     "The reset request stays disabled until a credit is available.": "La demande de réinitialisation reste désactivée tant qu’aucun crédit n’est disponible.",
@@ -5408,7 +5412,6 @@
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom",
-    "The payment amount is approximate. Payment provider fees are not included.": "Le montant à payer est approximatif. Les frais du prestataire de paiement ne sont pas inclus."
+    "Zoom": "Zoom"
   }
 }

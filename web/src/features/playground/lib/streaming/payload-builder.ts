@@ -18,11 +18,49 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type {
   ChatCompletionRequest,
+  ImageGenerationRequest,
   Message,
   PlaygroundConfig,
   ParameterEnabled,
 } from '../../types'
-import { formatMessageForAPI, isValidMessage } from '../message/message-utils'
+import {
+  formatMessageForAPI,
+  getMessageContent,
+  isValidMessage,
+} from '../message/message-utils'
+
+const IMAGE_MODEL_PATTERNS = [
+  /^gpt-image-/i,
+  /^chatgpt-image-/i,
+  /^dall-e(?:-|$)/i,
+]
+
+export function isImageGenerationModel(model: string): boolean {
+  return IMAGE_MODEL_PATTERNS.some((pattern) => pattern.test(model.trim()))
+}
+
+export function buildImageGenerationPayload(
+  messages: Message[],
+  config: PlaygroundConfig
+): ImageGenerationRequest {
+  let prompt = ''
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (message.from === 'user' && isValidMessage(message)) {
+      prompt = getMessageContent(message)
+      break
+    }
+  }
+
+  return {
+    model: config.model,
+    group: config.group,
+    prompt,
+    n: 1,
+    quality: 'medium',
+    size: '1024x1024',
+  }
+}
 
 /**
  * Build API request payload from messages and config

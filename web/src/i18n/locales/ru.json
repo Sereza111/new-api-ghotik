@@ -1397,6 +1397,7 @@
     "Deployments": "Развертывания",
     "Desc": "По убыванию",
     "Describe": "Описание",
+    "Describe the image you want to create": "Опишите изображение, которое хотите создать",
     "Describe this model...": "Опишите эту модель...",
     "Describe this vendor...": "Опишите этого поставщика...",
     "Description": "Описание",
@@ -1497,6 +1498,7 @@
     "Downgrade to pre-purchase group": "Понизить до группы до покупки",
     "Downgrade to this group after the subscription expires": "Понизить до этой группы после истечения подписки",
     "Download": "Скачать",
+    "Download image": "Скачать изображение",
     "Drag {{group}} to reorder": "Перетащите {{group}}, чтобы изменить порядок",
     "Draw": "Рисование",
     "Drawing": "Рисование",
@@ -2152,13 +2154,14 @@
     "Gemini will continue to auto-detect thinking mode even with the adapter disabled. Enable this only when you need finer control over pricing and budgeting.": "Gemini продолжит автоматически определять режим мышления, даже если адаптер отключен. Включайте это только тогда, когда вам нужен более тонкий контроль над ценообразованием и бюджетированием.",
     "General": "Общие",
     "General Settings": "Общие настройки",
+    "Generate": "Создать",
     "Generate and manage your API access token": "Генерировать и управлять вашим токеном доступа API",
     "Generate Lyrics": "Создать текст песни",
     "Generate Music": "Создать музыку",
     "Generate new backup codes for account recovery": "Сгенерировать новые резервные коды для восстановления аккаунта",
     "Generate New Codes": "Сгенерировать новые коды",
     "Generate tokens from the Tokens page; you can scope them to specific models, groups, IPs, and rate-limits.": "Создавайте токены на странице «Токены». Их можно ограничить моделями, группами, IP и лимитами частоты.",
-    "Generated image": "Сгенерированное изображение",
+    "Generated image": "Созданное изображение",
     "Generating new codes will invalidate all existing backup codes.": "Генерация новых кодов аннулирует все существующие резервные коды.",
     "Generating...": "Создание...",
     "Generation quality preset": "Пресет качества генерации",
@@ -4660,6 +4663,7 @@
     "The model you're looking for doesn't exist.": "Модель, которую вы ищете, не существует.",
     "The name displayed across the application": "Имя, отображаемое в приложении",
     "The new token will only be shown once. Copy it and store it securely.": "Новый токен будет показан только один раз. Скопируйте его и сохраните в безопасном месте.",
+    "The payment amount is approximate. Payment provider fees are not included.": "Сумма к оплате рассчитана приблизительно. Комиссия платёжного сервиса не включена.",
     "The public URL of your server, used for OAuth callbacks, webhooks, and other external integrations": "Публичный URL вашего сервера, используемый для OAuth-перенаправлений, вебхуков и других внешних интеграций",
     "The requested chat preset does not exist or has been removed.": "Запрошенный предустановленный чат не существует или был удален.",
     "The reset request stays disabled until a credit is available.": "Запрос сброса недоступен, пока нет доступного сброса.",
@@ -5408,7 +5412,6 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom",
-    "The payment amount is approximate. Payment provider fees are not included.": "Сумма к оплате рассчитана приблизительно. Комиссия платёжного сервиса не включена."
+    "Zoom": "Zoom"
   }
 }
