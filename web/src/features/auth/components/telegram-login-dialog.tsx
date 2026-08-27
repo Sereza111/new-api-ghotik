@@ -30,64 +30,51 @@ type TelegramLoginDialogProps = {
   onAuthorization: (authorization: unknown) => void
 }
 
-let telegramCallbackSequence = 0
-
 export function TelegramLoginDialog(props: TelegramLoginDialogProps) {
   const { t } = useTranslation()
-  const widgetShell = useRef<HTMLDivElement | null>(null)
-  const widgetContainer = useRef<HTMLDivElement | null>(null)
-  const loadingIndicator = useRef<HTMLDivElement | null>(null)
-  const errorMessage = useRef<HTMLParagraphElement | null>(null)
+  const widgetFrame = useRef<HTMLIFrameElement | null>(null)
   const authorizationHandler = useRef(props.onAuthorization)
-  const [callbackName] = useState(
-    () => `newApiTelegramLogin${++telegramCallbackSequence}`
-  )
+  const [widgetState, setWidgetState] = useState<
+    'loading' | 'ready' | 'failed'
+  >('loading')
+  const botName = props.botName.trim().replace(/^@/, '')
+  const widgetUrl =
+    props.open && botName
+      ? `https://oauth.telegram.org/embed/${encodeURIComponent(botName)}?origin=${encodeURIComponent(window.location.origin)}&return_to=${encodeURIComponent(window.location.href)}&size=large&radius=8&request_access=write`
+      : ''
 
   useEffect(() => {
     authorizationHandler.current = props.onAuthorization
   }, [props.onAuthorization])
 
   useEffect(() => {
-    const container = widgetContainer.current
-    const botName = props.botName.trim().replace(/^@/, '')
-    if (!props.open || !container || !botName) return
+    if (!widgetUrl) return
+    setWidgetState('loading')
 
-    widgetShell.current?.setAttribute('aria-busy', 'true')
-    loadingIndicator.current?.classList.remove('hidden')
-    errorMessage.current?.classList.add('hidden')
-    const callback = (authorization: unknown) => {
-      authorizationHandler.current(authorization)
-    }
-    const browserWindow = window as unknown as Record<string, unknown>
-    browserWindow[callbackName] = callback
+    const handleTelegramMessage = (event: MessageEvent<unknown>) => {
+      if (
+        !['https://oauth.telegram.org', 'null'].includes(event.origin) ||
+        event.source !== widgetFrame.current?.contentWindow
+      ) {
+        return
+      }
 
-    const script = document.createElement('script')
-    script.async = true
-    script.src = 'https://telegram.org/js/telegram-widget.js?22'
-    script.dataset.telegramLogin = botName
-    script.dataset.size = 'large'
-    script.dataset.radius = '8'
-    script.dataset.onauth = `${callbackName}(user)`
-    const handleLoad = () => {
-      widgetShell.current?.setAttribute('aria-busy', 'false')
-      loadingIndicator.current?.classList.add('hidden')
+      let data: { event?: string; auth_data?: unknown } | null = null
+      try {
+        data = (
+          typeof event.data === 'string' ? JSON.parse(event.data) : event.data
+        ) as { event?: string; auth_data?: unknown } | null
+      } catch {
+        return
+      }
+      if (data?.event === 'auth_user' && data.auth_data) {
+        authorizationHandler.current(data.auth_data)
+      }
     }
-    const handleError = () => {
-      widgetShell.current?.setAttribute('aria-busy', 'false')
-      loadingIndicator.current?.classList.add('hidden')
-      errorMessage.current?.classList.remove('hidden')
-    }
-    script.addEventListener('load', handleLoad)
-    script.addEventListener('error', handleError)
-    container.replaceChildren(script)
 
-    return () => {
-      script.removeEventListener('load', handleLoad)
-      script.removeEventListener('error', handleError)
-      container.replaceChildren()
-      delete browserWindow[callbackName]
-    }
-  }, [callbackName, props.botName, props.open])
+    window.addEventListener('message', handleTelegramMessage)
+    return () => window.removeEventListener('message', handleTelegramMessage)
+  }, [widgetUrl])
 
   return (
     <Dialog
@@ -100,17 +87,25 @@ export function TelegramLoginDialog(props: TelegramLoginDialogProps) {
       bodyClassName='space-y-4'
     >
       <div
-        ref={widgetShell}
         className='flex min-h-12 items-center justify-center'
-        aria-busy={props.pending}
+        aria-busy={props.pending || widgetState === 'loading'}
       >
-        <div ref={loadingIndicator} className='hidden'>
-          <Spinner />
-        </div>
-        <p ref={errorMessage} className='text-destructive hidden text-sm'>
-          {t('Login failed')}
-        </p>
-        <div ref={widgetContainer} />
+        {widgetState === 'loading' && <Spinner />}
+        {widgetState === 'failed' && (
+          <p className='text-destructive text-sm'>{t('Login failed')}</p>
+        )}
+        {widgetUrl && (
+          <iframe
+            ref={widgetFrame}
+            src={widgetUrl}
+            title={t('Telegram Login Widget')}
+            className={widgetState === 'ready' ? 'h-10 w-[238px]' : 'hidden'}
+            scrolling='no'
+            sandbox='allow-forms allow-popups allow-popups-to-escape-sandbox allow-scripts'
+            onLoad={() => setWidgetState('ready')}
+            onError={() => setWidgetState('failed')}
+          />
+        )}
       </div>
     </Dialog>
   )
