@@ -291,11 +291,22 @@ func SendEmailVerification(c *gin.Context) {
 	}
 	code := common.GenerateVerificationCode(6)
 	common.RegisterVerificationCodeWithKey(email, code, common.EmailVerificationPurpose)
-	subject := fmt.Sprintf("%s邮箱验证邮件", common.SystemName)
-	content := fmt.Sprintf("<p>您好，你正在进行%s邮箱验证。</p>"+
-		"<p>您的验证码为: <strong>%s</strong></p>"+
-		"<p>验证码 %d 分钟内有效，如果不是本人操作，请忽略。</p>", common.SystemName, code, common.VerificationValidMinutes)
-	err := common.SendEmail(subject, email, content)
+	subject := fmt.Sprintf("Код подтверждения — %s", common.SystemName)
+	content, err := renderAuthEmail(authEmailData{
+		SystemName:   common.SystemName,
+		PreviewText:  fmt.Sprintf("Код подтверждения для %s: %s", common.SystemName, code),
+		Eyebrow:      "Подтверждение почты",
+		Title:        "Подтвердите адрес электронной почты",
+		Description:  fmt.Sprintf("Введите этот код на странице регистрации, чтобы завершить создание аккаунта в %s.", common.SystemName),
+		Code:         code,
+		ValidMinutes: common.VerificationValidMinutes,
+		ServerURL:    system_setting.ServerAddress,
+	})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	err = common.SendEmail(subject, email, content)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -317,12 +328,22 @@ func SendPasswordResetEmail(c *gin.Context) {
 		code := common.GenerateVerificationCode(0)
 		common.RegisterVerificationCodeWithKey(email, code, common.PasswordResetPurpose)
 		link := fmt.Sprintf("%s/user/reset?email=%s&token=%s", system_setting.ServerAddress, email, code)
-		subject := fmt.Sprintf("%s密码重置", common.SystemName)
-		content := fmt.Sprintf("<p>您好，你正在进行%s密码重置。</p>"+
-			"<p>点击 <a href='%s'>此处</a> 进行密码重置。</p>"+
-			"<p>如果链接无法点击，请尝试点击下面的链接或将其复制到浏览器中打开：<br> %s </p>"+
-			"<p>重置链接 %d 分钟内有效，如果不是本人操作，请忽略。</p>", common.SystemName, link, link, common.VerificationValidMinutes)
-		err := common.SendEmail(subject, email, content)
+		subject := fmt.Sprintf("Сброс пароля — %s", common.SystemName)
+		content, err := renderAuthEmail(authEmailData{
+			SystemName:   common.SystemName,
+			PreviewText:  fmt.Sprintf("Запрос на сброс пароля в %s", common.SystemName),
+			Eyebrow:      "Безопасность аккаунта",
+			Title:        "Сброс пароля",
+			Description:  fmt.Sprintf("Мы получили запрос на смену пароля аккаунта в %s.", common.SystemName),
+			ActionURL:    link,
+			ActionLabel:  "Сменить пароль",
+			FallbackText: "Если кнопка не открывается, скопируйте эту ссылку в браузер:",
+			ValidMinutes: common.VerificationValidMinutes,
+			ServerURL:    system_setting.ServerAddress,
+		})
+		if err == nil {
+			err = common.SendEmail(subject, email, content)
+		}
 		if err != nil {
 			logger.LogError(c.Request.Context(), fmt.Sprintf("failed to send password reset email to %s: %s", email, err.Error()))
 		}
