@@ -42,6 +42,11 @@ type telegramChatMember struct {
 	IsMember bool   `json:"is_member"`
 }
 
+type telegramBotCommand struct {
+	Command     string `json:"command"`
+	Description string `json:"description"`
+}
+
 func NormalizeTelegramChannel(raw string) (string, string, error) {
 	trimmed := strings.TrimSpace(raw)
 	trimmed = strings.TrimSuffix(trimmed, "/")
@@ -115,11 +120,20 @@ func ConfigureTelegramChannelBonusWebhook(ctx context.Context) error {
 	if _, _, err := NormalizeTelegramChannel(setting.TelegramChannelBonusChannel); err != nil {
 		return err
 	}
+	commands := []telegramBotCommand{
+		{Command: "start", Description: "Главное меню"},
+		{Command: "profile", Description: "Мой профиль и баланс"},
+		{Command: "bonus", Description: "Бонус за подписку"},
+		{Command: "help", Description: "Помощь"},
+	}
+	if _, err := callTelegramBotAPI[bool](ctx, token, "setMyCommands", map[string]any{"commands": commands}); err != nil {
+		return err
+	}
 
 	payload := map[string]any{
 		"url":             serverAddress + "/api/telegram/channel-bonus/webhook",
 		"secret_token":    TelegramChannelBonusWebhookSecret(token),
-		"allowed_updates": []string{"message", "callback_query"},
+		"allowed_updates": []string{"message", "callback_query", "chat_member"},
 	}
 	_, err = callTelegramBotAPI[bool](ctx, token, "setWebhook", payload)
 	return err
@@ -141,8 +155,10 @@ func TelegramSendMessage(ctx context.Context, chatId int64, text string, buttons
 func TelegramAnswerCallback(ctx context.Context, callbackId string, text string, showAlert bool) error {
 	payload := map[string]any{
 		"callback_query_id": callbackId,
-		"text":              text,
 		"show_alert":        showAlert,
+	}
+	if text != "" {
+		payload["text"] = text
 	}
 	_, err := callTelegramBotAPI[bool](ctx, common.TelegramBotToken, "answerCallbackQuery", payload)
 	return err
@@ -160,10 +176,10 @@ func TelegramIsChannelMember(ctx context.Context, channel string, telegramId int
 	if err != nil {
 		return false, err
 	}
-	return telegramChannelMemberStatusIsActive(member.Status, member.IsMember), nil
+	return TelegramChannelMemberStatusIsActive(member.Status, member.IsMember), nil
 }
 
-func telegramChannelMemberStatusIsActive(status string, isMember bool) bool {
+func TelegramChannelMemberStatusIsActive(status string, isMember bool) bool {
 	switch status {
 	case "creator", "administrator", "member":
 		return true

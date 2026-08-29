@@ -34,6 +34,6 @@ func TestTelegramChannelMemberStatusIsActive(t *testing.T) {
 		{status: "kicked", want: false},
 	}
 	for _, test := range tests {
-		assert.Equal(t, test.want, telegramChannelMemberStatusIsActive(test.status, test.isMember))
+		assert.Equal(t, test.want, TelegramChannelMemberStatusIsActive(test.status, test.isMember))
 	}
 }

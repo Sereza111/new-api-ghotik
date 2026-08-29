@@ -22,12 +22,20 @@ import (
 
 const telegramChannelBonusCallback = "claim_channel_bonus"
 
+const (
+	telegramProfileCallback       = "show_profile"
+	telegramBonusMenuCallback     = "show_channel_bonus"
+	telegramMainMenuCallback      = "show_main_menu"
+	telegramBonusRevocationWindow = 30 * 24 * time.Hour
+)
+
 type telegramBonusUser struct {
 	Id int64 `json:"id"`
 }
 
 type telegramBonusChat struct {
-	Id int64 `json:"id"`
+	Id       int64  `json:"id"`
+	Username string `json:"username"`
 }
 
 type telegramBonusMessage struct {
@@ -43,9 +51,23 @@ type telegramBonusCallbackQuery struct {
 	Message *telegramBonusMessage `json:"message"`
 }
 
+type telegramBonusChatMember struct {
+	Status   string            `json:"status"`
+	IsMember bool              `json:"is_member"`
+	User     telegramBonusUser `json:"user"`
+}
+
+type telegramBonusChatMemberUpdated struct {
+	Chat          telegramBonusChat       `json:"chat"`
+	Date          int64                   `json:"date"`
+	OldChatMember telegramBonusChatMember `json:"old_chat_member"`
+	NewChatMember telegramBonusChatMember `json:"new_chat_member"`
+}
+
 type telegramBonusUpdate struct {
-	Message       *telegramBonusMessage       `json:"message"`
-	CallbackQuery *telegramBonusCallbackQuery `json:"callback_query"`
+	Message       *telegramBonusMessage           `json:"message"`
+	CallbackQuery *telegramBonusCallbackQuery     `json:"callback_query"`
+	ChatMember    *telegramBonusChatMemberUpdated `json:"chat_member"`
 }
 
 func ConfigureTelegramChannelBonusWebhook(c *gin.Context) {
@@ -88,6 +110,10 @@ func TelegramChannelBonusWebhook(c *gin.Context) {
 	}
 	if update.Message != nil {
 		handleTelegramChannelBonusMessage(c.Request.Context(), update.Message)
+		return
+	}
+	if update.ChatMember != nil {
+		handleTelegramChannelMemberUpdate(c.Request.Context(), update.ChatMember)
 	}
 }
 
@@ -101,23 +127,51 @@ func handleTelegramChannelBonusMessage(ctx context.Context, message *telegramBon
 	}
 	command := strings.ToLower(fields[0])
 	command = strings.SplitN(command, "@", 2)[0]
-	if command != "/start" && command != "/bonus" {
-		return
+	switch command {
+	case "/start":
+		if !telegramUserIsLinked(message.From.Id) {
+			sendTelegramAccountBindingPrompt(ctx, message.Chat.Id)
+			return
+		}
+		sendTelegramMainMenu(ctx, message.Chat.Id)
+	case "/profile":
+		sendTelegramProfile(ctx, message.Chat.Id, message.From.Id)
+	case "/bonus":
+		if !telegramUserIsLinked(message.From.Id) {
+			sendTelegramAccountBindingPrompt(ctx, message.Chat.Id)
+			return
+		}
+		sendTelegramChannelBonusPrompt(ctx, message.Chat.Id)
+	case "/help":
+		sendTelegramHelp(ctx, message.Chat.Id)
 	}
-
-	user := &model.User{TelegramId: strconv.FormatInt(message.From.Id, 10)}
-	if err := user.FillUserByTelegramId(); err != nil || user.Status != common.UserStatusEnabled {
-		sendTelegramAccountBindingPrompt(ctx, message.Chat.Id)
-		return
-	}
-	sendTelegramChannelBonusPrompt(ctx, message.Chat.Id)
 }
 
 func handleTelegramChannelBonusCallback(ctx context.Context, callback *telegramBonusCallbackQuery) {
-	if callback.Data != telegramChannelBonusCallback || callback.Id == "" || callback.Message == nil {
+	if callback.Id == "" || callback.Message == nil {
 		return
 	}
 
+	switch callback.Data {
+	case telegramChannelBonusCallback:
+		handleTelegramChannelBonusClaim(ctx, callback)
+	case telegramProfileCallback:
+		_ = service.TelegramAnswerCallback(ctx, callback.Id, "", false)
+		sendTelegramProfile(ctx, callback.Message.Chat.Id, callback.From.Id)
+	case telegramBonusMenuCallback:
+		_ = service.TelegramAnswerCallback(ctx, callback.Id, "", false)
+		if !telegramUserIsLinked(callback.From.Id) {
+			sendTelegramAccountBindingPrompt(ctx, callback.Message.Chat.Id)
+			return
+		}
+		sendTelegramChannelBonusPrompt(ctx, callback.Message.Chat.Id)
+	case telegramMainMenuCallback:
+		_ = service.TelegramAnswerCallback(ctx, callback.Id, "", false)
+		sendTelegramMainMenu(ctx, callback.Message.Chat.Id)
+	}
+}
+
+func handleTelegramChannelBonusClaim(ctx context.Context, callback *telegramBonusCallbackQuery) {
 	isMember, err := service.TelegramIsChannelMember(ctx, setting.TelegramChannelBonusChannel, callback.From.Id)
 	if err != nil {
 		common.SysError("Telegram channel membership check failed: " + err.Error())
@@ -130,9 +184,15 @@ func handleTelegramChannelBonusCallback(ctx context.Context, callback *telegramB
 	}
 
 	quota := common.QuotaFromFloat(setting.TelegramChannelBonusAmountUSD * common.QuotaPerUnit)
+	channel, _, err := service.NormalizeTelegramChannel(setting.TelegramChannelBonusChannel)
+	if err != nil {
+		common.SysError("Telegram channel bonus configuration is invalid: " + err.Error())
+		_ = service.TelegramAnswerCallback(ctx, callback.Id, "Настройка канала временно недоступна.", true)
+		return
+	}
 	bonus, err := model.ClaimTelegramChannelBonus(
 		strconv.FormatInt(callback.From.Id, 10),
-		setting.TelegramChannelBonusChannel,
+		channel,
 		quota,
 	)
 	if err != nil {
@@ -155,7 +215,153 @@ func handleTelegramChannelBonusCallback(ctx context.Context, callback *telegramB
 	model.RecordLog(bonus.UserId, model.LogTypeTopup, fmt.Sprintf("Бонус %s за подписку на Telegram-канал %s", logger.LogQuota(bonus.QuotaAwarded), bonus.Channel))
 	_ = service.TelegramAnswerCallback(ctx, callback.Id, "Готово! Бонус "+reward+" начислен на баланс.", true)
 	_ = service.TelegramSendMessage(ctx, callback.Message.Chat.Id,
-		"<b>Бонус начислен</b>\n\nНа баланс вашего аккаунта New API добавлено <b>"+reward+"</b>.", nil)
+		"🖤 <b>Бонус начислен</b>\n\nНа баланс вашего аккаунта New API добавлено <b>"+reward+"</b>. Сохраните подписку на канал минимум на 30 дней.", telegramBackToMenuButtons())
+}
+
+func handleTelegramChannelMemberUpdate(ctx context.Context, update *telegramBonusChatMemberUpdated) {
+	telegramID, eventTime, ok := telegramChannelMemberDeparture(update, setting.TelegramChannelBonusChannel)
+	if !ok {
+		return
+	}
+
+	channel, _, err := service.NormalizeTelegramChannel(setting.TelegramChannelBonusChannel)
+	if err != nil {
+		common.SysError("Telegram channel bonus configuration is invalid: " + err.Error())
+		return
+	}
+	bonus, revoked, err := model.RevokeTelegramChannelBonus(
+		strconv.FormatInt(telegramID, 10),
+		channel,
+		eventTime,
+		telegramBonusRevocationWindow,
+	)
+	if err != nil {
+		common.SysError("Telegram channel bonus revocation failed: " + err.Error())
+		return
+	}
+	if !revoked {
+		return
+	}
+
+	reward := telegramQuotaUSD(bonus.QuotaAwarded)
+	model.RecordLog(bonus.UserId, model.LogTypeTopup, fmt.Sprintf("Списание %s: отписка от Telegram-канала %s в течение 30 дней", logger.LogQuota(bonus.QuotaAwarded), bonus.Channel))
+	text := "🖤 <b>Бонус отозван</b>\n\nВы отписались от канала раньше чем через 30 дней, поэтому <b>" + reward + "</b> списано с баланса. Повторно получить этот бонус нельзя."
+	if err := service.TelegramSendMessage(ctx, telegramID, text, telegramBackToMenuButtons()); err != nil {
+		common.SysError("Telegram channel bonus revocation notice failed: " + err.Error())
+	}
+}
+
+func telegramChannelMemberDeparture(update *telegramBonusChatMemberUpdated, configuredChannel string) (int64, time.Time, bool) {
+	if update == nil || update.Date <= 0 {
+		return 0, time.Time{}, false
+	}
+	channel, _, err := service.NormalizeTelegramChannel(configuredChannel)
+	if err != nil || !strings.EqualFold(channel, "@"+strings.TrimPrefix(update.Chat.Username, "@")) {
+		return 0, time.Time{}, false
+	}
+	if !service.TelegramChannelMemberStatusIsActive(update.OldChatMember.Status, update.OldChatMember.IsMember) ||
+		service.TelegramChannelMemberStatusIsActive(update.NewChatMember.Status, update.NewChatMember.IsMember) {
+		return 0, time.Time{}, false
+	}
+	telegramID := update.NewChatMember.User.Id
+	if telegramID == 0 {
+		telegramID = update.OldChatMember.User.Id
+	}
+	if telegramID == 0 {
+		return 0, time.Time{}, false
+	}
+	return telegramID, time.Unix(update.Date, 0), true
+}
+
+func telegramUserIsLinked(telegramID int64) bool {
+	user := &model.User{TelegramId: strconv.FormatInt(telegramID, 10)}
+	return user.FillUserByTelegramId() == nil && user.Status == common.UserStatusEnabled
+}
+
+func sendTelegramMainMenu(ctx context.Context, chatId int64) {
+	serverAddress := strings.TrimRight(system_setting.ServerAddress, "/")
+	text := "🖤 <b>VL API</b>\n\nЕдиный доступ к моделям ИИ через один API-ключ. Управляйте балансом, ключами и расходами в личном кабинете.\n\nВыберите нужный раздел:"
+	buttons := [][]service.TelegramInlineButton{
+		{{Text: "Профиль", CallbackData: telegramProfileCallback}, {Text: "Бонус", CallbackData: telegramBonusMenuCallback}},
+		{{Text: "Открыть панель", URL: serverAddress}, {Text: "Документация", URL: serverAddress + "/docs"}},
+	}
+	if err := service.TelegramSendMessage(ctx, chatId, text, buttons); err != nil {
+		common.SysError("Telegram main menu failed: " + err.Error())
+	}
+}
+
+func sendTelegramProfile(ctx context.Context, chatId int64, telegramID int64) {
+	user := &model.User{TelegramId: strconv.FormatInt(telegramID, 10)}
+	if err := user.FillUserByTelegramId(); err != nil || user.Status != common.UserStatusEnabled {
+		sendTelegramAccountBindingPrompt(ctx, chatId)
+		return
+	}
+
+	bonusStatus := "доступен после подписки"
+	bonus, err := model.GetTelegramChannelBonusByTelegramId(user.TelegramId)
+	if err != nil {
+		common.SysError("Telegram profile bonus lookup failed: " + err.Error())
+	} else if bonus != nil {
+		bonusStatus = telegramBonusStatus(bonus, time.Now())
+	}
+	name := user.DisplayName
+	if strings.TrimSpace(name) == "" {
+		name = user.Username
+	}
+	text := "🖤 <b>Ваш профиль</b>\n\n" +
+		"<b>Имя:</b> " + html.EscapeString(name) + "\n" +
+		"<b>ID аккаунта:</b> <code>" + strconv.Itoa(user.Id) + "</code>\n" +
+		"<b>Баланс:</b> " + telegramQuotaUSD(user.Quota) + "\n" +
+		"<b>Использовано:</b> " + telegramQuotaUSD(user.UsedQuota) + "\n" +
+		"<b>Запросов:</b> " + strconv.Itoa(user.RequestCount) + "\n" +
+		"<b>Бонус канала:</b> " + bonusStatus
+	serverAddress := strings.TrimRight(system_setting.ServerAddress, "/")
+	buttons := [][]service.TelegramInlineButton{
+		{{Text: "Пополнить баланс", URL: serverAddress + "/wallet"}, {Text: "API-ключи", URL: serverAddress + "/keys"}},
+		{{Text: "Проверить бонус", CallbackData: telegramBonusMenuCallback}},
+		{{Text: "Главное меню", CallbackData: telegramMainMenuCallback}},
+	}
+	if err := service.TelegramSendMessage(ctx, chatId, text, buttons); err != nil {
+		common.SysError("Telegram profile failed: " + err.Error())
+	}
+}
+
+func telegramBonusStatus(bonus *model.TelegramChannelBonus, now time.Time) string {
+	if bonus == nil {
+		return "доступен после подписки"
+	}
+	if bonus.RevokedAt > 0 {
+		return "отозван"
+	}
+	retentionEndsAt := time.Unix(bonus.CreatedAt, 0).Add(telegramBonusRevocationWindow)
+	if !now.Before(retentionEndsAt) {
+		return "закреплён"
+	}
+	secondsRemaining := int64(retentionEndsAt.Sub(now) / time.Second)
+	daysRemaining := (secondsRemaining + int64(24*time.Hour/time.Second) - 1) / int64(24*time.Hour/time.Second)
+	return fmt.Sprintf("начислен · осталось %d дн.", daysRemaining)
+}
+
+func telegramQuotaUSD(quota int) string {
+	if common.QuotaPerUnit <= 0 {
+		return "—"
+	}
+	return fmt.Sprintf("$%.2f", float64(quota)/common.QuotaPerUnit)
+}
+
+func sendTelegramHelp(ctx context.Context, chatId int64) {
+	text := "🖤 <b>Помощь</b>\n\n" +
+		"/start — главное меню\n" +
+		"/profile — профиль и баланс\n" +
+		"/bonus — бонус за подписку\n" +
+		"/help — список команд"
+	if err := service.TelegramSendMessage(ctx, chatId, text, telegramBackToMenuButtons()); err != nil {
+		common.SysError("Telegram help failed: " + err.Error())
+	}
+}
+
+func telegramBackToMenuButtons() [][]service.TelegramInlineButton {
+	return [][]service.TelegramInlineButton{{{Text: "Главное меню", CallbackData: telegramMainMenuCallback}}}
 }
 
 func sendTelegramChannelBonusPrompt(ctx context.Context, chatId int64) {
@@ -165,11 +371,12 @@ func sendTelegramChannelBonusPrompt(ctx context.Context, chatId int64) {
 		return
 	}
 	reward := fmt.Sprintf("$%.2f", setting.TelegramChannelBonusAmountUSD)
-	text := "<b>Бонус за подписку</b>\n\nПодпишитесь на канал <b>" + html.EscapeString(channel) +
-		"</b> и получите <b>" + reward + "</b> на баланс New API. Бонус доступен один раз."
+	text := "🖤 <b>Бонус за подписку</b>\n\nПодпишитесь на канал <b>" + html.EscapeString(channel) +
+		"</b> и получите <b>" + reward + "</b> на баланс New API. Бонус доступен один раз. Чтобы сохранить его, оставайтесь подписаны 30 дней."
 	buttons := [][]service.TelegramInlineButton{
 		{{Text: "Подписаться на канал", URL: channelURL}},
 		{{Text: "Проверить подписку", CallbackData: telegramChannelBonusCallback}},
+		{{Text: "Главное меню", CallbackData: telegramMainMenuCallback}},
 	}
 	if err := service.TelegramSendMessage(ctx, chatId, text, buttons); err != nil {
 		common.SysError("Telegram channel bonus prompt failed: " + err.Error())
@@ -179,7 +386,10 @@ func sendTelegramChannelBonusPrompt(ctx context.Context, chatId int64) {
 func sendTelegramAccountBindingPrompt(ctx context.Context, chatId int64) {
 	profileURL := strings.TrimRight(system_setting.ServerAddress, "/") + "/profile"
 	text := "<b>Сначала привяжите Telegram</b>\n\nВойдите в New API, откройте профиль и привяжите этот Telegram-аккаунт. После этого вернитесь сюда и отправьте /bonus."
-	buttons := [][]service.TelegramInlineButton{{{Text: "Открыть профиль New API", URL: profileURL}}}
+	buttons := [][]service.TelegramInlineButton{
+		{{Text: "Открыть профиль New API", URL: profileURL}},
+		{{Text: "Главное меню", CallbackData: telegramMainMenuCallback}},
+	}
 	if err := service.TelegramSendMessage(ctx, chatId, text, buttons); err != nil {
 		common.SysError("Telegram account binding prompt failed: " + err.Error())
 	}
