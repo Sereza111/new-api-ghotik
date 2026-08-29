@@ -1,3 +1,4 @@
+import GoogleColor from '@lobehub/icons/es/Google/components/Color'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -103,12 +104,16 @@ export function OAuthProviders({
 
   if (status?.oidc_enabled) {
     const oidcDisplayName = status.oidc_display_name?.trim() || 'OIDC'
+    const isGoogleProvider = oidcDisplayName.toLowerCase() === 'google'
     providerButtons.push({
       key: 'oidc',
       label: t('Continue with {{name}}', {
         name: oidcDisplayName,
       }),
       onClick: handleOIDCLogin,
+      icon: isGoogleProvider ? (
+        <GoogleColor data-icon='inline-start' aria-hidden='true' />
+      ) : undefined,
     })
   }
 
