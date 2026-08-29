@@ -43,4 +43,37 @@ describe('Platega payment amount routing', () => {
     expect(amount).toBe(800)
     expect(calls).toEqual(['platega:10'])
   })
+
+  test('rejects a failed amount response instead of displaying a zero payment', async () => {
+    const calculators = {
+      regular: async () => ({ success: true, data: '1' }),
+      stripe: async () => ({ success: true, data: '2' }),
+      cryptoPay: async () => ({
+        message: 'error',
+        data: 'top-up quota limit exceeded',
+      }),
+      platega: async () => ({ success: true, data: '800.00' }),
+      waffo: async () => ({ success: true, data: '4' }),
+      waffoPancake: async () => ({ success: true, data: '5' }),
+    }
+
+    await expect(
+      requestPaymentAmount(10, PAYMENT_TYPES.CRYPTO_PAY, calculators)
+    ).rejects.toThrow('Wallet balance is too high to accept this top-up')
+  })
+
+  test('rejects a non-positive amount returned by a payment calculator', async () => {
+    const calculators = {
+      regular: async () => ({ success: true, data: '0' }),
+      stripe: async () => ({ success: true, data: '2' }),
+      cryptoPay: async () => ({ success: true, data: '3' }),
+      platega: async () => ({ success: true, data: '800.00' }),
+      waffo: async () => ({ success: true, data: '4' }),
+      waffoPancake: async () => ({ success: true, data: '5' }),
+    }
+
+    await expect(
+      requestPaymentAmount(10, 'regular', calculators)
+    ).rejects.toThrow('Payment request failed')
+  })
 })

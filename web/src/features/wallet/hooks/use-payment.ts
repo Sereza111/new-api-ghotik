@@ -42,7 +42,7 @@ import {
   isWaffoPancakePayment,
   submitPaymentForm,
 } from '../lib'
-import type { AmountRequest, AmountResponse } from '../types'
+import type { AmountRequest, AmountResponse, ApiResponse } from '../types'
 
 // ============================================================================
 // Payment Hook
@@ -68,6 +68,24 @@ const defaultPaymentAmountCalculators: PaymentAmountCalculators = {
   waffoPancake: calculateWaffoPancakeAmount,
 }
 
+const TOPUP_QUOTA_LIMIT_ERROR = 'top-up quota limit exceeded'
+
+export function getPaymentErrorMessage(response: ApiResponse): string {
+  if (response.data === TOPUP_QUOTA_LIMIT_ERROR) {
+    return i18next.t('Wallet balance is too high to accept this top-up')
+  }
+
+  if (typeof response.data === 'string' && response.data.trim()) {
+    return response.data
+  }
+
+  if (response.message && response.message !== 'error') {
+    return response.message
+  }
+
+  return i18next.t('Payment request failed')
+}
+
 export async function requestPaymentAmount(
   topupAmount: number,
   paymentType: string,
@@ -87,11 +105,16 @@ export async function requestPaymentAmount(
   }
 
   const response = await calculator({ amount: topupAmount })
-  if (!isApiSuccess(response) || !response.data) {
-    return 0
+  if (!isApiSuccess(response)) {
+    throw new Error(getPaymentErrorMessage(response))
   }
 
-  return Number.parseFloat(response.data)
+  const calculatedAmount = Number.parseFloat(response.data || '')
+  if (!Number.isFinite(calculatedAmount) || calculatedAmount <= 0) {
+    throw new Error(i18next.t('Payment request failed'))
+  }
+
+  return calculatedAmount
 }
 
 export function usePayment() {
@@ -101,7 +124,11 @@ export function usePayment() {
 
   // Calculate payment amount
   const calculatePaymentAmount = useCallback(
-    async (topupAmount: number, paymentType: string) => {
+    async (
+      topupAmount: number,
+      paymentType: string,
+      notifyOnError = false
+    ): Promise<number | null> => {
       try {
         setCalculating(true)
         const calculatedAmount = await requestPaymentAmount(
@@ -110,9 +137,16 @@ export function usePayment() {
         )
         setAmount(calculatedAmount)
         return calculatedAmount
-      } catch {
+      } catch (error) {
         setAmount(0)
-        return 0
+        if (notifyOnError) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : i18next.t('Payment request failed')
+          toast.error(message)
+        }
+        return null
       } finally {
         setCalculating(false)
       }
@@ -155,7 +189,7 @@ export function usePayment() {
         }
 
         if (!isApiSuccess(response)) {
-          toast.error(response.message || i18next.t('Payment request failed'))
+          toast.error(getPaymentErrorMessage(response))
           return false
         }
 
