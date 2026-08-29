@@ -53,8 +53,10 @@ describe('price comparison', () => {
       </I18nextProvider>
     )
 
-    expect(screen.getByLabelText('Our price')).toHaveTextContent('$0.1/$0.6')
-    expect(screen.getByLabelText('Official price')).toHaveTextContent('$4/$20')
+    expect(screen.getByLabelText('Our price')).toHaveTextContent('$0.1 / $0.6')
+    expect(screen.getByLabelText('Official price')).toHaveTextContent(
+      '$4 / $20'
+    )
     expect(screen.getByText('-98%')).toBeVisible()
     expect(screen.getByText('/ 1M tokens')).toBeVisible()
   })
