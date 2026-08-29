@@ -218,6 +218,13 @@ func main() {
 	time.Sleep(100 * time.Millisecond)
 
 	common.LogStartupSuccess(startTime, port)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := service.ConfigureTelegramChannelBonusWebhook(ctx); err != nil {
+			common.SysError("failed to configure Telegram channel bonus webhook: " + err.Error())
+		}
+	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

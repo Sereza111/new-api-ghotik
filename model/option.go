@@ -136,6 +136,9 @@ func InitOptionMap() {
 	common.OptionMap["GitHubClientSecret"] = ""
 	common.OptionMap["TelegramBotToken"] = ""
 	common.OptionMap["TelegramBotName"] = ""
+	common.OptionMap["TelegramChannelBonusEnabled"] = strconv.FormatBool(setting.TelegramChannelBonusEnabled)
+	common.OptionMap["TelegramChannelBonusChannel"] = setting.TelegramChannelBonusChannel
+	common.OptionMap["TelegramChannelBonusAmountUSD"] = strconv.FormatFloat(setting.TelegramChannelBonusAmountUSD, 'f', -1, 64)
 	common.OptionMap["WeChatServerAddress"] = ""
 	common.OptionMap["WeChatServerToken"] = ""
 	common.OptionMap["WeChatAccountQRCodeImageURL"] = ""
@@ -329,6 +332,8 @@ func updateOptionMap(key string, value string) (err error) {
 			common.WeChatAuthEnabled = boolValue
 		case "TelegramOAuthEnabled":
 			common.TelegramOAuthEnabled = boolValue
+		case "TelegramChannelBonusEnabled":
+			setting.TelegramChannelBonusEnabled = boolValue
 		case "TurnstileCheckEnabled":
 			common.TurnstileCheckEnabled = boolValue
 		case "RegisterEnabled":
@@ -555,6 +560,10 @@ func updateOptionMap(key string, value string) (err error) {
 		common.TelegramBotToken = value
 	case "TelegramBotName":
 		common.TelegramBotName = value
+	case "TelegramChannelBonusChannel":
+		setting.TelegramChannelBonusChannel = value
+	case "TelegramChannelBonusAmountUSD":
+		setting.TelegramChannelBonusAmountUSD, _ = strconv.ParseFloat(value, 64)
 	case "TurnstileSiteKey":
 		common.TurnstileSiteKey = value
 	case "TurnstileSecretKey":

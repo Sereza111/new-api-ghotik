@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import axios from 'axios'
-import { ExternalLink } from 'lucide-react'
+import { Bot, ExternalLink, LoaderCircle } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -27,6 +27,7 @@ import * as z from 'zod'
 
 import { CopyButton } from '@/components/copy-button'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 import {
   Form,
   FormControl,
@@ -40,6 +41,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
+import { configureTelegramChannelBonusWebhook } from '../api'
 import { FormDirtyIndicator } from '../components/form-dirty-indicator'
 import { FormNavigationGuard } from '../components/form-navigation-guard'
 import {
@@ -83,6 +85,9 @@ const oauthSchema = z.object({
   TelegramOAuthEnabled: z.boolean(),
   TelegramBotToken: z.string(),
   TelegramBotName: z.string(),
+  TelegramChannelBonusEnabled: z.boolean(),
+  TelegramChannelBonusChannel: z.string().min(1),
+  TelegramChannelBonusAmountUSD: z.number().min(0.01).max(100),
   LinuxDOOAuthEnabled: z.boolean(),
   LinuxDOClientId: z.string(),
   LinuxDOClientSecret: z.string(),
@@ -113,6 +118,9 @@ type FlatOAuthDefaults = {
   TelegramOAuthEnabled: boolean
   TelegramBotToken: string
   TelegramBotName: string
+  TelegramChannelBonusEnabled: boolean
+  TelegramChannelBonusChannel: string
+  TelegramChannelBonusAmountUSD: number
   LinuxDOOAuthEnabled: boolean
   LinuxDOClientId: string
   LinuxDOClientSecret: string
@@ -197,6 +205,10 @@ const buildFormDefaults = (defaults: FlatOAuthDefaults): OAuthFormValues => ({
   TelegramOAuthEnabled: defaults.TelegramOAuthEnabled,
   TelegramBotToken: defaults.TelegramBotToken ?? '',
   TelegramBotName: defaults.TelegramBotName ?? '',
+  TelegramChannelBonusEnabled: defaults.TelegramChannelBonusEnabled,
+  TelegramChannelBonusChannel:
+    defaults.TelegramChannelBonusChannel ?? '@VL_API',
+  TelegramChannelBonusAmountUSD: defaults.TelegramChannelBonusAmountUSD ?? 0.5,
   LinuxDOOAuthEnabled: defaults.LinuxDOOAuthEnabled,
   LinuxDOClientId: defaults.LinuxDOClientId ?? '',
   LinuxDOClientSecret: defaults.LinuxDOClientSecret ?? '',
@@ -225,6 +237,9 @@ const normalizeFormValues = (values: OAuthFormValues): FlatOAuthDefaults => ({
   TelegramOAuthEnabled: values.TelegramOAuthEnabled,
   TelegramBotToken: values.TelegramBotToken,
   TelegramBotName: values.TelegramBotName,
+  TelegramChannelBonusEnabled: values.TelegramChannelBonusEnabled,
+  TelegramChannelBonusChannel: values.TelegramChannelBonusChannel,
+  TelegramChannelBonusAmountUSD: values.TelegramChannelBonusAmountUSD,
   LinuxDOOAuthEnabled: values.LinuxDOOAuthEnabled,
   LinuxDOClientId: values.LinuxDOClientId,
   LinuxDOClientSecret: values.LinuxDOClientSecret,
@@ -244,6 +259,7 @@ export function OAuthSection(props: OAuthSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
   const [activeTab, setActiveTab] = useState('github')
+  const [isConfiguringBonusBot, setIsConfiguringBonusBot] = useState(false)
   const siteUrl = resolveOAuthSiteUrl(props.serverAddress, t('Site URL'))
   const githubCallbackUrl = buildOAuthCallbackUrl(
     props.serverAddress,
@@ -360,6 +376,28 @@ export function OAuthSection(props: OAuthSectionProps) {
   const handleReset = () => {
     form.reset(buildFormDefaults(baselineRef.current))
     toast.success(t('Form reset to saved values'))
+  }
+
+  const handleConfigureBonusBot = async () => {
+    setIsConfiguringBonusBot(true)
+    try {
+      const result = await configureTelegramChannelBonusWebhook()
+      if (result.success) {
+        toast.success(t('Telegram bonus bot configured successfully'))
+      } else {
+        toast.error(
+          result.message || t('Failed to configure Telegram bonus bot')
+        )
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : t('Failed to configure Telegram bonus bot')
+      toast.error(message)
+    } finally {
+      setIsConfiguringBonusBot(false)
+    }
   }
 
   return (
@@ -872,6 +910,121 @@ export function OAuthSection(props: OAuthSectionProps) {
                           ref={field.ref}
                         />
                       </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <Alert className='lg:col-span-2'>
+                  <AlertTitle>{t('Channel subscription bonus')}</AlertTitle>
+                  <AlertDescription className='space-y-3'>
+                    <p>
+                      {t(
+                        'Add the bot as a channel administrator so Telegram can verify subscriptions.'
+                      )}
+                    </p>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      onClick={handleConfigureBonusBot}
+                      disabled={
+                        isConfiguringBonusBot ||
+                        !form.watch('TelegramChannelBonusEnabled') ||
+                        form.formState.isDirty
+                      }
+                    >
+                      {isConfiguringBonusBot ? (
+                        <LoaderCircle
+                          data-icon='inline-start'
+                          className='animate-spin'
+                          aria-hidden='true'
+                        />
+                      ) : (
+                        <Bot data-icon='inline-start' aria-hidden='true' />
+                      )}
+                      {t('Configure bonus bot')}
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+
+                <FormField
+                  control={form.control}
+                  name='TelegramChannelBonusEnabled'
+                  render={({ field }) => (
+                    <SettingsSwitchItem>
+                      <SettingsSwitchContent>
+                        <FormLabel>
+                          {t('Enable Telegram channel bonus')}
+                        </FormLabel>
+                        <FormDescription>
+                          {t(
+                            'Reward users once after their channel subscription is verified'
+                          )}
+                        </FormDescription>
+                      </SettingsSwitchContent>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </SettingsSwitchItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='TelegramChannelBonusChannel'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Telegram channel')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder='@VL_API'
+                          autoComplete='off'
+                          value={field.value ?? ''}
+                          onChange={(event) =>
+                            field.onChange(event.target.value)
+                          }
+                          name={field.name}
+                          onBlur={field.onBlur}
+                          ref={field.ref}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Public channel username used for membership checks'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='TelegramChannelBonusAmountUSD'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Subscription bonus (USD)')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min='0.01'
+                          max='100'
+                          step='0.01'
+                          value={field.value}
+                          onChange={(event) =>
+                            field.onChange(event.target.valueAsNumber)
+                          }
+                          name={field.name}
+                          onBlur={field.onBlur}
+                          ref={field.ref}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t('One-time wallet reward after verification')}
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}

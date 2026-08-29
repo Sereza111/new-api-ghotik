@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/model_setting"
@@ -217,6 +218,32 @@ func UpdateOption(c *gin.Context) {
 				"success": false,
 				"message": "无法启用 Telegram OAuth，请先填入 Telegram Bot Token！",
 			})
+			return
+		}
+	case "TelegramChannelBonusEnabled":
+		if option.Value == "true" {
+			if common.TelegramBotToken == "" {
+				common.ApiErrorMsg(c, "请先配置 Telegram Bot Token")
+				return
+			}
+			if _, _, err := service.NormalizeTelegramChannel(setting.TelegramChannelBonusChannel); err != nil {
+				common.ApiErrorMsg(c, "请先配置有效的 Telegram 公开频道")
+				return
+			}
+			if !strings.HasPrefix(strings.TrimSpace(system_setting.ServerAddress), "https://") {
+				common.ApiErrorMsg(c, "Telegram 机器人需要公开的 HTTPS 服务器地址")
+				return
+			}
+		}
+	case "TelegramChannelBonusChannel":
+		if _, _, err := service.NormalizeTelegramChannel(option.Value.(string)); err != nil {
+			common.ApiErrorMsg(c, "Telegram 频道用户名无效")
+			return
+		}
+	case "TelegramChannelBonusAmountUSD":
+		amount, err := strconv.ParseFloat(strings.TrimSpace(option.Value.(string)), 64)
+		if err != nil || amount < 0.01 || amount > 100 {
+			common.ApiErrorMsg(c, "Telegram 订阅奖励必须在 0.01 到 100 USD 之间")
 			return
 		}
 	case "theme.frontend":

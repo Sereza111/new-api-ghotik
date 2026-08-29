@@ -41,6 +41,13 @@ export async function updateSystemOption(request: UpdateOptionRequest) {
   return res.data
 }
 
+export async function configureTelegramChannelBonusWebhook() {
+  const res = await api.post<UpdateOptionResponse>(
+    '/api/option/telegram_channel_bonus/webhook'
+  )
+  return res.data
+}
+
 export async function confirmPaymentCompliance() {
   const res = await api.post<ConfirmPaymentComplianceResponse>(
     '/api/option/payment_compliance',
