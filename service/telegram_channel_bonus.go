@@ -105,7 +105,7 @@ func callTelegramBotAPI[T any](ctx context.Context, token string, method string,
 }
 
 func ConfigureTelegramChannelBonusWebhook(ctx context.Context) error {
-	if !setting.TelegramChannelBonusEnabled {
+	if !setting.TelegramChannelBonusEnabled && !common.TelegramOAuthEnabled {
 		return nil
 	}
 	token := strings.TrimSpace(common.TelegramBotToken)
@@ -117,8 +117,10 @@ func ConfigureTelegramChannelBonusWebhook(ctx context.Context) error {
 	if err != nil || parsedAddress.Scheme != "https" || parsedAddress.Host == "" {
 		return errors.New("public HTTPS server address is required for Telegram webhook")
 	}
-	if _, _, err := NormalizeTelegramChannel(setting.TelegramChannelBonusChannel); err != nil {
-		return err
+	if setting.TelegramChannelBonusEnabled {
+		if _, _, err := NormalizeTelegramChannel(setting.TelegramChannelBonusChannel); err != nil {
+			return err
+		}
 	}
 	commands := []telegramBotCommand{
 		{Command: "start", Description: "Главное меню"},
@@ -130,10 +132,14 @@ func ConfigureTelegramChannelBonusWebhook(ctx context.Context) error {
 		return err
 	}
 
+	allowedUpdates := []string{"message", "callback_query"}
+	if setting.TelegramChannelBonusEnabled {
+		allowedUpdates = append(allowedUpdates, "chat_member")
+	}
 	payload := map[string]any{
 		"url":             serverAddress + "/api/telegram/channel-bonus/webhook",
 		"secret_token":    TelegramChannelBonusWebhookSecret(token),
-		"allowed_updates": []string{"message", "callback_query", "chat_member"},
+		"allowed_updates": allowedUpdates,
 	}
 	_, err = callTelegramBotAPI[bool](ctx, token, "setWebhook", payload)
 	return err

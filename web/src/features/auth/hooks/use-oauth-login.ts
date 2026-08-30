@@ -20,15 +20,20 @@ import { useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
-import { clearAuthentication } from '@/lib/api'
+import { applyAuthBundle, clearAuthentication, isAuthBundle } from '@/lib/api'
 
-import { createOAuthFlow, logout } from '../api'
+import {
+  createOAuthFlow,
+  getTelegramLoginStatus,
+  logout,
+  startTelegramLogin,
+} from '../api'
+import { sanitizeAuthRedirect } from '../lib/auth-redirect'
 import {
   buildGitHubOAuthUrl,
   buildDiscordOAuthUrl,
   buildOIDCOAuthUrl,
   buildLinuxDOOAuthUrl,
-  buildTelegramOAuthUrl,
 } from '../lib/oauth'
 import type { SystemStatus, CustomOAuthProviderInfo } from '../types'
 
@@ -43,6 +48,9 @@ export function useOAuthLogin(
   const [isLoading, setIsLoading] = useState(false)
   const [githubButtonText, setGithubButtonText] = useState('')
   const [githubButtonDisabled, setGithubButtonDisabled] = useState(false)
+  const [telegramFlowExpiresAt, setTelegramFlowExpiresAt] = useState<
+    number | null
+  >(null)
   const githubTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
@@ -54,6 +62,71 @@ export function useOAuthLogin(
       }
     }
   }, [t])
+
+  useEffect(() => {
+    if (!telegramFlowExpiresAt) return
+
+    const abortController = new AbortController()
+    let requestPending = false
+    let stopped = false
+    const stopPolling = (message?: string) => {
+      if (stopped) return
+      stopped = true
+      setTelegramFlowExpiresAt(null)
+      setIsLoading(false)
+      if (message) toast.error(message)
+    }
+    const poll = async () => {
+      if (requestPending || stopped) return
+      if (Date.now() >= telegramFlowExpiresAt * 1000) {
+        stopPolling(t('Telegram binding failed. Please try again.'))
+        return
+      }
+      requestPending = true
+      try {
+        const response = await getTelegramLoginStatus(abortController.signal)
+        if (stopped) return
+        if (response.success && isAuthBundle(response.data)) {
+          stopped = true
+          applyAuthBundle(response.data)
+          toast.success(t('Signed in successfully!'))
+          const target =
+            sanitizeAuthRedirect(redirectTo, window.location.origin) ??
+            '/dashboard'
+          window.location.assign(target)
+          return
+        }
+        const status = (response.data as { status?: string } | undefined)
+          ?.status
+        if (!response.success || status !== 'pending') {
+          stopPolling(
+            response.message ||
+              t('Failed to start {{provider}} login', {
+                provider: 'Telegram',
+              })
+          )
+        }
+      } catch {
+        if (!abortController.signal.aborted) {
+          stopPolling(
+            t('Failed to start {{provider}} login', {
+              provider: 'Telegram',
+            })
+          )
+        }
+      } finally {
+        requestPending = false
+      }
+    }
+
+    void poll()
+    const interval = window.setInterval(() => void poll(), 1500)
+    return () => {
+      stopped = true
+      abortController.abort()
+      window.clearInterval(interval)
+    }
+  }, [redirectTo, t, telegramFlowExpiresAt])
 
   const resetSession = async () => {
     const response = await logout()
@@ -156,26 +229,34 @@ export function useOAuthLogin(
   }
 
   const handleTelegramLogin = async () => {
-    const botId = status?.telegram_bot_id?.trim()
-    if (!botId) {
+    const botName = status?.telegram_bot_name?.trim()
+    if (!botName) {
       toast.error(t('Login failed'))
       return
     }
 
-    setIsLoading(true)
-    try {
-      await resetSession()
-      const callbackUrl = new URL('/oauth/telegram', window.location.origin)
-      if (redirectTo) {
-        callbackUrl.searchParams.set('redirect', redirectTo)
-      }
-      const url = buildTelegramOAuthUrl(botId, callbackUrl.toString())
-      window.open(url, '_self')
-    } catch {
+    const telegramWindow = window.open('', '_blank')
+    if (!telegramWindow) {
       toast.error(
         t('Failed to start {{provider}} login', { provider: 'Telegram' })
       )
-    } finally {
+      return
+    }
+    setIsLoading(true)
+    try {
+      await resetSession()
+      const response = await startTelegramLogin()
+      if (!response.success || !response.data?.deep_link) {
+        throw new Error(response.message || 'Telegram login failed')
+      }
+      telegramWindow.opener = null
+      telegramWindow.location.replace(response.data.deep_link)
+      setTelegramFlowExpiresAt(response.data.expires_at)
+    } catch {
+      telegramWindow.close()
+      toast.error(
+        t('Failed to start {{provider}} login', { provider: 'Telegram' })
+      )
       setIsLoading(false)
     }
   }

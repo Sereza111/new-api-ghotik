@@ -176,6 +176,34 @@ export async function telegramLogin(
   return res.data
 }
 
+export interface TelegramLoginFlow {
+  deep_link: string
+  expires_at: number
+}
+
+export async function startTelegramLogin(): Promise<
+  ApiResponse<TelegramLoginFlow>
+> {
+  const res = await api.post('/api/oauth/telegram/login/start', undefined, {
+    skipAuthRefresh: true,
+    skipErrorHandler: true,
+  })
+  return res.data
+}
+
+export async function getTelegramLoginStatus(
+  signal?: AbortSignal
+): Promise<ApiResponse> {
+  const res = await api.post('/api/oauth/telegram/login/status', undefined, {
+    signal,
+    disableDuplicate: true,
+    skipAuthRefresh: true,
+    skipBusinessError: true,
+    skipErrorHandler: true,
+  })
+  return res.data
+}
+
 // ----------------------------------------------------------------------------
 // Registration
 // ----------------------------------------------------------------------------

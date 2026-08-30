@@ -30,7 +30,10 @@ const (
 )
 
 type telegramBonusUser struct {
-	Id int64 `json:"id"`
+	Id        int64  `json:"id"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	Username  string `json:"username"`
 }
 
 type telegramBonusChat struct {
@@ -86,7 +89,7 @@ func ConfigureTelegramChannelBonusWebhook(c *gin.Context) {
 }
 
 func TelegramChannelBonusWebhook(c *gin.Context) {
-	if !setting.TelegramChannelBonusEnabled || strings.TrimSpace(common.TelegramBotToken) == "" {
+	if (!setting.TelegramChannelBonusEnabled && !common.TelegramOAuthEnabled) || strings.TrimSpace(common.TelegramBotToken) == "" {
 		c.Status(http.StatusNotFound)
 		return
 	}
@@ -129,6 +132,9 @@ func handleTelegramChannelBonusMessage(ctx context.Context, message *telegramBon
 	command = strings.SplitN(command, "@", 2)[0]
 	switch command {
 	case "/start":
+		if len(fields) == 2 && handleTelegramAuthenticationStart(ctx, message.Chat.Id, message.From, fields[1]) {
+			return
+		}
 		if !telegramUserIsLinked(message.From.Id) {
 			sendTelegramAccountBindingPrompt(ctx, message.Chat.Id)
 			return
@@ -145,6 +151,72 @@ func handleTelegramChannelBonusMessage(ctx context.Context, message *telegramBon
 	case "/help":
 		sendTelegramHelp(ctx, message.Chat.Id)
 	}
+}
+
+func handleTelegramAuthenticationStart(ctx context.Context, chatId int64, from *telegramBonusUser, parameter string) bool {
+	if from == nil || chatId != from.Id {
+		return false
+	}
+	purpose := ""
+	flowToken := ""
+	switch {
+	case strings.HasPrefix(parameter, "login_"):
+		purpose = model.AuthFlowPurposeTelegramLogin
+		flowToken = strings.TrimPrefix(parameter, "login_")
+	case strings.HasPrefix(parameter, "bind_"):
+		purpose = model.AuthFlowPurposeTelegramBind
+		flowToken = strings.TrimPrefix(parameter, "bind_")
+	default:
+		return false
+	}
+	if flowToken == "" {
+		return false
+	}
+
+	match := model.AuthFlowMatch{Purpose: purpose}
+	flow, err := model.GetAuthFlow(flowToken, match)
+	if err != nil {
+		_ = service.TelegramSendMessage(ctx, chatId,
+			"🖤 <b>Ссылка устарела</b>\n\nВернитесь на сайт и начните вход через Telegram ещё раз.", nil)
+		return true
+	}
+	var current telegramLoginFlowPayload
+	if err := common.UnmarshalJsonStr(flow.Payload, &current); err != nil {
+		common.SysError("Telegram auth flow payload decode failed: " + err.Error())
+		_ = service.TelegramSendMessage(ctx, chatId, "Не удалось подтвердить вход. Попробуйте ещё раз.", nil)
+		return true
+	}
+	if current.TelegramId != "" {
+		if current.TelegramId == strconv.FormatInt(from.Id, 10) {
+			_ = service.TelegramSendMessage(ctx, chatId,
+				"🖤 <b>Вход уже подтверждён</b>\n\nВернитесь во вкладку VL API — она завершит вход автоматически.", nil)
+		} else {
+			_ = service.TelegramSendMessage(ctx, chatId, "Эта ссылка уже была использована.", nil)
+		}
+		return true
+	}
+	payload, err := common.Marshal(telegramLoginFlowPayload{
+		TelegramId: strconv.FormatInt(from.Id, 10),
+		Username:   from.Username,
+		FirstName:  from.FirstName,
+		LastName:   from.LastName,
+	})
+	if err != nil {
+		common.SysError("Telegram auth flow payload encode failed: " + err.Error())
+		return true
+	}
+	if err := model.CompareAndSwapAuthFlowPayload(flowToken, match, flow.Payload, string(payload)); err != nil {
+		_ = service.TelegramSendMessage(ctx, chatId, "Эта ссылка устарела или уже была использована.", nil)
+		return true
+	}
+
+	action := "вход"
+	if purpose == model.AuthFlowPurposeTelegramBind {
+		action = "привязку аккаунта"
+	}
+	_ = service.TelegramSendMessage(ctx, chatId,
+		"🖤 <b>Telegram подтверждён</b>\n\nВернитесь во вкладку VL API — она завершит "+action+" автоматически.", nil)
+	return true
 }
 
 func handleTelegramChannelBonusCallback(ctx context.Context, callback *telegramBonusCallbackQuery) {

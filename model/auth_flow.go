@@ -20,6 +20,7 @@ const (
 	AuthFlowPurposePasskeyLogin      = "passkey_login"
 	AuthFlowPurposePasskeyRegister   = "passkey_register"
 	AuthFlowPurposePasskeyStepUp     = "passkey_step_up"
+	AuthFlowPurposeTelegramLogin     = "telegram_login"
 	AuthFlowPurposeTelegramBind      = "telegram_bind"
 	AuthFlowPurposeTelegramAssertion = "telegram_assertion"
 	AuthFlowIntentLogin              = "login"
@@ -176,6 +177,25 @@ func GetAuthFlow(token string, match AuthFlowMatch) (*AuthFlow, error) {
 		return nil, ErrAuthFlowExpired
 	}
 	return &flow, nil
+}
+
+// CompareAndSwapAuthFlowPayload records a provider result only while the
+// one-time flow is pending and still contains the payload the caller read.
+func CompareAndSwapAuthFlowPayload(token string, match AuthFlowMatch, expectedPayload, payload string) error {
+	if token == "" || match.Purpose == "" {
+		return ErrAuthFlowInvalid
+	}
+	now := time.Now()
+	result := applyAuthFlowMatch(DB.Model(&AuthFlow{}), token, match).
+		Where("consumed_at IS NULL AND expires_at > ? AND payload = ?", now, expectedPayload).
+		Update("payload", payload)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrAuthFlowConsumed
+	}
+	return nil
 }
 
 // ConsumeAuthFlow atomically validates and consumes a flow. Optional match

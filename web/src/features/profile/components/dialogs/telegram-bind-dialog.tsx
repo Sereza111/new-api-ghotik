@@ -16,8 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Send } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Loader2, Send } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -25,10 +25,9 @@ import { Dialog } from '@/components/dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { TELEGRAM_BIND_RESULT_MESSAGE } from '@/features/auth/constants'
 import { getServerErrorMessageKey } from '@/lib/server-error-message'
 
-import { startTelegramBind } from '../../api'
+import { getTelegramBindStatus, startTelegramBind } from '../../api'
 
 // ============================================================================
 // Telegram Bind Dialog Component
@@ -48,26 +47,28 @@ export function TelegramBindDialog({
   onSuccess,
 }: TelegramBindDialogProps) {
   const { t } = useTranslation()
-  const widgetRef = useRef<HTMLDivElement>(null)
-  const [callbackUrl, setCallbackUrl] = useState<string | null>(null)
+  const [deepLink, setDeepLink] = useState<string | null>(null)
   const [flowToken, setFlowToken] = useState<string | null>(null)
+  const [expiresAt, setExpiresAt] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const createBindFlow = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setDeepLink(null)
+    setFlowToken(null)
+    setExpiresAt(null)
     try {
       const response = await startTelegramBind()
-      if (!response.success || !response.data?.callback_url) {
+      if (!response.success || !response.data?.deep_link) {
         throw new Error(
           response.message || t('Failed to start Telegram binding')
         )
       }
       setFlowToken(response.data.flow_token)
-      setCallbackUrl(
-        new URL(response.data.callback_url, window.location.origin).toString()
-      )
+      setDeepLink(response.data.deep_link)
+      setExpiresAt(response.data.expires_at)
     } catch (bindError: unknown) {
       setError(
         bindError instanceof Error
@@ -81,8 +82,9 @@ export function TelegramBindDialog({
 
   useEffect(() => {
     if (!open) {
-      setCallbackUrl(null)
+      setDeepLink(null)
       setFlowToken(null)
+      setExpiresAt(null)
       setError(null)
       return
     }
@@ -90,53 +92,62 @@ export function TelegramBindDialog({
   }, [createBindFlow, open])
 
   useEffect(() => {
-    if (!open || !flowToken) return
+    if (!open || !flowToken || !expiresAt) return
 
-    const handleBindResult = (event: MessageEvent<unknown>) => {
-      if (event.origin !== window.location.origin) return
-      const result = event.data as {
-        type?: string
-        flow_token?: string
-        success?: boolean
-        code?: string
-      } | null
-      if (
-        !result ||
-        result.type !== TELEGRAM_BIND_RESULT_MESSAGE ||
-        result.flow_token !== flowToken
-      ) {
+    const abortController = new AbortController()
+    let requestPending = false
+    let stopped = false
+    const poll = async () => {
+      if (requestPending || stopped) return
+      if (Date.now() >= expiresAt * 1000) {
+        stopped = true
+        setError(
+          t(
+            'This Telegram binding request has expired or has already been used.'
+          )
+        )
         return
       }
-      if (!result.success) {
-        const messageKey = getServerErrorMessageKey({ code: result.code })
-        setError(t(messageKey || 'Telegram binding failed. Please try again.'))
-        return
+      requestPending = true
+      try {
+        const response = await getTelegramBindStatus(
+          flowToken,
+          abortController.signal
+        )
+        if (stopped) return
+        if (response.success && response.data?.status === 'complete') {
+          stopped = true
+          toast.success(t('Binding successful!'))
+          onSuccess()
+          onOpenChange(false)
+          return
+        }
+        if (!response.success) {
+          const code = (response as { code?: string }).code
+          const messageKey = getServerErrorMessageKey({ code })
+          stopped = true
+          setError(
+            t(messageKey || 'Telegram binding failed. Please try again.')
+          )
+        }
+      } catch {
+        if (!abortController.signal.aborted) {
+          stopped = true
+          setError(t('Telegram binding failed. Please try again.'))
+        }
+      } finally {
+        requestPending = false
       }
-      toast.success(t('Binding successful!'))
-      onSuccess()
-      onOpenChange(false)
     }
 
-    window.addEventListener('message', handleBindResult)
-    return () => window.removeEventListener('message', handleBindResult)
-  }, [flowToken, onOpenChange, onSuccess, open, t])
-
-  useEffect(() => {
-    const container = widgetRef.current
-    if (!container || !callbackUrl) return
-
-    container.replaceChildren()
-    const script = document.createElement('script')
-    script.async = true
-    script.src = 'https://telegram.org/js/telegram-widget.js?22'
-    script.setAttribute('data-telegram-login', botName.replace(/^@/, ''))
-    script.setAttribute('data-size', 'large')
-    script.setAttribute('data-auth-url', callbackUrl)
-    script.setAttribute('data-request-access', 'write')
-    container.appendChild(script)
-
-    return () => container.replaceChildren()
-  }, [botName, callbackUrl])
+    void poll()
+    const interval = window.setInterval(() => void poll(), 1500)
+    return () => {
+      stopped = true
+      abortController.abort()
+      window.clearInterval(interval)
+    }
+  }, [expiresAt, flowToken, onOpenChange, onSuccess, open, t])
 
   return (
     <Dialog
@@ -166,7 +177,9 @@ export function TelegramBindDialog({
           <div className='text-center'>
             <p className='text-muted-foreground text-sm'>
               {t('Bot:')}{' '}
-              <span className='font-mono font-semibold'>@{botName}</span>
+              <span className='font-mono font-semibold'>
+                @{botName.replace(/^@/, '')}
+              </span>
             </p>
             <p className='text-muted-foreground mt-1 text-xs'>
               {t(
@@ -184,7 +197,25 @@ export function TelegramBindDialog({
               </Button>
             </div>
           )}
-          <div ref={widgetRef} className='flex min-h-10 justify-center' />
+          {deepLink && !error && (
+            <Button
+              render={
+                <a href={deepLink} target='_blank' rel='noopener noreferrer' />
+              }
+            >
+              <Send aria-hidden='true' />
+              {t('Continue with Telegram')}
+            </Button>
+          )}
+          {deepLink && !error && (
+            <p className='text-muted-foreground flex items-center gap-2 text-xs'>
+              <Loader2
+                className='h-3.5 w-3.5 animate-spin'
+                aria-hidden='true'
+              />
+              {t('Waiting')}
+            </p>
+          )}
         </div>
 
         <p className='text-muted-foreground text-center text-xs'>

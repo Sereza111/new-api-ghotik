@@ -49,8 +49,11 @@ func SetApiRouter(router *gin.Engine) {
 		// Non-standard OAuth (WeChat, Telegram) - keep original routes
 		apiRouter.GET("/oauth/wechat", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.WeChatAuth)
 		apiRouter.POST("/oauth/wechat/bind", middleware.UserAuth(), middleware.CriticalRateLimit(), controller.WeChatBind)
+		apiRouter.POST("/oauth/telegram/login/start", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.TelegramLoginStart)
+		apiRouter.POST("/oauth/telegram/login/status", middleware.DisableCache(), controller.TelegramLoginStatus)
 		apiRouter.GET("/oauth/telegram/login", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.TelegramLogin)
 		apiRouter.POST("/oauth/telegram/bind/start", middleware.UserAuth(), middleware.CriticalRateLimit(), middleware.DisableCache(), controller.TelegramBindStart)
+		apiRouter.POST("/oauth/telegram/bind/:flow_token/status", middleware.UserAuth(), middleware.DisableCache(), controller.TelegramBindStatus)
 		apiRouter.GET("/oauth/telegram/bind/:flow_token", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.TelegramBind)
 		apiRouter.POST("/telegram/channel-bonus/webhook", anonymousRequestBodyLimit, controller.TelegramChannelBonusWebhook)
 		// Standard OAuth providers (GitHub, Discord, OIDC, LinuxDO) - unified route

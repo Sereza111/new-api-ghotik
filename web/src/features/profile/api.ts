@@ -140,6 +140,7 @@ export async function bindWeChat(code: string): Promise<ApiResponse> {
 export interface TelegramBindFlow {
   flow_token: string
   callback_url: string
+  deep_link: string
   expires_at: number
 }
 
@@ -147,6 +148,23 @@ export async function startTelegramBind(): Promise<
   ApiResponse<TelegramBindFlow>
 > {
   const res = await api.post('/api/oauth/telegram/bind/start')
+  return res.data
+}
+
+export async function getTelegramBindStatus(
+  flowToken: string,
+  signal?: AbortSignal
+): Promise<ApiResponse<{ status?: string }>> {
+  const res = await api.post(
+    `/api/oauth/telegram/bind/${encodeURIComponent(flowToken)}/status`,
+    undefined,
+    {
+      signal,
+      disableDuplicate: true,
+      skipBusinessError: true,
+      skipErrorHandler: true,
+    }
+  )
   return res.data
 }
 

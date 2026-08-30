@@ -174,6 +174,132 @@ func TestFindOrCreateTelegramUser(t *testing.T) {
 	assert.Equal(t, "654321", registeredAfterRetry.TelegramId)
 }
 
+func TestTelegramBotLoginFlowIsBrowserBoundAndCreatesSession(t *testing.T) {
+	previousDB := model.DB
+	previousLogDB := model.LOG_DB
+	previousType := common.MainDatabaseType()
+	previousRegisterEnabled := common.RegisterEnabled
+	previousQuota := common.QuotaForNewUser
+	previousRedis := common.RedisEnabled
+	previousSecret := common.SessionSecret
+	previousOAuthEnabled := common.TelegramOAuthEnabled
+	previousBotName := common.TelegramBotName
+	previousBotToken := common.TelegramBotToken
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(
+		&model.User{},
+		&model.AuthFlow{},
+		&model.ExternalIdentityClaim{},
+		&model.UserSession{},
+		&model.Log{},
+	))
+	model.DB = db
+	model.LOG_DB = db
+	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
+	common.RegisterEnabled = true
+	common.QuotaForNewUser = 0
+	common.RedisEnabled = false
+	common.SessionSecret = "telegram-browser-flow-test-secret"
+	common.TelegramOAuthEnabled = true
+	common.TelegramBotName = "@test_login_bot"
+	common.TelegramBotToken = "123:test-token"
+	t.Cleanup(func() {
+		model.DB = previousDB
+		model.LOG_DB = previousLogDB
+		common.SetMainDatabaseType(previousType)
+		common.RegisterEnabled = previousRegisterEnabled
+		common.QuotaForNewUser = previousQuota
+		common.RedisEnabled = previousRedis
+		common.SessionSecret = previousSecret
+		common.TelegramOAuthEnabled = previousOAuthEnabled
+		common.TelegramBotName = previousBotName
+		common.TelegramBotToken = previousBotToken
+	})
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/api/oauth/telegram/login/start", TelegramLoginStart)
+	router.POST("/api/oauth/telegram/login/status", TelegramLoginStatus)
+
+	startRecorder := httptest.NewRecorder()
+	router.ServeHTTP(
+		startRecorder,
+		httptest.NewRequest(http.MethodPost, "/api/oauth/telegram/login/start", nil),
+	)
+	require.Equal(t, http.StatusOK, startRecorder.Code)
+	var startResponse struct {
+		Success bool `json:"success"`
+		Data    struct {
+			DeepLink string `json:"deep_link"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(startRecorder.Body.Bytes(), &startResponse))
+	require.True(t, startResponse.Success)
+	require.NotEmpty(t, startResponse.Data.DeepLink)
+	cookies := startRecorder.Result().Cookies()
+	require.Len(t, cookies, 1)
+	require.Equal(t, telegramLoginCookieName, cookies[0].Name)
+	require.True(t, cookies[0].HttpOnly)
+	flowToken, verifier, ok := strings.Cut(cookies[0].Value, ".")
+	require.True(t, ok)
+	assert.Contains(t, startResponse.Data.DeepLink, "start=login_"+flowToken)
+	assert.NotContains(t, startResponse.Data.DeepLink, verifier)
+
+	wrongBrowser := httptest.NewRequest(http.MethodPost, "/api/oauth/telegram/login/status", nil)
+	wrongBrowser.AddCookie(&http.Cookie{
+		Name:  telegramLoginCookieName,
+		Value: flowToken + ".different-browser-verifier",
+	})
+	wrongBrowserRecorder := httptest.NewRecorder()
+	router.ServeHTTP(wrongBrowserRecorder, wrongBrowser)
+	assert.Equal(t, http.StatusForbidden, wrongBrowserRecorder.Code)
+
+	flow, err := model.GetAuthFlow(flowToken, model.AuthFlowMatch{
+		Purpose:   model.AuthFlowPurposeTelegramLogin,
+		SessionId: telegramLoginBrowserBinding(verifier),
+	})
+	require.NoError(t, err)
+	authorizedPayload, err := common.Marshal(telegramLoginFlowPayload{
+		TelegramId: "99887766",
+		Username:   "telegrambrowseruser",
+		FirstName:  "Telegram",
+		LastName:   "Browser",
+	})
+	require.NoError(t, err)
+	require.NoError(t, model.CompareAndSwapAuthFlowPayload(
+		flowToken,
+		model.AuthFlowMatch{Purpose: model.AuthFlowPurposeTelegramLogin},
+		flow.Payload,
+		string(authorizedPayload),
+	))
+
+	statusRequest := httptest.NewRequest(http.MethodPost, "/api/oauth/telegram/login/status", nil)
+	statusRequest.AddCookie(cookies[0])
+	statusRecorder := httptest.NewRecorder()
+	router.ServeHTTP(statusRecorder, statusRequest)
+	require.Equal(t, http.StatusOK, statusRecorder.Code)
+	var statusResponse struct {
+		Success bool `json:"success"`
+		Data    struct {
+			AccessToken string `json:"access_token"`
+			Session     struct {
+				SID string `json:"sid"`
+			} `json:"session"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(statusRecorder.Body.Bytes(), &statusResponse))
+	assert.True(t, statusResponse.Success)
+	assert.NotEmpty(t, statusResponse.Data.AccessToken)
+	assert.NotEmpty(t, statusResponse.Data.Session.SID)
+
+	var user model.User
+	require.NoError(t, db.Where("telegram_id = ?", "99887766").First(&user).Error)
+	assert.Equal(t, "telegrambrowseruser", user.Username)
+	_, err = model.GetAuthFlow(flowToken, model.AuthFlowMatch{Purpose: model.AuthFlowPurposeTelegramLogin})
+	assert.ErrorIs(t, err, model.ErrAuthFlowConsumed)
+}
+
 func createTelegramBindTestFlow(t *testing.T, db *gorm.DB, name string, status int, now time.Time) (*model.User, string) {
 	t.Helper()
 	user := &model.User{
