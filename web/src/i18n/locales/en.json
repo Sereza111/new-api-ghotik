@@ -2781,6 +2781,7 @@
     "Low balance": "Low balance",
     "Lowest median first-token latency": "Lowest median first-token latency",
     "m": "m",
+    "macOS / Linux": "macOS / Linux",
     "Maintenance": "Maintenance",
     "Make extra groups visible to, or hide default groups from, users of a specific group.": "Make extra groups visible to, or hide default groups from, users of a specific group.",
     "Make it easier for teammates to pick the right group.": "Make it easier for teammates to pick the right group.",
@@ -3439,6 +3440,7 @@
     "OpenRouter": "OpenRouter",
     "opens in an external client. Trigger it from the sidebar or API key actions to launch the configured application.": "opens in an external client. Trigger it from the sidebar or API key actions to launch the configured application.",
     "Operate channels": "Operate channels",
+    "Operating system": "Operating system",
     "Operation": "Operation",
     "operation and charging behavior": "operation and charging behavior",
     "Operation Audit Info": "Operation Audit Info",
@@ -4109,6 +4111,7 @@
     "Replace mode: Will completely replace all existing keys": "Replace mode: Will completely replace all existing keys",
     "Replace sk-your-key in the request below.": "Replace sk-your-key in the request below.",
     "Replace the example key and model with your own values.": "Replace the example key and model with your own values.",
+    "Replace the placeholder key and save it to {{path}}.": "Replace the placeholder key and save it to {{path}}.",
     "Replace With": "Replace With",
     "replaced": "replaced",
     "Replacement Model": "Replacement Model",
@@ -4343,6 +4346,7 @@
     "Save SMTP settings": "Save SMTP settings",
     "Save SSRF settings": "Save SSRF settings",
     "Save Stripe settings": "Save Stripe settings",
+    "Save the Codex configuration to {{path}}.": "Save the Codex configuration to {{path}}.",
     "Save these backup codes in a safe place. Each code can only be used once.": "Save these backup codes in a safe place. Each code can only be used once.",
     "Save these codes in a safe place. Each code can only be used once.": "Save these codes in a safe place. Each code can only be used once.",
     "Save this token now. You won't be able to view it again after closing this dialog.": "Save this token now. You won't be able to view it again after closing this dialog.",
@@ -5610,6 +5614,7 @@
     "Waiting": "Waiting",
     "Waiting for email...": "Waiting for email...",
     "Wallet": "Wallet",
+    "Wallet balance is too high to accept this top-up": "Wallet balance is too high to accept this top-up",
     "Wallet First": "Wallet First",
     "Wallet Management": "Wallet Management",
     "Wallet management and personal preferences.": "Wallet management and personal preferences.",
@@ -5681,6 +5686,7 @@
     "whsec_xxx": "whsec_xxx",
     "Why only one store + product?": "Why only one store + product?",
     "Window:": "Window:",
+    "Windows": "Windows",
     "Wire encoding for the embedding vectors": "Wire encoding for the embedding vectors",
     "with conflicts": "with conflicts",
     "with the API key from your token settings.": "with the API key from your token settings.",
@@ -5743,7 +5749,6 @@
     "Zero retention": "Zero retention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom",
-    "Wallet balance is too high to accept this top-up": "Wallet balance is too high to accept this top-up"
+    "Zoom": "Zoom"
   }
 }

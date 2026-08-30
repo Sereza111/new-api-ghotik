@@ -2781,6 +2781,7 @@
     "Low balance": "Solde faible",
     "Lowest median first-token latency": "Latence médiane de premier jeton la plus faible",
     "m": "m",
+    "macOS / Linux": "macOS / Linux",
     "Maintenance": "Maintenance",
     "Make extra groups visible to, or hide default groups from, users of a specific group.": "Rendre des groupes supplémentaires visibles pour les utilisateurs d’un groupe donné, ou leur masquer des groupes par défaut.",
     "Make it easier for teammates to pick the right group.": "Faciliter le choix du bon groupe pour les coéquipiers.",
@@ -3439,6 +3440,7 @@
     "OpenRouter": "OpenRouter",
     "opens in an external client. Trigger it from the sidebar or API key actions to launch the configured application.": "s'ouvre dans un client externe. Déclenchez-le depuis la barre latérale ou les actions de clé API pour lancer l'application configurée.",
     "Operate channels": "Exploiter les canaux",
+    "Operating system": "Système d’exploitation",
     "Operation": "Opération",
     "operation and charging behavior": "à l’exploitation et à la facturation",
     "Operation Audit Info": "Informations d'audit d'opération",
@@ -4109,6 +4111,7 @@
     "Replace mode: Will completely replace all existing keys": "Mode remplacement : Remplacera complètement toutes les clés existantes",
     "Replace sk-your-key in the request below.": "Remplacez sk-your-key dans la requête ci-dessous.",
     "Replace the example key and model with your own values.": "Remplacez la clé et le modèle d’exemple par vos propres valeurs.",
+    "Replace the placeholder key and save it to {{path}}.": "Remplacez la clé fictive et enregistrez-la dans {{path}}.",
     "Replace With": "Remplacer par",
     "replaced": "remplacé",
     "Replacement Model": "Modèle de remplacement",
@@ -4343,6 +4346,7 @@
     "Save SMTP settings": "Enregistrer les paramètres SMTP",
     "Save SSRF settings": "Enregistrer les paramètres SSRF",
     "Save Stripe settings": "Enregistrer les paramètres Stripe",
+    "Save the Codex configuration to {{path}}.": "Enregistrez la configuration Codex dans {{path}}.",
     "Save these backup codes in a safe place. Each code can only be used once.": "Enregistrez ces codes de secours dans un endroit sûr. Chaque code ne peut être utilisé qu'une seule fois.",
     "Save these codes in a safe place. Each code can only be used once.": "Enregistrez ces codes dans un endroit sûr. Chaque code ne peut être utilisé qu'une seule fois.",
     "Save this token now. You won't be able to view it again after closing this dialog.": "Enregistrez ce jeton maintenant. Vous ne pourrez plus le consulter après la fermeture de cette boîte de dialogue.",
@@ -5610,6 +5614,7 @@
     "Waiting": "En attente",
     "Waiting for email...": "En attente de l'e-mail...",
     "Wallet": "Portefeuille",
+    "Wallet balance is too high to accept this top-up": "Le solde du portefeuille est trop élevé pour accepter ce rechargement",
     "Wallet First": "Portefeuille en priorité",
     "Wallet Management": "Gestion du portefeuille",
     "Wallet management and personal preferences.": "Gestion du portefeuille et préférences personnelles.",
@@ -5681,6 +5686,7 @@
     "whsec_xxx": "whsec_xxx",
     "Why only one store + product?": "Pourquoi une seule boutique + un seul produit ?",
     "Window:": "Fenêtre :",
+    "Windows": "Windows",
     "Wire encoding for the embedding vectors": "Encodage filaire pour les vecteurs",
     "with conflicts": "avec des conflits",
     "with the API key from your token settings.": "par la clé API de votre page de jetons.",
@@ -5743,7 +5749,6 @@
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom",
-    "Wallet balance is too high to accept this top-up": "Le solde du portefeuille est trop élevé pour accepter ce rechargement"
+    "Zoom": "Zoom"
   }
 }

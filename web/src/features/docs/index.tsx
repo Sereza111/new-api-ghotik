@@ -1,3 +1,21 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
 import { Link } from '@tanstack/react-router'
 import {
   ArrowRight,
@@ -17,7 +35,10 @@ import { PublicLayout } from '@/components/layout/components/public-layout'
 import { PageTransition } from '@/components/page-transition'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
+
+import { getCodexSetup, type SetupFile } from './codex-setup'
 
 const CLIENTS = ['codex', 'cursor', 'openai-sdk', 'curl'] as const
 
@@ -30,54 +51,118 @@ const CLIENT_LABELS: Record<Client, string> = {
   curl: 'cURL',
 }
 
+type ClientGuide = {
+  steps: string[]
+  files: SetupFile[]
+}
+
+function GuideFile(props: { file: SetupFile }) {
+  const { t } = useTranslation()
+
+  return (
+    <div className='min-w-0'>
+      <div className='bg-card flex items-center justify-between rounded-t-md border border-b-0 px-4 py-2.5'>
+        <span className='text-muted-foreground truncate pr-3 font-mono text-xs'>
+          {props.file.filename}
+        </span>
+        <CopyButton
+          value={props.file.snippet}
+          tooltip={t('Copy configuration')}
+          aria-label={t('Copy configuration')}
+        />
+      </div>
+      <div className='bg-card overflow-x-auto rounded-b-md border p-4'>
+        <pre className='min-h-32 font-mono text-xs leading-6 whitespace-pre'>
+          <code>{props.file.snippet}</code>
+        </pre>
+      </div>
+    </div>
+  )
+}
+
+function GuideDetails(props: { guide: ClientGuide }) {
+  const { t } = useTranslation()
+
+  return (
+    <div className='mt-7 grid gap-8 xl:grid-cols-[minmax(15rem,0.7fr)_minmax(0,1.3fr)]'>
+      <div>
+        <h3 className='text-sm font-semibold'>{t('Setup steps')}</h3>
+        <ol className='mt-4 space-y-4'>
+          {props.guide.steps.map((step, index) => (
+            <li key={step} className='flex gap-3 text-sm leading-6'>
+              <span className='border-border text-primary grid size-7 shrink-0 place-items-center rounded-full border font-mono text-xs'>
+                {index + 1}
+              </span>
+              <span className='min-w-0 pt-0.5 break-words'>{step}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+
+      <div className='min-w-0 space-y-4'>
+        {props.guide.files.map((file) => (
+          <GuideFile key={file.filename} file={file} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function Docs() {
   const { t } = useTranslation()
   const [client, setClient] = useState<Client>('codex')
   const origin = typeof window === 'undefined' ? '' : window.location.origin
   const baseUrl = `${origin}/v1`
 
-  const clientGuides: Record<
-    Client,
-    { steps: string[]; filename: string; snippet: string }
-  > = {
-    codex: {
-      filename: '~/.codex/config.toml',
+  const getCodexGuide = (platform: 'windows' | 'unix'): ClientGuide => {
+    const setup = getCodexSetup(baseUrl, platform)
+    return {
       steps: [
         t('Create an API key in the console.'),
-        t('Set the VL_API_KEY environment variable to your key.'),
-        t('Add the provider configuration to ~/.codex/config.toml.'),
+        t('Save the Codex configuration to {{path}}.', {
+          path: setup.configPath,
+        }),
+        t('Replace the placeholder key and save it to {{path}}.', {
+          path: setup.authPath,
+        }),
         t('Start Codex and send a test prompt.'),
       ],
-      snippet: `model = "gpt-5.6-sol"
-model_provider = "vl"
+      files: setup.files,
+    }
+  }
 
-[model_providers.vl]
-name = "VL API"
-base_url = "${baseUrl}"
-env_key = "VL_API_KEY"
-wire_api = "responses"`,
+  const clientGuides: Record<Client, ClientGuide> = {
+    codex: {
+      steps: [],
+      files: [],
     },
     cursor: {
-      filename: 'Cursor Settings',
       steps: [
         t('Create an API key in the console.'),
         t('Open the model provider settings in Cursor.'),
         t('Enter the API key and the base URL shown below.'),
         t('Select an available model and send a test prompt.'),
       ],
-      snippet: `${t('Base URL')}: ${baseUrl}
+      files: [
+        {
+          filename: 'Cursor Settings',
+          snippet: `${t('Base URL')}: ${baseUrl}
 ${t('API key')}: sk-your-key
 ${t('Model')}: gpt-5.6-sol`,
+        },
+      ],
     },
     'openai-sdk': {
-      filename: 'example.py',
       steps: [
         t('Install the official OpenAI SDK.'),
         t('Create an API key in the console.'),
         t('Use the key and base URL in the client configuration.'),
         t('Run the example and verify the response.'),
       ],
-      snippet: `from openai import OpenAI
+      files: [
+        {
+          filename: 'example.py',
+          snippet: `from openai import OpenAI
 
 client = OpenAI(
     api_key="sk-your-key",
@@ -89,19 +174,25 @@ response = client.responses.create(
     input="Hello",
 )
 print(response.output_text)`,
+        },
+      ],
     },
     curl: {
-      filename: 'Terminal',
       steps: [
         t('Create an API key in the console.'),
         t('Replace sk-your-key in the request below.'),
         t('Choose a model from the model catalog.'),
         t('Run the command in your terminal.'),
       ],
-      snippet: `curl ${baseUrl}/chat/completions \\
+      files: [
+        {
+          filename: 'Terminal',
+          snippet: `curl ${baseUrl}/chat/completions \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer sk-your-key" \\
   -d '{"model":"gpt-5.6-sol","messages":[{"role":"user","content":"Hello"}]}'`,
+        },
+      ],
     },
   }
 
@@ -168,39 +259,22 @@ print(response.output_text)`,
               </Badge>
             </div>
 
-            <div className='mt-7 grid gap-8 xl:grid-cols-[minmax(15rem,0.7fr)_minmax(0,1.3fr)]'>
-              <div>
-                <h3 className='text-sm font-semibold'>{t('Setup steps')}</h3>
-                <ol className='mt-4 space-y-4'>
-                  {selectedGuide.steps.map((step, index) => (
-                    <li key={step} className='flex gap-3 text-sm leading-6'>
-                      <span className='border-border text-primary grid size-7 shrink-0 place-items-center rounded-full border font-mono text-xs'>
-                        {index + 1}
-                      </span>
-                      <span className='pt-0.5'>{step}</span>
-                    </li>
-                  ))}
-                </ol>
-              </div>
-
-              <div className='min-w-0'>
-                <div className='bg-card flex items-center justify-between rounded-t-md border border-b-0 px-4 py-2.5'>
-                  <span className='text-muted-foreground font-mono text-xs'>
-                    {selectedGuide.filename}
-                  </span>
-                  <CopyButton
-                    value={selectedGuide.snippet}
-                    tooltip={t('Copy configuration')}
-                    aria-label={t('Copy configuration')}
-                  />
-                </div>
-                <div className='bg-card overflow-x-auto rounded-b-md border p-4'>
-                  <pre className='min-h-52 font-mono text-xs leading-6 whitespace-pre'>
-                    <code>{selectedGuide.snippet}</code>
-                  </pre>
-                </div>
-              </div>
-            </div>
+            {client === 'codex' ? (
+              <Tabs defaultValue='windows' className='mt-7'>
+                <TabsList variant='line' aria-label={t('Operating system')}>
+                  <TabsTrigger value='windows'>{t('Windows')}</TabsTrigger>
+                  <TabsTrigger value='unix'>{t('macOS / Linux')}</TabsTrigger>
+                </TabsList>
+                <TabsContent value='windows'>
+                  <GuideDetails guide={getCodexGuide('windows')} />
+                </TabsContent>
+                <TabsContent value='unix'>
+                  <GuideDetails guide={getCodexGuide('unix')} />
+                </TabsContent>
+              </Tabs>
+            ) : (
+              <GuideDetails guide={selectedGuide} />
+            )}
           </div>
         </section>
 

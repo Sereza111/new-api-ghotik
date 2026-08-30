@@ -2781,6 +2781,7 @@
     "Low balance": "残高不足",
     "Lowest median first-token latency": "最初のトークンまでの中央値レイテンシの最小値",
     "m": "m",
+    "macOS / Linux": "macOS / Linux",
     "Maintenance": "メンテナンス",
     "Make extra groups visible to, or hide default groups from, users of a specific group.": "特定グループのユーザーに追加のグループを表示したり、デフォルトのグループを非表示にしたりします。",
     "Make it easier for teammates to pick the right group.": "チームメイトが適切なグループを選択しやすくする。",
@@ -3439,6 +3440,7 @@
     "OpenRouter": "OpenRouter",
     "opens in an external client. Trigger it from the sidebar or API key actions to launch the configured application.": "外部クライアントで開きます。サイドバーまたはAPIキーアクションからトリガーして、設定されたアプリケーションを起動します。",
     "Operate channels": "チャネルを運用",
+    "Operating system": "オペレーティングシステム",
     "Operation": "操作",
     "operation and charging behavior": "運用および課金行為に起因する法的責任を負うことを確認します",
     "Operation Audit Info": "操作監査情報",
@@ -4109,6 +4111,7 @@
     "Replace mode: Will completely replace all existing keys": "置換モード: 既存のすべてのキーを完全に置き換えます",
     "Replace sk-your-key in the request below.": "以下のリクエストの sk-your-key を置き換えます。",
     "Replace the example key and model with your own values.": "サンプルのキーとモデルを自分の値に置き換えてください。",
+    "Replace the placeholder key and save it to {{path}}.": "プレースホルダーのキーを置き換えて {{path}} に保存します。",
     "Replace With": "置換後",
     "replaced": "置換済み",
     "Replacement Model": "代替モデル",
@@ -4343,6 +4346,7 @@
     "Save SMTP settings": "SMTP設定を保存",
     "Save SSRF settings": "SSRF 設定を保存",
     "Save Stripe settings": "Stripe設定を保存",
+    "Save the Codex configuration to {{path}}.": "Codex の設定を {{path}} に保存します。",
     "Save these backup codes in a safe place. Each code can only be used once.": "これらのバックアップコードを安全な場所に保存してください。各コードは一度だけ使用できます。",
     "Save these codes in a safe place. Each code can only be used once.": "これらのコードを安全な場所に保存してください。各コードは一度だけ使用できます。",
     "Save this token now. You won't be able to view it again after closing this dialog.": "このトークンを今すぐ保存してください。このダイアログを閉じると、再度表示できません。",
@@ -5610,6 +5614,7 @@
     "Waiting": "待機中",
     "Waiting for email...": "メールを待っています...",
     "Wallet": "ウォレット",
+    "Wallet balance is too high to accept this top-up": "ウォレット残高が高すぎるため、このチャージを受け付けられません",
     "Wallet First": "ウォレット優先",
     "Wallet Management": "ウォレット管理",
     "Wallet management and personal preferences.": "ウォレット管理と個人設定。",
@@ -5681,6 +5686,7 @@
     "whsec_xxx": "whsec_xxx",
     "Why only one store + product?": "なぜストア + 商品は 1 つだけなのか？",
     "Window:": "ウィンドウ：",
+    "Windows": "Windows",
     "Wire encoding for the embedding vectors": "ベクトルの転送エンコーディング",
     "with conflicts": "競合あり",
     "with the API key from your token settings.": "をトークン設定の API キーに置き換えてください。",
@@ -5743,7 +5749,6 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム",
-    "Wallet balance is too high to accept this top-up": "ウォレット残高が高すぎるため、このチャージを受け付けられません"
+    "Zoom": "ズーム"
   }
 }

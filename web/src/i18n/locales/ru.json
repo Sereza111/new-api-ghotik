@@ -2781,6 +2781,7 @@
     "Low balance": "Низкий баланс",
     "Lowest median first-token latency": "Минимальная медианная задержка первого токена",
     "m": "m",
+    "macOS / Linux": "macOS / Linux",
     "Maintenance": "Обслуживание",
     "Make extra groups visible to, or hide default groups from, users of a specific group.": "Показать дополнительные группы пользователям определённой группы или скрыть от них группы по умолчанию.",
     "Make it easier for teammates to pick the right group.": "Упростите выбор правильной группы для товарищей по команде.",
@@ -3439,6 +3440,7 @@
     "OpenRouter": "OpenRouter",
     "opens in an external client. Trigger it from the sidebar or API key actions to launch the configured application.": "открывается во внешнем клиенте. Запустите его из боковой панели или действий с ключом API, чтобы запустить настроенное приложение.",
     "Operate channels": "Обслуживание каналов",
+    "Operating system": "Операционная система",
     "Operation": "Операция",
     "operation and charging behavior": "эксплуатацию и взимание платы",
     "Operation Audit Info": "Информация об аудите операций",
@@ -4109,6 +4111,7 @@
     "Replace mode: Will completely replace all existing keys": "Режим замены: полностью заменит все существующие ключи",
     "Replace sk-your-key in the request below.": "Замените sk-your-key в запросе ниже.",
     "Replace the example key and model with your own values.": "Замените пример ключа и модели своими значениями.",
+    "Replace the placeholder key and save it to {{path}}.": "Замените ключ-заглушку и сохраните файл в {{path}}.",
     "Replace With": "Заменить на",
     "replaced": "заменено",
     "Replacement Model": "Модель замены",
@@ -4343,6 +4346,7 @@
     "Save SMTP settings": "Сохранить настройки SMTP",
     "Save SSRF settings": "Сохранить настройки SSRF",
     "Save Stripe settings": "Сохранить настройки Stripe",
+    "Save the Codex configuration to {{path}}.": "Сохраните конфигурацию Codex в {{path}}.",
     "Save these backup codes in a safe place. Each code can only be used once.": "Сохраните эти резервные коды в безопасном месте. Каждый код может быть использован только один раз.",
     "Save these codes in a safe place. Each code can only be used once.": "Сохраните эти коды в безопасном месте. Каждый код может быть использован только один раз.",
     "Save this token now. You won't be able to view it again after closing this dialog.": "Сохраните этот токен сейчас. После закрытия диалогового окна вы не сможете просмотреть его снова.",
@@ -5610,6 +5614,7 @@
     "Waiting": "Ожидание",
     "Waiting for email...": "Ожидание письма...",
     "Wallet": "Кошелек",
+    "Wallet balance is too high to accept this top-up": "Баланс кошелька слишком велик для этого пополнения",
     "Wallet First": "Кошелёк в приоритете",
     "Wallet Management": "Управление кошельком",
     "Wallet management and personal preferences.": "Управление кошельком и личные предпочтения.",
@@ -5681,6 +5686,7 @@
     "whsec_xxx": "whsec_xxx",
     "Why only one store + product?": "Почему только один магазин и продукт?",
     "Window:": "Окно:",
+    "Windows": "Windows",
     "Wire encoding for the embedding vectors": "Кодирование векторов в передаче",
     "with conflicts": "с конфликтами",
     "with the API key from your token settings.": "на API-ключ из настроек токенов.",
@@ -5743,7 +5749,6 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom",
-    "Wallet balance is too high to accept this top-up": "Баланс кошелька слишком велик для этого пополнения"
+    "Zoom": "Zoom"
   }
 }

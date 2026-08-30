@@ -2781,6 +2781,7 @@
     "Low balance": "餘額偏低",
     "Lowest median first-token latency": "最低首 token 延遲中位數",
     "m": "分鐘",
+    "macOS / Linux": "macOS / Linux",
     "Maintenance": "維護",
     "Make extra groups visible to, or hide default groups from, users of a specific group.": "讓特定分組的用戶額外看到某些分組，或對其屏蔽預設可選的分組。",
     "Make it easier for teammates to pick the right group.": "讓隊友更容易選擇正確的分組。",
@@ -3439,6 +3440,7 @@
     "OpenRouter": "OpenRouter",
     "opens in an external client. Trigger it from the sidebar or API key actions to launch the configured application.": "在外部用戶端中打開。從側邊欄或 API 金鑰操作中觸發，以啟動設定的套用。",
     "Operate channels": "運維渠道",
+    "Operating system": "作業系統",
     "Operation": "操作",
     "operation and charging behavior": "運營和收費行為產生的法律責任",
     "Operation Audit Info": "操作審計資訊",
@@ -4109,6 +4111,7 @@
     "Replace mode: Will completely replace all existing keys": "替換模式：將完全替換所有現有鍵",
     "Replace sk-your-key in the request below.": "將下方請求中的 sk-your-key 替換為您的金鑰。",
     "Replace the example key and model with your own values.": "請將範例金鑰與模型替換為您自己的值。",
+    "Replace the placeholder key and save it to {{path}}.": "替換預留位置金鑰並儲存至 {{path}}。",
     "Replace With": "替換為",
     "replaced": "已替換",
     "Replacement Model": "替換模型",
@@ -4343,6 +4346,7 @@
     "Save SMTP settings": "儲存 SMTP 設定",
     "Save SSRF settings": "儲存 SSRF 設定",
     "Save Stripe settings": "儲存 Stripe 設定",
+    "Save the Codex configuration to {{path}}.": "將 Codex 設定儲存至 {{path}}。",
     "Save these backup codes in a safe place. Each code can only be used once.": "將這些備份代碼儲存在安全的地方。每個代碼只能使用一次。",
     "Save these codes in a safe place. Each code can only be used once.": "將這些代碼儲存在安全的地方。每個代碼只能使用一次。",
     "Save this token now. You won't be able to view it again after closing this dialog.": "請立即儲存此令牌。關閉此對話框後，您將無法再次查看。",
@@ -5610,6 +5614,7 @@
     "Waiting": "等待中",
     "Waiting for email...": "等待電郵...",
     "Wallet": "錢包",
+    "Wallet balance is too high to accept this top-up": "錢包餘額過高，無法接受此次儲值",
     "Wallet First": "優先錢包",
     "Wallet Management": "錢包管理",
     "Wallet management and personal preferences.": "錢包管理和個人偏好設定。",
@@ -5681,6 +5686,7 @@
     "whsec_xxx": "whsec_xxx",
     "Why only one store + product?": "為什麼只需要一個店鋪和產品？",
     "Window:": "窗口：",
+    "Windows": "Windows",
     "Wire encoding for the embedding vectors": "向量傳輸的編碼格式",
     "with conflicts": "有衝突",
     "with the API key from your token settings.": "替換為令牌設定中的 API Key。",
@@ -5743,7 +5749,6 @@
     "Zero retention": "零數據保留",
     "Zhipu": "智譜",
     "Zhipu V4": "智譜 V4",
-    "Zoom": "縮放",
-    "Wallet balance is too high to accept this top-up": "錢包餘額過高，無法接受此次儲值"
+    "Zoom": "縮放"
   }
 }

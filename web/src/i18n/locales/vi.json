@@ -2781,6 +2781,7 @@
     "Low balance": "Số dư thấp",
     "Lowest median first-token latency": "Độ trễ trung vị token đầu tiên thấp nhất",
     "m": "m",
+    "macOS / Linux": "macOS / Linux",
     "Maintenance": "Bảo trì",
     "Make extra groups visible to, or hide default groups from, users of a specific group.": "Hiển thị thêm nhóm cho người dùng của một nhóm cụ thể, hoặc ẩn các nhóm mặc định khỏi họ.",
     "Make it easier for teammates to pick the right group.": "Giúp đồng đội dễ dàng chọn đúng nhóm hơn.",
@@ -3439,6 +3440,7 @@
     "OpenRouter": "OpenRouter",
     "opens in an external client. Trigger it from the sidebar or API key actions to launch the configured application.": "mở trong một ứng dụng bên ngoài. Kích hoạt nó từ thanh bên hoặc các hành động khóa API để khởi chạy ứng dụng đã cấu hình.",
     "Operate channels": "Vận hành kênh",
+    "Operating system": "Hệ điều hành",
     "Operation": "Thao tác",
     "operation and charging behavior": "vận hành và thu phí",
     "Operation Audit Info": "Thông tin kiểm toán thao tác",
@@ -4109,6 +4111,7 @@
     "Replace mode: Will completely replace all existing keys": "Chế độ Thay thế: Sẽ thay thế hoàn toàn tất cả các khóa hiện có",
     "Replace sk-your-key in the request below.": "Thay sk-your-key trong yêu cầu bên dưới.",
     "Replace the example key and model with your own values.": "Thay khóa và mô hình mẫu bằng giá trị của bạn.",
+    "Replace the placeholder key and save it to {{path}}.": "Thay khóa giữ chỗ và lưu vào {{path}}.",
     "Replace With": "Thay bằng",
     "replaced": "thay thế",
     "Replacement Model": "Replacement model",
@@ -4343,6 +4346,7 @@
     "Save SMTP settings": "Lưu cài đặt SMTP",
     "Save SSRF settings": "Lưu cài đặt SSRF",
     "Save Stripe settings": "Lưu cài đặt Stripe",
+    "Save the Codex configuration to {{path}}.": "Lưu cấu hình Codex vào {{path}}.",
     "Save these backup codes in a safe place. Each code can only be used once.": "Lưu các mã dự phòng này ở nơi an toàn. Mỗi mã chỉ được sử dụng một lần.",
     "Save these codes in a safe place. Each code can only be used once.": "Hãy lưu các mã này ở nơi an toàn. Mỗi mã chỉ có thể được sử dụng một lần.",
     "Save this token now. You won't be able to view it again after closing this dialog.": "Hãy lưu token này ngay. Bạn sẽ không thể xem lại sau khi đóng hộp thoại.",
@@ -5610,6 +5614,7 @@
     "Waiting": "Đang chờ",
     "Waiting for email...": "Đang chờ email...",
     "Wallet": "Ví",
+    "Wallet balance is too high to accept this top-up": "Số dư ví quá cao để nhận khoản nạp này",
     "Wallet First": "Ưu tiên ví",
     "Wallet Management": "Quản lý ví",
     "Wallet management and personal preferences.": "Quản lý ví và sở thích cá nhân.",
@@ -5681,6 +5686,7 @@
     "whsec_xxx": "whsec_xxx",
     "Why only one store + product?": "Tại sao chỉ một cửa hàng + sản phẩm?",
     "Window:": "Cửa sổ:",
+    "Windows": "Windows",
     "Wire encoding for the embedding vectors": "Định dạng truyền cho vector embedding",
     "with conflicts": "với các xung đột",
     "with the API key from your token settings.": "bằng API key từ trang Tokens của bạn.",
@@ -5743,7 +5749,6 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom",
-    "Wallet balance is too high to accept this top-up": "Số dư ví quá cao để nhận khoản nạp này"
+    "Zoom": "Zoom"
   }
 }
