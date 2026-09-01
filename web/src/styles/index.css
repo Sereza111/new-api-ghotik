@@ -578,16 +578,21 @@ For commercial licensing, please contact support@quantumnous.com
   animation: landing-fade-right 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-@keyframes fortune-wheel-turn {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .vl-public-surface {
   --primary: oklch(0.82 0.055 230);
   --primary-foreground: oklch(0.15 0.018 235);
   --ring: oklch(0.74 0.06 230);
+}
+
+.fortune-atmosphere-surface {
+  position: relative;
+  min-height: 100svh;
+  isolation: isolate;
+}
+
+.fortune-page-content {
+  position: relative;
+  z-index: 1;
 }
 
 .vl-brand-mark {
@@ -595,10 +600,222 @@ For commercial licensing, please contact support@quantumnous.com
   background: color-mix(in oklch, oklch(0.82 0.055 230) 7%, transparent);
 }
 
-.fortune-wheel-rotor {
-  animation: fortune-wheel-turn 36s linear infinite;
-  transform-origin: center;
-  will-change: transform;
+@keyframes fortune-orbit-turn {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.fortune-scene {
+  --fortune-cyan: oklch(0.78 0.055 220);
+  --fortune-paper: oklch(0.86 0.012 100);
+  --fortune-gold: oklch(0.69 0.052 83);
+  container-type: inline-size;
+  filter: drop-shadow(0 1.75rem 2.5rem rgb(0 0 0 / 0.55));
+  touch-action: pan-y;
+}
+
+.fortune-atmosphere {
+  pointer-events: none;
+  position: fixed;
+  z-index: 0;
+  inset: 0;
+  display: block;
+  width: 100vw;
+  height: 100dvh;
+  opacity: 0;
+  mix-blend-mode: screen;
+}
+
+.dark .fortune-atmosphere {
+  opacity: 0.9;
+}
+
+.fortune-oracle-frame,
+.fortune-living-engraving {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+}
+
+.fortune-oracle-frame {
+  z-index: 1;
+}
+
+.fortune-living-engraving {
+  z-index: 2;
+  margin: 0;
+}
+
+.fortune-oracle-art,
+.fortune-oracle-fallback {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.fortune-oracle-art {
+  opacity: 0;
+  filter: drop-shadow(0 1rem 1.4rem rgb(0 0 0 / 0.5));
+  transition: opacity 700ms ease;
+}
+
+.fortune-oracle-fallback {
+  object-fit: contain;
+  filter: grayscale(1) contrast(1.16) brightness(0.82);
+  mix-blend-mode: screen;
+  opacity: 0.76;
+  transition: opacity 500ms ease;
+}
+
+.fortune-scene[data-fortune-ready='true'] .fortune-oracle-art {
+  opacity: 1;
+}
+
+.fortune-scene[data-fortune-ready='true'] .fortune-oracle-fallback {
+  opacity: 0;
+}
+
+.fortune-orbit,
+.fortune-diamond {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  aspect-ratio: 1;
+  translate: -50% -50%;
+}
+
+.fortune-orbit {
+  border: 1px solid color-mix(in oklch, var(--fortune-cyan) 24%, transparent);
+  border-radius: 50%;
+  animation: fortune-orbit-turn 72s linear infinite;
+}
+
+.fortune-orbit-outer {
+  width: 96%;
+}
+
+.fortune-orbit-inner {
+  width: 70%;
+  border-style: dotted;
+  animation-direction: reverse;
+  animation-duration: 48s;
+}
+
+.fortune-orbit i {
+  position: absolute;
+  width: clamp(0.35rem, 2cqi, 0.58rem);
+  aspect-ratio: 1;
+  border: 1px solid color-mix(in oklch, var(--fortune-paper) 58%, transparent);
+  background: #070809;
+  rotate: 45deg;
+}
+
+.fortune-orbit i:nth-child(1) {
+  top: 0;
+  left: 50%;
+  translate: -50% -50%;
+}
+
+.fortune-orbit i:nth-child(2) {
+  top: 50%;
+  right: 0;
+  translate: 50% -50%;
+}
+
+.fortune-orbit i:nth-child(3) {
+  bottom: 0;
+  left: 50%;
+  translate: -50% 50%;
+}
+
+.fortune-orbit i:nth-child(4) {
+  top: 50%;
+  left: 0;
+  translate: -50% -50%;
+}
+
+.fortune-diamond {
+  border: 1px solid color-mix(in oklch, var(--fortune-paper) 12%, transparent);
+  rotate: 45deg;
+}
+
+.fortune-diamond-a {
+  width: 82%;
+}
+
+.fortune-diamond-b {
+  width: 60%;
+  border-color: color-mix(in oklch, var(--fortune-gold) 18%, transparent);
+  rotate: 67.5deg;
+}
+
+.fortune-sigil {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  width: clamp(1.4rem, 7cqi, 1.9rem);
+  aspect-ratio: 1;
+  place-items: center;
+  border: 1px solid color-mix(in oklch, var(--fortune-paper) 30%, transparent);
+  border-radius: 50%;
+  background: rgb(6 8 9 / 0.82);
+  color: color-mix(in oklch, var(--fortune-paper) 64%, transparent);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: clamp(0.38rem, 1.5cqi, 0.48rem);
+}
+
+.fortune-sigil-n {
+  top: 2%;
+  left: 50%;
+  translate: -50% -50%;
+}
+
+.fortune-sigil-e {
+  top: 50%;
+  right: 2%;
+  translate: 50% -50%;
+}
+
+.fortune-sigil-s {
+  bottom: 2%;
+  left: 50%;
+  translate: -50% 50%;
+}
+
+.fortune-sigil-w {
+  top: 50%;
+  left: 2%;
+  translate: -50% -50%;
+}
+
+.fortune-caption {
+  pointer-events: none;
+  position: absolute;
+  z-index: 3;
+  bottom: 1.5%;
+  left: 50%;
+  translate: -50% 0;
+  color: color-mix(in oklch, var(--fortune-paper) 44%, transparent);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: clamp(0.35rem, 1.45cqi, 0.44rem);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.fortune-caption span {
+  margin-left: 0.8rem;
+  color: var(--fortune-gold);
+}
+
+.fortune-scene[data-motion-paused='true'] .fortune-orbit {
+  animation-play-state: paused;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -607,7 +824,7 @@ For commercial licensing, please contact support@quantumnous.com
   .landing-animate-scale-in,
   .landing-animate-fade-left,
   .landing-animate-fade-right,
-  .fortune-wheel-rotor {
+  .fortune-orbit {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;

@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+
 import { render, screen } from '@testing-library/react'
 import { createInstance } from 'i18next'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
@@ -33,7 +34,7 @@ beforeAll(async () => {
 })
 
 describe('gothic fortune wheel', () => {
-  test('animates only the inner rotor and supports reduced motion', () => {
+  test('keeps an accessible static fallback behind decorative WebGL layers', () => {
     render(
       <I18nextProvider i18n={i18n}>
         <FortuneWheel />
@@ -43,13 +44,18 @@ describe('gothic fortune wheel', () => {
     const frame = screen.getByRole('figure', {
       name: 'Gothic Wheel of Fortune',
     })
-    const rotor = screen.getByTestId('fortune-wheel-rotor')
     const staticFrame = screen.getByTestId('fortune-wheel-frame')
+    const fallback = screen.getByTestId('fortune-wheel-fallback')
+    const artwork = screen.getByTestId('fortune-wheel-art')
 
-    expect(frame).not.toHaveClass('fortune-wheel-rotor')
-    expect(staticFrame).toHaveClass('absolute')
-    expect(staticFrame).not.toHaveClass('fortune-wheel-rotor')
-    expect(rotor).toHaveClass('fortune-wheel-rotor')
-    expect(rotor).toHaveClass('motion-reduce:animate-none')
+    expect(frame).toHaveClass('aspect-square')
+    expect(frame).toHaveAttribute('data-fortune-ready', 'false')
+    expect(staticFrame).toHaveAttribute('aria-hidden', 'true')
+    expect(fallback).toHaveAttribute(
+      'src',
+      expect.stringContaining('fortune-reference')
+    )
+    expect(fallback).toHaveAttribute('alt', '')
+    expect(artwork.closest('[aria-hidden="true"]')).not.toBeNull()
   })
 })

@@ -20,6 +20,7 @@ import { Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 
 import { Skeleton } from '@/components/ui/skeleton'
+import { FortuneAtmosphere } from '@/features/home/components/fortune-atmosphere'
 import { FortuneWheel } from '@/features/home/components/fortune-wheel'
 import { useSystemConfig } from '@/hooks/use-system-config'
 
@@ -34,11 +35,12 @@ export function AuthLayout({ children }: AuthLayoutProps) {
   return (
     <div
       data-auth-layout='gothic'
-      className='bg-background relative grid min-h-svh max-w-none overflow-x-hidden'
+      className='bg-background fortune-atmosphere-surface relative grid min-h-svh max-w-none overflow-x-hidden'
     >
+      <FortuneAtmosphere />
       <div
         aria-hidden='true'
-        className='border-primary/20 pointer-events-none absolute inset-x-0 top-20 border-t'
+        className='border-primary/20 pointer-events-none absolute inset-x-0 top-20 z-10 border-t'
       />
       <Link
         to='/'
@@ -61,7 +63,7 @@ export function AuthLayout({ children }: AuthLayoutProps) {
           <span className='font-serif text-xl font-semibold'>{systemName}</span>
         )}
       </Link>
-      <div className='mx-auto grid min-h-svh w-full max-w-[1280px] items-center gap-10 px-4 pt-24 pb-8 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(420px,520px)] lg:pt-28'>
+      <div className='relative z-10 mx-auto grid min-h-svh w-full max-w-[1280px] items-center gap-10 px-4 pt-24 pb-8 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(420px,520px)] lg:pt-28'>
         <section className='hidden min-w-0 items-center gap-8 lg:grid lg:grid-cols-[minmax(0,1fr)_19rem]'>
           <div className='min-w-0 space-y-6'>
             <p className='text-primary text-xs font-semibold uppercase'>

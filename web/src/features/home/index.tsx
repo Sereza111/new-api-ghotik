@@ -27,6 +27,7 @@ import { isLikelyHtml } from '@/lib/content-format'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { CTA, Hero, HowItWorks, PlatformOverview } from './components'
+import { FortuneAtmosphere } from './components/fortune-atmosphere'
 import { useHomePageContent } from './hooks'
 
 export function Home() {
@@ -122,12 +123,15 @@ export function Home() {
 
   return (
     <PublicLayout showMainContainer={false} showFooter={false}>
-      <div className='vl-public-surface'>
-        <Hero isAuthenticated={isAuthenticated} />
-        <PlatformOverview />
-        <HowItWorks />
-        <CTA isAuthenticated={isAuthenticated} />
-        <Footer />
+      <div className='vl-public-surface fortune-atmosphere-surface'>
+        <FortuneAtmosphere />
+        <div className='fortune-page-content'>
+          <Hero isAuthenticated={isAuthenticated} />
+          <PlatformOverview />
+          <HowItWorks />
+          <CTA isAuthenticated={isAuthenticated} />
+          <Footer />
+        </div>
       </div>
     </PublicLayout>
   )
