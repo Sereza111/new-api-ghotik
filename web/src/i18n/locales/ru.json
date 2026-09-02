@@ -5752,6 +5752,26 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Automatic (API key default)": "Автоматически (настройка API-ключа)",
+    "API key routing": "Маршрут API-ключа",
+    "Available sources": "Доступные источники",
+    "Failed to update source preference": "Не удалось изменить источник",
+    "Fallback behavior": "Резервный маршрут",
+    "Loading routing sources": "Загрузка источников маршрутизации",
+    "Model families": "Семейства моделей",
+    "Model sources": "Источники моделей",
+    "No description provided.": "Описание не указано.",
+    "No routing sources are available": "Нет доступных источников",
+    "Saving source preference": "Сохранение выбранного источника",
+    "Selected": "Выбран",
+    "Source for {{family}}": "Источник для {{family}}",
+    "Source preference updated": "Источник изменён",
+    "Source preferences apply to this account.": "Выбранные источники применяются ко всему аккаунту.",
+    "This account has no selectable model sources.": "Для этого аккаунта нет доступных источников моделей.",
+    "Try again": "Повторить",
+    "Unable to load routing sources": "Не удалось загрузить источники маршрутизации",
+    "Unavailable models use the API key default route.": "Если модель недоступна, запрос пойдёт по маршруту API-ключа.",
+    "Uses the route configured on each API key.": "Используется маршрут, заданный для каждого API-ключа."
   }
 }

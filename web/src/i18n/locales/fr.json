@@ -5752,6 +5752,26 @@
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Automatic (API key default)": "Automatique (défaut de la clé API)",
+    "API key routing": "Routage de la clé API",
+    "Available sources": "Sources disponibles",
+    "Failed to update source preference": "Impossible de modifier la source",
+    "Fallback behavior": "Routage de secours",
+    "Loading routing sources": "Chargement des sources de routage",
+    "Model families": "Familles de modèles",
+    "Model sources": "Sources des modèles",
+    "No description provided.": "Aucune description fournie.",
+    "No routing sources are available": "Aucune source de routage disponible",
+    "Saving source preference": "Enregistrement de la source",
+    "Selected": "Sélectionnée",
+    "Source for {{family}}": "Source pour {{family}}",
+    "Source preference updated": "Source mise à jour",
+    "Source preferences apply to this account.": "Les sources choisies s’appliquent à ce compte.",
+    "This account has no selectable model sources.": "Ce compte ne dispose d’aucune source de modèle sélectionnable.",
+    "Try again": "Réessayer",
+    "Unable to load routing sources": "Impossible de charger les sources de routage",
+    "Unavailable models use the API key default route.": "Les modèles indisponibles utilisent le routage par défaut de la clé API.",
+    "Uses the route configured on each API key.": "Utilise le routage configuré sur chaque clé API."
   }
 }

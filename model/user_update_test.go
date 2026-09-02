@@ -227,6 +227,55 @@ func TestUpdateUserSettingOnlyUpdatesSetting(t *testing.T) {
 	assert.Equal(t, "zh", got.GetSetting().Language)
 }
 
+func TestMutateUserSettingPreservesIndependentFields(t *testing.T) {
+	setupUserUpdateTestState(t)
+
+	user := User{
+		Id:       4,
+		Username: "setting-mutation-user",
+		Password: "password",
+		Status:   common.UserStatusEnabled,
+	}
+	user.SetSetting(dto.UserSetting{
+		Language:          "ru",
+		BillingPreference: "wallet",
+		RoutingSources:    map[string]string{"gpt": "premium"},
+	})
+	require.NoError(t, DB.Create(&user).Error)
+
+	require.NoError(t, MutateUserSetting(user.Id, func(setting *dto.UserSetting) error {
+		setting.SidebarModules = "console,routing"
+		return nil
+	}))
+
+	var got User
+	require.NoError(t, DB.First(&got, user.Id).Error)
+	settings := got.GetSetting()
+	assert.Equal(t, "ru", settings.Language)
+	assert.Equal(t, "wallet", settings.BillingPreference)
+	assert.Equal(t, map[string]string{"gpt": "premium"}, settings.RoutingSources)
+	assert.Equal(t, "console,routing", settings.SidebarModules)
+}
+
+func TestMutateUserSettingRollsBackRejectedMutation(t *testing.T) {
+	setupUserUpdateTestState(t)
+
+	user := User{Id: 5, Username: "rejected-setting-user", Password: "password", Status: common.UserStatusEnabled}
+	user.SetSetting(dto.UserSetting{Language: "ru"})
+	require.NoError(t, DB.Create(&user).Error)
+
+	expectedError := errors.New("reject setting mutation")
+	err := MutateUserSetting(user.Id, func(setting *dto.UserSetting) error {
+		setting.Language = "en"
+		return expectedError
+	})
+	require.ErrorIs(t, err, expectedError)
+
+	var got User
+	require.NoError(t, DB.First(&got, user.Id).Error)
+	assert.Equal(t, "ru", got.GetSetting().Language)
+}
+
 func TestEnsureEmailAvailableRejectsExistingEmailCaseInsensitive(t *testing.T) {
 	setupUserUpdateTestState(t)
 

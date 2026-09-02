@@ -72,7 +72,10 @@ func GetUserAutoGroup(userGroup string) []string {
 // FilterUserTokenAutoGroups applies current permissions before the current
 // per-token limit. It intentionally does not fall back to the global Auto list.
 func FilterUserTokenAutoGroups(userGroup string, groups []string) []string {
-	maxCount := setting.GetMaxTokenAutoGroups()
+	return filterUserTokenAutoGroups(userGroup, groups, setting.GetMaxTokenAutoGroups())
+}
+
+func filterUserTokenAutoGroups(userGroup string, groups []string, maxCount int) []string {
 	filtered := make([]string, 0, min(len(groups), maxCount))
 	seen := make(map[string]struct{})
 	for _, group := range groups {
@@ -103,7 +106,14 @@ func GetRequestAutoGroups(c *gin.Context, userGroup string) []string {
 	if !ok {
 		return []string{}
 	}
-	return FilterUserTokenAutoGroups(userGroup, groups)
+	maxCount := setting.GetMaxTokenAutoGroups()
+	if routingLimit := common.GetContextKeyInt(c, constant.ContextKeyRoutingSourceGroupLimit); routingLimit > maxCount {
+		// The account preference is a synthetic primary route. The stored
+		// limit preserves every route already resolved for this request,
+		// including an inherited global Auto list.
+		maxCount = routingLimit
+	}
+	return filterUserTokenAutoGroups(userGroup, groups, maxCount)
 }
 
 // GetGroupsEnabledModels 按 groups 顺序获取各分组启用的模型并去重

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
@@ -149,6 +150,71 @@ func TestRefreshUserGroupCacheRepairsDelayedSameVersionWrite(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "pro", cached.Group)
 	assert.EqualValues(t, 1, cached.AuthVersion)
+}
+
+func TestRefreshUserSettingCacheRepairsDelayedSameVersionWrite(t *testing.T) {
+	truncateTables(t)
+	useUserCacheMiniRedis(t)
+
+	user := User{
+		Username:    "delayed-setting-refresh",
+		Password:    "password",
+		Role:        common.RoleCommonUser,
+		Status:      common.UserStatusEnabled,
+		Group:       "default",
+		Quota:       100,
+		AuthVersion: 1,
+	}
+	user.SetSetting(dto.UserSetting{Language: "ru"})
+	require.NoError(t, DB.Create(&user).Error)
+	require.NoError(t, populateUserCache(user))
+	require.NoError(t, cacheDecrUserQuota(user.Id, 25))
+
+	firstSnapshotRead := make(chan struct{})
+	releaseDelayedRefresh := make(chan struct{})
+	var intercepted atomic.Bool
+	const callbackName = "test:block_delayed_setting_refresh"
+	require.NoError(t, DB.Callback().Query().After("gorm:query").Register(callbackName, func(*gorm.DB) {
+		if intercepted.CompareAndSwap(false, true) {
+			close(firstSnapshotRead)
+			<-releaseDelayedRefresh
+		}
+	}))
+	t.Cleanup(func() {
+		_ = DB.Callback().Query().Remove(callbackName)
+	})
+
+	delayedResult := make(chan error, 1)
+	go func() {
+		delayedResult <- RefreshUserSettingCache(user.Id)
+	}()
+	<-firstSnapshotRead
+
+	require.NoError(t, MutateUserSetting(user.Id, func(setting *dto.UserSetting) error {
+		setting.Language = "en"
+		setting.RoutingSources = map[string]string{"gpt": "premium"}
+		return nil
+	}))
+	cached, err := cacheGetUserBase(user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, 75, cached.Quota)
+	assert.Equal(t, "en", cached.GetSetting().Language)
+	assert.Equal(t, "premium", cached.GetSetting().RoutingSources["gpt"])
+	assert.EqualValues(t, 1, cached.AuthVersion)
+
+	close(releaseDelayedRefresh)
+	require.NoError(t, <-delayedResult)
+	cached, err = cacheGetUserBase(user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, 75, cached.Quota)
+	assert.Equal(t, "en", cached.GetSetting().Language)
+	assert.Equal(t, "premium", cached.GetSetting().RoutingSources["gpt"])
+	assert.EqualValues(t, 1, cached.AuthVersion)
+
+	var stored User
+	require.NoError(t, DB.First(&stored, user.Id).Error)
+	assert.Equal(t, "en", stored.GetSetting().Language)
+	assert.Equal(t, "premium", stored.GetSetting().RoutingSources["gpt"])
 }
 
 func TestCommittedUserAuthVersionPermanentlyRejectsDelayedCacheFill(t *testing.T) {

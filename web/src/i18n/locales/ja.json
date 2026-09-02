@@ -5752,6 +5752,26 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Automatic (API key default)": "自動（API キーのデフォルト）",
+    "API key routing": "API キーのルーティング",
+    "Available sources": "利用可能なソース",
+    "Failed to update source preference": "ソース設定を更新できませんでした",
+    "Fallback behavior": "フォールバック動作",
+    "Loading routing sources": "ルーティングソースを読み込み中",
+    "Model families": "モデルファミリー",
+    "Model sources": "モデルソース",
+    "No description provided.": "説明はありません。",
+    "No routing sources are available": "利用可能なルーティングソースがありません",
+    "Saving source preference": "ソース設定を保存中",
+    "Selected": "選択中",
+    "Source for {{family}}": "{{family}} のソース",
+    "Source preference updated": "ソース設定を更新しました",
+    "Source preferences apply to this account.": "ソース設定はこのアカウント全体に適用されます。",
+    "This account has no selectable model sources.": "このアカウントで選択できるモデルソースはありません。",
+    "Try again": "再試行",
+    "Unable to load routing sources": "ルーティングソースを読み込めません",
+    "Unavailable models use the API key default route.": "利用できないモデルは API キーのデフォルトルートを使用します。",
+    "Uses the route configured on each API key.": "各 API キーに設定されたルートを使用します。"
   }
 }

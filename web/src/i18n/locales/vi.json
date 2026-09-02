@@ -5752,6 +5752,26 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Automatic (API key default)": "Tự động (mặc định của khóa API)",
+    "API key routing": "Định tuyến khóa API",
+    "Available sources": "Nguồn khả dụng",
+    "Failed to update source preference": "Không thể cập nhật nguồn ưu tiên",
+    "Fallback behavior": "Cơ chế dự phòng",
+    "Loading routing sources": "Đang tải nguồn định tuyến",
+    "Model families": "Họ mô hình",
+    "Model sources": "Nguồn mô hình",
+    "No description provided.": "Chưa có mô tả.",
+    "No routing sources are available": "Không có nguồn định tuyến khả dụng",
+    "Saving source preference": "Đang lưu nguồn ưu tiên",
+    "Selected": "Đã chọn",
+    "Source for {{family}}": "Nguồn cho {{family}}",
+    "Source preference updated": "Đã cập nhật nguồn ưu tiên",
+    "Source preferences apply to this account.": "Nguồn ưu tiên áp dụng cho toàn bộ tài khoản này.",
+    "This account has no selectable model sources.": "Tài khoản này không có nguồn mô hình để lựa chọn.",
+    "Try again": "Thử lại",
+    "Unable to load routing sources": "Không thể tải nguồn định tuyến",
+    "Unavailable models use the API key default route.": "Mô hình không khả dụng sẽ dùng tuyến mặc định của khóa API.",
+    "Uses the route configured on each API key.": "Sử dụng tuyến đã cấu hình trên từng khóa API."
   }
 }

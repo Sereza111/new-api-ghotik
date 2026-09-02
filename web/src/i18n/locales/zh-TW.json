@@ -5752,6 +5752,26 @@
     "Zero retention": "零數據保留",
     "Zhipu": "智譜",
     "Zhipu V4": "智譜 V4",
-    "Zoom": "縮放"
+    "Zoom": "縮放",
+    "Automatic (API key default)": "自動（API 金鑰預設）",
+    "API key routing": "API 金鑰路由",
+    "Available sources": "可用來源",
+    "Failed to update source preference": "更新來源偏好失敗",
+    "Fallback behavior": "備援行為",
+    "Loading routing sources": "正在載入路由來源",
+    "Model families": "模型系列",
+    "Model sources": "模型來源",
+    "No description provided.": "未提供說明。",
+    "No routing sources are available": "沒有可用的路由來源",
+    "Saving source preference": "正在儲存來源偏好",
+    "Selected": "已選擇",
+    "Source for {{family}}": "{{family}} 的來源",
+    "Source preference updated": "來源偏好已更新",
+    "Source preferences apply to this account.": "來源偏好適用於此帳戶。",
+    "This account has no selectable model sources.": "此帳戶沒有可選擇的模型來源。",
+    "Try again": "再試一次",
+    "Unable to load routing sources": "無法載入路由來源",
+    "Unavailable models use the API key default route.": "無法使用的模型將採用 API 金鑰的預設路由。",
+    "Uses the route configured on each API key.": "使用每個 API 金鑰所設定的路由。"
   }
 }

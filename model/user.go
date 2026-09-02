@@ -94,7 +94,7 @@ type User struct {
 	AccessToken      *string                    `json:"-" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
 	Quota            int                        `json:"quota" gorm:"type:bigint;default:0"`
 	UsedQuota        int                        `json:"used_quota" gorm:"type:bigint;default:0;column:used_quota"` // used quota
-	RequestCount     int                        `json:"request_count" gorm:"type:int;default:0;"`               // request number
+	RequestCount     int                        `json:"request_count" gorm:"type:int;default:0;"`                  // request number
 	Group            string                     `json:"group" gorm:"type:varchar(64);default:'default'"`
 	AffCode          string                     `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
 	AffCount         int                        `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
@@ -176,18 +176,48 @@ func (user *User) SetSetting(setting dto.UserSetting) {
 }
 
 func UpdateUserSetting(userId int, setting dto.UserSetting) error {
+	return MutateUserSetting(userId, func(current *dto.UserSetting) error {
+		*current = setting
+		return nil
+	})
+}
+
+// MutateUserSetting serializes read-modify-write updates so independent
+// settings cannot overwrite each other when dashboard requests race.
+func MutateUserSetting(userId int, mutate func(*dto.UserSetting) error) error {
 	if userId == 0 {
 		return errors.New("id 为空！")
 	}
-	settingBytes, err := common.Marshal(setting)
+	if mutate == nil {
+		return errors.New("setting mutator is nil")
+	}
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var user User
+		if err := lockForUpdate(tx).
+			Select("id", "setting").
+			Where("id = ?", userId).
+			First(&user).Error; err != nil {
+			return err
+		}
+
+		current := user.GetSetting()
+		if err := mutate(&current); err != nil {
+			return err
+		}
+		settingBytes, err := common.Marshal(current)
+		if err != nil {
+			return err
+		}
+		settingValue := string(settingBytes)
+		return tx.Model(&User{}).
+			Where("id = ?", userId).
+			Update("setting", settingValue).Error
+	})
 	if err != nil {
 		return err
 	}
-	settingValue := string(settingBytes)
-	if err = DB.Model(&User{}).Where("id = ?", userId).Update("setting", settingValue).Error; err != nil {
-		return err
-	}
-	return updateUserSettingCache(userId, settingValue)
+	return RefreshUserSettingCache(userId)
 }
 
 // userBindColumns 允许通过 UpdateUserBindColumn 更新的第三方账号绑定列白名单。
@@ -1236,7 +1266,7 @@ func GetUserSetting(id int, fromDB bool) (settingMap dto.UserSetting, err error)
 		// Update Redis cache asynchronously on successful DB read
 		if shouldUpdateRedis(fromDB, err) {
 			gopool.Go(func() {
-				if err := updateUserSettingCache(id, setting); err != nil {
+				if err := RefreshUserSettingCache(id); err != nil {
 					common.SysLog("failed to update user setting cache: " + err.Error())
 				}
 			})
