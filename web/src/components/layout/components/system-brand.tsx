@@ -61,23 +61,26 @@ export function SystemBrand(props: SystemBrandProps) {
         to='/'
         aria-label={t('Go to home')}
         className={cn(
-          'text-foreground inline-flex h-8 items-center gap-2 rounded-sm px-1.5 font-serif text-sm font-semibold transition-colors outline-none select-none',
+          'text-foreground inline-flex h-9 min-w-0 items-center gap-2 rounded-sm px-1.5 font-serif text-sm font-semibold transition-colors outline-none select-none',
           'hover:bg-accent focus-visible:ring-ring/40 focus-visible:ring-2'
         )}
       >
-        <div className='vl-brand-mark flex size-7 items-center justify-center rounded-sm border'>
+        <div
+          data-slot='vl-brand-mark'
+          className='vl-brand-mark flex size-8 shrink-0 items-center justify-center rounded-md border'
+        >
           <img
             src='/service-mark.svg?v=2'
             alt='VL'
-            className='size-5 object-contain'
+            className='size-6 object-contain'
           />
         </div>
-        <span className='font-serif text-base'>VL</span>
-        <span className='bg-border h-4 w-px' aria-hidden='true' />
-        <div className='ring-border flex size-5 items-center justify-center overflow-hidden rounded-sm ring-1'>
+        <span className='shrink-0 font-serif text-lg'>VL</span>
+        <span className='bg-border h-4 w-px shrink-0' aria-hidden='true' />
+        <div className='ring-border flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-sm ring-1'>
           <img src={logo} alt={t('Logo')} className='size-full object-cover' />
         </div>
-        <span className='text-muted-foreground max-w-[9rem] truncate font-sans text-xs'>
+        <span className='text-muted-foreground max-w-[9rem] min-w-0 truncate font-sans text-xs'>
           {name}
         </span>
       </Link>

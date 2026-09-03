@@ -597,7 +597,23 @@ For commercial licensing, please contact support@quantumnous.com
 
 .vl-brand-mark {
   border-color: color-mix(in oklch, oklch(0.82 0.055 230) 48%, var(--border));
-  background: color-mix(in oklch, oklch(0.82 0.055 230) 7%, transparent);
+  background: color-mix(in oklch, var(--foreground) 88%, var(--primary));
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 18%, transparent),
+    0 0 12px color-mix(in oklch, oklch(0.82 0.055 230) 14%, transparent);
+}
+
+.dark .vl-brand-mark {
+  background: color-mix(in oklch, oklch(0.82 0.055 230) 11%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 18%, transparent),
+    0 0 14px color-mix(in oklch, oklch(0.82 0.055 230) 18%, transparent);
+}
+
+.vl-brand-mark img {
+  filter: drop-shadow(
+    0 0 0.28rem color-mix(in oklch, oklch(0.82 0.055 230) 40%, transparent)
+  );
 }
 
 @keyframes fortune-orbit-turn {

@@ -5,18 +5,36 @@ This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as
 published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { Coins, Database, PiggyBank, ReceiptText } from 'lucide-react'
-import { useMemo } from 'react'
+import { lazy, Suspense, useMemo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { ErrorState } from '@/components/error-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import { getUserUsageSummary } from '@/features/dashboard/api'
 import { getPricing } from '@/features/pricing/api'
-import { getReferencePriceUSD } from '@/features/pricing/lib/reference-price'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { computeTimeRange } from '@/lib/time'
+
+import { calculateUsageInsights } from './usage-insights-data'
+
+const LazyUsageInsightsCharts = lazy(() =>
+  import('./usage-insights-charts').then((module) => ({
+    default: module.UsageInsightsCharts,
+  }))
+)
 
 const numberFormatter = new Intl.NumberFormat(undefined, {
   notation: 'compact',
@@ -37,62 +55,35 @@ export function UsageInsights() {
 
   const usageQuery = useQuery({
     queryKey: ['dashboard', 'usage-insights', range],
-    queryFn: () => getUserUsageSummary(range),
+    queryFn: async () => {
+      const response = await getUserUsageSummary(range)
+      if (!response.success) throw new Error('Usage summary request failed')
+      return response
+    },
     staleTime: 60 * 1000,
   })
   const pricingQuery = useQuery({
     queryKey: ['pricing', 'usage-insights'],
-    queryFn: getPricing,
+    queryFn: async () => {
+      const response = await getPricing()
+      if (!response.success) throw new Error('Pricing request failed')
+      return response
+    },
     staleTime: 5 * 60 * 1000,
   })
 
-  const metrics = useMemo(() => {
-    const rows = usageQuery.data?.data ?? []
-    const pricingByModel = new Map(
-      (pricingQuery.data?.data ?? []).map((model) => [model.model_name, model])
-    )
-
-    let promptTokens = 0
-    let completionTokens = 0
-    let cacheTokens = 0
-    let officialCost = 0
-    let actualCoveredCost = 0
-
-    for (const row of rows) {
-      promptTokens += Number(row.prompt_tokens) || 0
-      completionTokens += Number(row.completion_tokens) || 0
-      cacheTokens += Number(row.cache_tokens) || 0
-
-      const model = pricingByModel.get(row.model_name)
-      if (!model) continue
-
-      if (model.quota_type === 1) {
-        const requestPrice = getReferencePriceUSD(model, 'request')
-        if (requestPrice == null) continue
-        officialCost += requestPrice * row.request_count
-      } else {
-        const inputPrice = getReferencePriceUSD(model, 'input')
-        const outputPrice = getReferencePriceUSD(model, 'output')
-        if (inputPrice == null || outputPrice == null) continue
-        officialCost +=
-          (row.prompt_tokens / 1_000_000) * inputPrice +
-          (row.completion_tokens / 1_000_000) * outputPrice
-      }
-      actualCoveredCost += row.quota / Math.max(1, currency.quotaPerUnit)
-    }
-
-    const totalTokens = promptTokens + completionTokens
-    return {
-      totalTokens,
-      cacheTokens,
-      cacheShare: promptTokens > 0 ? (cacheTokens / promptTokens) * 100 : 0,
-      officialCost,
-      actualCoveredCost,
-      savings: Math.max(0, officialCost - actualCoveredCost),
-    }
-  }, [currency.quotaPerUnit, pricingQuery.data?.data, usageQuery.data?.data])
+  const metrics = useMemo(
+    () =>
+      calculateUsageInsights(
+        usageQuery.data?.data ?? [],
+        pricingQuery.data?.data ?? [],
+        currency.quotaPerUnit
+      ),
+    [currency.quotaPerUnit, pricingQuery.data?.data, usageQuery.data?.data]
+  )
 
   const loading = usageQuery.isLoading || pricingQuery.isLoading
+  const failed = usageQuery.isError || pricingQuery.isError
   const items = [
     {
       key: 'tokens',
@@ -106,9 +97,7 @@ export function UsageInsights() {
       icon: Database,
       title: t('Tokens read from cache'),
       value: numberFormatter.format(metrics.cacheTokens),
-      detail: t('{{value}}% of input tokens', {
-        value: metrics.cacheShare.toFixed(1),
-      }),
+      detail: t('Cached input'),
     },
     {
       key: 'official',
@@ -128,6 +117,83 @@ export function UsageInsights() {
     },
   ]
 
+  let charts: ReactNode
+  if (loading) {
+    charts = (
+      <div className='grid border-t lg:grid-cols-2'>
+        <div className='min-h-80 border-b p-4 sm:p-5 lg:border-r lg:border-b-0'>
+          <Skeleton className='h-4 w-24' />
+          <Skeleton className='mt-2 h-3 w-56 max-w-full' />
+          <Skeleton className='mt-4 h-48 w-full' />
+        </div>
+        <div className='min-h-80 p-4 sm:p-5'>
+          <Skeleton className='h-4 w-20' />
+          <Skeleton className='mt-2 h-3 w-64 max-w-full' />
+          <Skeleton className='mt-4 h-48 w-full' />
+        </div>
+      </div>
+    )
+  } else {
+    charts = (
+      <Suspense
+        fallback={
+          <div className='grid border-t lg:grid-cols-2'>
+            <div className='min-h-80 border-b p-5 lg:border-r lg:border-b-0'>
+              <Skeleton className='h-56 w-full' />
+            </div>
+            <div className='min-h-80 p-5'>
+              <Skeleton className='h-56 w-full' />
+            </div>
+          </div>
+        }
+      >
+        <LazyUsageInsightsCharts metrics={metrics} />
+      </Suspense>
+    )
+  }
+
+  let content: ReactNode
+  if (failed) {
+    content = (
+      <ErrorState
+        title={t('Failed to load')}
+        description={t('Please try again later.')}
+        className='min-h-80'
+        onRetry={() => {
+          if (usageQuery.isError) void usageQuery.refetch()
+          if (pricingQuery.isError) void pricingQuery.refetch()
+        }}
+      />
+    )
+  } else {
+    content = (
+      <>
+        <div className='grid sm:grid-cols-2 xl:grid-cols-4'>
+          {items.map(({ key, icon: Icon, title, value, detail }) => (
+            <div
+              key={key}
+              className='border-b p-4 last:border-b-0 xl:border-r xl:border-b-0 xl:last:border-r-0 sm:[&:nth-child(odd)]:border-r sm:[&:nth-last-child(-n+2)]:border-b-0'
+            >
+              <div className='text-muted-foreground flex items-center gap-2 text-xs'>
+                <Icon className='text-primary size-4' aria-hidden='true' />
+                <span>{title}</span>
+              </div>
+              {loading ? (
+                <Skeleton className='mt-3 h-7 w-24' />
+              ) : (
+                <div className='mt-3 font-mono text-xl font-semibold tabular-nums'>
+                  {value}
+                </div>
+              )}
+              <p className='text-muted-foreground mt-1.5 text-xs'>{detail}</p>
+            </div>
+          ))}
+        </div>
+        {charts}
+      </>
+    )
+  }
+
   return (
     <section className='bg-card overflow-hidden rounded-md border'>
       <header className='border-b px-4 py-3 sm:px-5'>
@@ -138,27 +204,7 @@ export function UsageInsights() {
           {t('Real token usage compared with official provider pricing')}
         </p>
       </header>
-      <div className='grid sm:grid-cols-2 xl:grid-cols-4'>
-        {items.map(({ key, icon: Icon, title, value, detail }) => (
-          <div
-            key={key}
-            className='border-b p-4 last:border-b-0 xl:border-r xl:border-b-0 xl:last:border-r-0 sm:[&:nth-child(odd)]:border-r sm:[&:nth-last-child(-n+2)]:border-b-0'
-          >
-            <div className='text-muted-foreground flex items-center gap-2 text-xs'>
-              <Icon className='text-primary size-4' aria-hidden='true' />
-              <span>{title}</span>
-            </div>
-            {loading ? (
-              <Skeleton className='mt-3 h-7 w-24' />
-            ) : (
-              <div className='mt-3 font-mono text-xl font-semibold tabular-nums'>
-                {value}
-              </div>
-            )}
-            <p className='text-muted-foreground mt-1.5 text-xs'>{detail}</p>
-          </div>
-        ))}
-      </div>
+      {content}
     </section>
   )
 }
