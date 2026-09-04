@@ -977,6 +977,19 @@ export function mountGothicCards(root, options = {}) {
       ready = true
       canvas.hidden = false
       draw(performance.now())
+
+      // Keep the static artwork visible until WebGL has reached the compositor.
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+      if (destroyed || gl.isContextLost()) return controller
+      draw(performance.now())
+
+      const glError = gl.getError()
+      if (glError !== gl.NO_ERROR) {
+        throw new Error(`WebGL card draw failed with error ${glError}`)
+      }
+
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+      if (destroyed || gl.isContextLost()) return controller
       root.classList.add('is-fx-ready')
       dispatch(root, 'arcana-fx:ready', { cards: states.length })
       requestFrame()
