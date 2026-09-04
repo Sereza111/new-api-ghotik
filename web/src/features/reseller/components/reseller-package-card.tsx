@@ -1,13 +1,31 @@
-import { Check, Sparkles } from 'lucide-react'
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
 import { useTranslation } from 'react-i18next'
 
-import fortuneReferenceUrl from '@/assets/fortune-reference.png'
-import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
 type ResellerPackageCardProps = {
+  id: string
   tokenMillions: number
   numeral: string
+  scene: string
+  art: string
   cost: string
   selected: boolean
   featured?: boolean
@@ -18,59 +36,33 @@ export function ResellerPackageCard(props: ResellerPackageCardProps) {
   const { t } = useTranslation()
 
   return (
-    <button
-      type='button'
-      className={cn(
-        'reseller-package-card group relative isolate flex min-h-64 w-full flex-col overflow-hidden rounded-md border p-4 text-left outline-none',
-        'focus-visible:border-ring focus-visible:ring-ring/35 focus-visible:ring-3',
-        props.selected && 'is-selected'
-      )}
-      aria-pressed={props.selected}
-      onClick={props.onSelect}
+    <label
+      className={cn('arcana-card', props.selected && 'is-selected')}
+      data-arcana-card
+      data-scene={props.scene}
+      data-art={props.art}
     >
-      <img
-        src={fortuneReferenceUrl}
-        alt=''
-        aria-hidden='true'
-        className='reseller-package-art'
+      <input
+        type='radio'
+        name='reseller-token-package'
+        value={props.id}
+        checked={props.selected}
+        aria-label={`${props.tokenMillions}M ${t('Tokens')}`}
+        onChange={props.onSelect}
       />
-      <div className='relative flex items-start justify-between gap-3'>
-        <span className='reseller-package-numeral'>{props.numeral}</span>
-        {props.featured ? (
-          <Badge variant='secondary' className='gap-1'>
-            <Sparkles aria-hidden='true' />
-            {t('Most popular')}
-          </Badge>
-        ) : null}
-      </div>
-
-      <div className='relative mt-auto'>
-        <p className='font-serif text-4xl leading-none font-semibold tabular-nums'>
-          {props.tokenMillions}M
-        </p>
-        <p className='text-muted-foreground mt-1 text-xs font-medium uppercase'>
-          {t('Tokens')}
-        </p>
-        <div className='mt-4 flex items-end justify-between gap-3 border-t pt-3'>
-          <div>
-            <p className='text-muted-foreground text-xs'>{t('Cost')}</p>
-            <p className='mt-0.5 text-base font-semibold tabular-nums'>
-              {props.cost}
-            </p>
-          </div>
-          <span
-            className={cn(
-              'grid size-7 place-items-center rounded-full border transition-colors',
-              props.selected
-                ? 'border-primary bg-primary text-primary-foreground'
-                : 'border-border bg-background/70 text-transparent'
-            )}
-            aria-hidden='true'
-          >
-            <Check className='size-4' />
-          </span>
-        </div>
-      </div>
-    </button>
+      <img className='arcana-card__fallback' src={props.art} alt='' />
+      <span className='arcana-card__roman' aria-hidden='true'>
+        {props.numeral}
+      </span>
+      {props.featured ? (
+        <span className='arcana-card__popular'>{t('Most popular')}</span>
+      ) : null}
+      <span className='arcana-card__meta'>
+        <span className='arcana-card__amount'>{props.tokenMillions}M</span>
+        <span className='arcana-card__unit'>{t('Tokens')}</span>
+        <span className='arcana-card__price'>{props.cost}</span>
+      </span>
+      <span className='arcana-card__check' aria-hidden='true' />
+    </label>
   )
 }

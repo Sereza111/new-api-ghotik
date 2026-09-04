@@ -1,0 +1,253 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
+.arcana-cards {
+  max-width: 1460px;
+  margin: 0 auto;
+}
+
+.arcana-cards__stage {
+  position: relative;
+  min-width: 0;
+}
+
+.arcana-cards__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(12px, 1.3vw, 20px);
+}
+
+.arcana-fx-canvas {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.arcana-card {
+  position: relative;
+  z-index: 1;
+  display: block;
+  min-width: 0;
+  aspect-ratio: 310 / 735;
+  overflow: hidden;
+  cursor: pointer;
+  clip-path: polygon(50% 0, 98.4% 12%, 98.4% 88%, 50% 100%, 1.6% 88%, 1.6% 12%);
+  background: #080a0b;
+  color: #e1e3df;
+  isolation: auto;
+}
+
+.arcana-cards.is-fx-ready .arcana-card {
+  background: transparent;
+}
+
+.arcana-card input {
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.arcana-card__fallback {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 1;
+  transition: opacity 450ms ease;
+}
+
+.arcana-cards.is-fx-ready .arcana-card__fallback {
+  opacity: 0;
+}
+
+.arcana-card__roman,
+.arcana-card__popular,
+.arcana-card__meta,
+.arcana-card__check {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.arcana-card__roman {
+  top: 12.2%;
+  left: 8.5%;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(170, 150, 93, 0.54);
+  border-radius: 50%;
+  background: rgba(5, 7, 7, 0.82);
+  color: #c9bea1;
+  font-family: Georgia, serif;
+  font-size: 12px;
+}
+
+.arcana-card__popular {
+  top: 12.5%;
+  right: 5.5%;
+  padding: 5px 8px;
+  border: 1px solid rgba(122, 176, 186, 0.35);
+  background: rgba(8, 14, 15, 0.84);
+  color: #b9d9df;
+  font-size: 10px;
+}
+
+.arcana-card__meta {
+  right: 6.2%;
+  bottom: 10.5%;
+  left: 6.2%;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 2px 10px;
+  padding: 12px 12px 11px;
+  border-top: 1px solid rgba(208, 212, 207, 0.18);
+  border-bottom: 1px solid rgba(208, 212, 207, 0.12);
+  background: rgba(4, 6, 7, 0.74);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(5px);
+}
+
+.arcana-card__amount {
+  color: #f0f1ed;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: clamp(24px, 2.3rem, 38px);
+  line-height: 0.95;
+}
+
+.arcana-card__unit {
+  grid-row: 2;
+  color: #8f9896;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.arcana-card__price {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  color: #d8d9d4;
+  font-family: Georgia, serif;
+  font-size: clamp(13px, 1.1rem, 18px);
+  font-weight: 700;
+}
+
+.arcana-card__check {
+  bottom: 3.2%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(143, 202, 222, 0.44);
+  border-radius: 50%;
+  background: rgba(8, 12, 13, 0.88);
+  opacity: 0;
+  transform: translateX(-50%) scale(0.7);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease,
+    background-color 180ms ease;
+}
+
+.arcana-card__check::before {
+  position: absolute;
+  top: 5px;
+  left: 8px;
+  width: 5px;
+  height: 9px;
+  border-right: 2px solid #071011;
+  border-bottom: 2px solid #071011;
+  content: '';
+  transform: rotate(45deg);
+}
+
+.arcana-card.is-selected {
+  filter: drop-shadow(0 0 8px rgba(126, 190, 210, 0.28));
+}
+
+.arcana-card.is-selected .arcana-card__check {
+  background: #8fcade;
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
+}
+
+.arcana-card:hover .arcana-card__meta,
+.arcana-card:focus-within .arcana-card__meta {
+  border-top-color: rgba(147, 198, 210, 0.42);
+}
+
+.arcana-card:focus-within {
+  filter: drop-shadow(0 0 2px #d9ecf0)
+    drop-shadow(0 0 10px rgba(116, 187, 205, 0.5));
+}
+
+@media (max-width: 1180px) {
+  .arcana-cards__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .arcana-cards__stage {
+    overflow: hidden;
+  }
+
+  .arcana-cards__grid {
+    display: flex;
+    gap: 14px;
+    overflow-x: auto;
+    padding: 0 18px 14px;
+    scroll-padding-left: 18px;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: thin;
+    scrollbar-color: #334044 transparent;
+  }
+
+  .arcana-card {
+    flex: 0 0 min(72vw, 304px);
+    scroll-snap-align: start;
+  }
+
+  .arcana-card__amount {
+    font-size: 30px;
+  }
+
+  .arcana-card__price {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arcana-card__fallback,
+  .arcana-card__check {
+    transition: none;
+  }
+}

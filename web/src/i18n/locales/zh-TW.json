@@ -5813,6 +5813,9 @@
     "Zero retention": "零數據保留",
     "Zhipu": "智譜",
     "Zhipu V4": "智譜 V4",
-    "Zoom": "縮放"
+    "Zoom": "縮放",
+    "Address used in prepared keys.": "已準備的金鑰將使用此地址。",
+    "Editable": "可編輯",
+    "Enter a valid HTTP(S) address.": "請輸入有效的 HTTP(S) 位址。"
   }
 }

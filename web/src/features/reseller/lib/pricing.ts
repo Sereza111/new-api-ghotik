@@ -1,17 +1,59 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
 import { z } from 'zod'
 
 import { RESELLER_TERMS, type ResellerQuote } from '../types'
 
-export const RESELLER_ENDPOINT = 'https://example.com'
+export const DEFAULT_RESELLER_ENDPOINT = 'https://pugshop.ru'
 export const RESELLER_BASE_COST_PER_MILLION = 0.12
 export const RESELLER_MIN_MILLIONS = 1
 export const RESELLER_MAX_MILLIONS = 1000
 
 export const RESELLER_PACKAGE_OPTIONS = [
-  { id: 'initium', tokenMillions: 10, numeral: 'I', featured: false },
-  { id: 'ascensus', tokenMillions: 50, numeral: 'II', featured: true },
-  { id: 'dominium', tokenMillions: 100, numeral: 'III', featured: false },
-  { id: 'imperium', tokenMillions: 500, numeral: 'IV', featured: false },
+  {
+    id: 'initium',
+    tokenMillions: 10,
+    numeral: 'I',
+    scene: 'avaritia',
+    featured: false,
+  },
+  {
+    id: 'ascensus',
+    tokenMillions: 50,
+    numeral: 'II',
+    scene: 'invidia',
+    featured: true,
+  },
+  {
+    id: 'dominium',
+    tokenMillions: 100,
+    numeral: 'III',
+    scene: 'superbia',
+    featured: false,
+  },
+  {
+    id: 'imperium',
+    tokenMillions: 500,
+    numeral: 'IV',
+    scene: 'luxuria',
+    featured: false,
+  },
 ] as const
 
 export const RESELLER_MARKUP_OPTIONS = [20, 50, 80, 100] as const
@@ -30,6 +72,36 @@ export const resellerDraftSchema = z.object({
     ),
   term: z.enum(RESELLER_TERMS),
 })
+
+export function normalizeResellerEndpoint(value: string): string | null {
+  const input = value.trim()
+  const hasControlCharacter = [...input].some(
+    (character) => character.charCodeAt(0) <= 0x20
+  )
+  if (!input || input.includes('\\') || hasControlCharacter) return null
+
+  const candidate = /^[a-z][a-z\d+.-]*:/i.test(input)
+    ? input
+    : `https://${input}`
+
+  try {
+    const parsed = new URL(candidate)
+    if (
+      (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+      parsed.username ||
+      parsed.password ||
+      parsed.search ||
+      parsed.hash ||
+      !parsed.hostname
+    ) {
+      return null
+    }
+
+    return parsed.toString().replace(/\/$/, '')
+  } catch {
+    return null
+  }
+}
 
 function roundCurrency(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100

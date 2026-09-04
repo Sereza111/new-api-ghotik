@@ -5813,6 +5813,9 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Address used in prepared keys.": "準備済みキーにはこのアドレスが使用されます。",
+    "Editable": "編集可能",
+    "Enter a valid HTTP(S) address.": "有効な HTTP(S) アドレスを入力してください。"
   }
 }

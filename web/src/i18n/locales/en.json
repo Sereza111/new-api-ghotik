@@ -5813,6 +5813,9 @@
     "Zero retention": "Zero retention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Address used in prepared keys.": "Address used in prepared keys.",
+    "Editable": "Editable",
+    "Enter a valid HTTP(S) address.": "Enter a valid HTTP(S) address."
   }
 }
