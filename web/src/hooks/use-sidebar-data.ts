@@ -15,6 +15,7 @@ import {
   ServerCog,
   Send,
   Settings,
+  Store,
   Ticket,
   User,
   Users,
@@ -93,6 +94,11 @@ export function useSidebarData(): SidebarData {
             title: t('Wallet'),
             url: '/wallet',
             icon: Wallet,
+          },
+          {
+            title: t('Reseller'),
+            url: '/reseller',
+            icon: Store,
           },
           {
             title: t('Profile'),
