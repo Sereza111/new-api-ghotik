@@ -51,6 +51,9 @@ func PrepareMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.
 	if relayInfo.BillingSource == BillingSourceSubscription {
 		return false, errors.New("legacy Midjourney billing does not support subscriptions")
 	}
+	if relayInfo.BillingSource == BillingSourceReseller || model.IsResellerTokenKey(relayInfo.TokenKey) {
+		return false, errors.New("legacy Midjourney billing does not support prepaid reseller keys")
+	}
 
 	task.Quota = quota
 	task.BillingChannelId = task.ChannelId

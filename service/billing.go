@@ -3,8 +3,11 @@ package service
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
@@ -13,11 +16,57 @@ import (
 const (
 	BillingSourceWallet       = "wallet"
 	BillingSourceSubscription = "subscription"
+	BillingSourceReseller     = "reseller_prepaid"
 )
 
 // PreConsumeBilling 根据用户计费偏好创建 BillingSession 并执行预扣费。
 // 会话存储在 relayInfo.Billing 上，供后续 Settle / Refund 使用。
 func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
+	fullBalanceHeld := false
+	if isResellerBilling(relayInfo) {
+		estimatedPromptTokens := relayInfo.GetEstimatePromptTokens()
+		if estimatedPromptTokens < common.PreConsumedQuota {
+			estimatedPromptTokens = common.PreConsumedQuota
+		}
+		var clamp *common.QuotaClamp
+		preConsumedQuota, clamp = resellerTokenQuota(
+			estimatedPromptTokens,
+			relayInfo.GetEstimateCompletionTokens(),
+		)
+		noteQuotaClamp(relayInfo, clamp)
+		if resellerNeedsFullBalanceReservation(relayInfo) {
+			// The auth middleware's context snapshot may be stale (or absent for
+			// websocket/embedded callers).  Read the current allocation directly
+			// from SQL so the hard-cap reservation cannot be based on Redis data.
+			if relayInfo.TokenId > 0 {
+				currentToken, tokenErr := model.GetTokenByIds(relayInfo.TokenId, relayInfo.UserId)
+				if tokenErr != nil {
+					return types.NewError(tokenErr, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
+				}
+				if currentToken.Key != strings.TrimPrefix(relayInfo.TokenKey, "sk-") ||
+					currentToken.UnlimitedQuota || currentToken.RemainQuota <= 0 {
+					return types.NewErrorWithStatusCode(
+						model.ErrResellerTokenQuotaInsufficient,
+						types.ErrorCodePreConsumeTokenQuotaFailed,
+						http.StatusForbidden,
+						types.ErrOptionWithSkipRetry(),
+						types.ErrOptionWithNoRecordErrorLog(),
+					)
+				}
+				if preConsumedQuota > currentToken.RemainQuota {
+					return types.NewErrorWithStatusCode(
+						model.ErrResellerTokenQuotaInsufficient,
+						types.ErrorCodePreConsumeTokenQuotaFailed,
+						http.StatusForbidden,
+						types.ErrOptionWithSkipRetry(),
+						types.ErrOptionWithNoRecordErrorLog(),
+					)
+				}
+				preConsumedQuota = currentToken.RemainQuota
+				fullBalanceHeld = true
+			}
+		}
+	}
 	if relayInfo != nil && relayInfo.QuotaClamp != nil {
 		return types.NewErrorWithStatusCode(
 			relayInfo.QuotaClamp,
@@ -38,6 +87,7 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 	if apiErr != nil {
 		return apiErr
 	}
+	session.fullBalanceHeld = fullBalanceHeld
 	relayInfo.Billing = session
 	return nil
 }
@@ -79,7 +129,7 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 		if actualQuota != 0 {
 			if relayInfo.BillingSource == BillingSourceSubscription {
 				checkAndSendSubscriptionQuotaNotify(relayInfo)
-			} else {
+			} else if relayInfo.BillingSource == BillingSourceWallet {
 				checkAndSendQuotaNotify(relayInfo, actualQuota-preConsumed, preConsumed)
 			}
 		}

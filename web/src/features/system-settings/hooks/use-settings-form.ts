@@ -261,7 +261,11 @@ export function useSettingsForm<T extends FieldValues>({
       {}
     )
 
-    await onSubmit(data, changedFields)
+    try {
+      await onSubmit(data, changedFields)
+    } catch {
+      return
+    }
 
     const flattenedValues = flattenValues(data)
     baselineRef.current = flattenedValues

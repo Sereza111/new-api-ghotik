@@ -331,6 +331,8 @@ func migrateDB() error {
 	err := DB.AutoMigrate(
 		&Channel{},
 		&Token{},
+		&ResellerKey{},
+		&ResellerQuotaOperation{},
 		&User{},
 		&UserSession{},
 		&AuthFlow{},

@@ -38,9 +38,38 @@ export type ResellerQuote = {
   profit: number
 }
 
-export type DemoResellerKey = ResellerDraftValues &
-  ResellerQuote & {
-    id: string
-    key: string
-    endpoint: string
-  }
+export type ResellerConfig = {
+  base_cost_per_million: number
+  default_endpoint: string
+}
+
+export type ResellerKey = {
+  id: number
+  client_label: string
+  token_millions: number
+  remaining_tokens: number
+  used_tokens: number
+  markup_percent: number
+  term: ResellerTerm
+  endpoint: string
+  key: string
+  created_time: number
+  expired_time: number
+  status: number
+  cost: number
+  client_price: number
+}
+
+export type CreateResellerKeyRequest = {
+  client_label: string
+  token_millions: number
+  markup_percent: number
+  term: ResellerTerm
+  request_id: string
+}
+
+export type ResellerApiResponse<T> = {
+  success: boolean
+  message?: string
+  data?: T
+}

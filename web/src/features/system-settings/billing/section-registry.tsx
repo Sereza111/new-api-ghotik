@@ -25,6 +25,7 @@ import { PaymentSettingsSection } from '../integrations/payment-settings-section
 import { RatioSettingsCard } from '../models/ratio-settings-card'
 import type { BillingSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
+import { ResellerPricingSection } from './reseller-pricing-section'
 
 const getModelDefaults = (settings: BillingSettings) => ({
   ModelPrice: settings.ModelPrice,
@@ -97,6 +98,21 @@ const BILLING_SECTIONS = [
               settings['general_setting.custom_currency_symbol'] ?? '¤',
             custom_currency_exchange_rate:
               settings['general_setting.custom_currency_exchange_rate'] ?? 1,
+          },
+        }}
+      />
+    ),
+  },
+  {
+    id: 'reseller-pricing',
+    titleKey: 'Reseller pricing',
+    build: (settings: BillingSettings) => (
+      <ResellerPricingSection
+        defaultValues={{
+          reseller_setting: {
+            base_cost_per_million:
+              settings['reseller_setting.base_cost_per_million'],
+            endpoint: settings['reseller_setting.endpoint'],
           },
         }}
       />

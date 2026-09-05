@@ -238,6 +238,12 @@ func validateOptionValue(key string, value string) error {
 	if key == "MaxTokenAutoGroups" {
 		return setting.ValidateMaxTokenAutoGroups(value)
 	}
+	if key == operation_setting.ResellerBaseCostPerMillionOption {
+		return operation_setting.ValidateResellerBaseCost(value)
+	}
+	if key == operation_setting.ResellerEndpointOption {
+		return operation_setting.ValidateResellerEndpoint(value)
+	}
 	return nil
 }
 

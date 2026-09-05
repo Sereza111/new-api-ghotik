@@ -20,7 +20,7 @@ import { z } from 'zod'
 
 import { RESELLER_TERMS, type ResellerQuote } from '../types'
 
-export const DEFAULT_RESELLER_ENDPOINT = 'https://pugshop.ru'
+export const DEFAULT_RESELLER_ENDPOINT = 'https://pugshop.ru/v1'
 export const RESELLER_BASE_COST_PER_MILLION = 0.12
 export const RESELLER_MIN_MILLIONS = 1
 export const RESELLER_MAX_MILLIONS = 1000
@@ -59,7 +59,7 @@ export const RESELLER_PACKAGE_OPTIONS = [
 export const RESELLER_MARKUP_OPTIONS = [20, 50, 80, 100] as const
 
 export const resellerDraftSchema = z.object({
-  clientLabel: z.string().trim().max(64),
+  clientLabel: z.string().trim().max(50),
   tokenMillions: z
     .number()
     .int()
@@ -109,7 +109,8 @@ function roundCurrency(value: number): number {
 
 export function calculateResellerQuote(
   tokenMillions: number,
-  markupPercent: number
+  markupPercent: number,
+  baseCostPerMillion = RESELLER_BASE_COST_PER_MILLION
 ): ResellerQuote {
   const safeMillions = Number.isFinite(tokenMillions)
     ? Math.min(
@@ -120,7 +121,11 @@ export function calculateResellerQuote(
   const safeMarkup = Number.isFinite(markupPercent)
     ? Math.max(0, markupPercent)
     : 0
-  const cost = roundCurrency(safeMillions * RESELLER_BASE_COST_PER_MILLION)
+  const safeBaseCost =
+    Number.isFinite(baseCostPerMillion) && baseCostPerMillion > 0
+      ? baseCostPerMillion
+      : RESELLER_BASE_COST_PER_MILLION
+  const cost = roundCurrency(safeMillions * safeBaseCost)
   const clientPrice = roundCurrency(cost * (1 + safeMarkup / 100))
 
   return {

@@ -421,6 +421,13 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			summary.Quota = composeTieredTextQuota(relayInfo, summary, tieredQuota, tieredRes)
 		}
 	}
+	settlementQuota := summary.Quota
+	if isResellerBilling(relayInfo) {
+		var clamp *common.QuotaClamp
+		settlementQuota, clamp = resellerTextTokenQuota(billingUsage, relayInfo.GetEstimatePromptTokens())
+		noteQuotaClamp(relayInfo, clamp)
+		relayInfo.BillingSource = BillingSourceReseller
+	}
 
 	for _, item := range summary.ToolSurchargeItems {
 		q := decimal.NewFromFloat(item.Price).
@@ -448,7 +455,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
 	}
 
-	if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
+	if err := SettleBilling(ctx, relayInfo, settlementQuota); err != nil {
 		logger.LogError(ctx, "error settling billing: "+err.Error())
 	}
 
@@ -519,6 +526,9 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	}
 	if tieredBillingApplied {
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
+	}
+	if isResellerBilling(relayInfo) {
+		other["reseller_token_quota"] = settlementQuota
 	}
 
 	attachQuotaSaturation(ctx, relayInfo, other)

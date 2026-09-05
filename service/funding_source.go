@@ -8,12 +8,12 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// FundingSource — 资金来源接口（钱包 or 订阅）
+// FundingSource — 资金来源接口（钱包、订阅或预付费令牌）
 // ---------------------------------------------------------------------------
 
 // FundingSource 抽象了预扣费的资金来源。
 type FundingSource interface {
-	// Source 返回资金来源标识："wallet" 或 "subscription"
+	// Source 返回资金来源标识。
 	Source() string
 	// PreConsume 从该资金来源预扣 amount 额度
 	PreConsume(amount int) error
@@ -22,6 +22,15 @@ type FundingSource interface {
 	// Refund 退还所有预扣费
 	Refund() error
 }
+
+// PrepaidTokenFunding represents reseller quota paid for when the token was
+// issued. Request settlement only adjusts the token quota itself.
+type PrepaidTokenFunding struct{}
+
+func (p *PrepaidTokenFunding) Source() string       { return BillingSourceReseller }
+func (p *PrepaidTokenFunding) PreConsume(int) error { return nil }
+func (p *PrepaidTokenFunding) Settle(int) error     { return nil }
+func (p *PrepaidTokenFunding) Refund() error        { return nil }
 
 // ---------------------------------------------------------------------------
 // WalletFunding — 钱包资金来源实现

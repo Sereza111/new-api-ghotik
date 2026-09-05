@@ -39,6 +39,8 @@ const defaultBillingSettings: BillingSettings = {
   'general_setting.custom_currency_exchange_rate': 1,
   DisplayInCurrencyEnabled: true,
   DisplayTokenStatEnabled: true,
+  'reseller_setting.base_cost_per_million': 0.12,
+  'reseller_setting.endpoint': 'https://pugshop.ru/v1',
   ModelPrice: '',
   ModelRatio: '',
   CacheRatio: '',

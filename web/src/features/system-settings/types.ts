@@ -269,6 +269,8 @@ export type BillingSettings = {
   'general_setting.custom_currency_exchange_rate': number
   DisplayInCurrencyEnabled: boolean
   DisplayTokenStatEnabled: boolean
+  'reseller_setting.base_cost_per_million': number
+  'reseller_setting.endpoint': string
   ModelPrice: string
   ModelRatio: string
   CacheRatio: string

@@ -145,6 +145,9 @@ func PrepareTieredBillingForSelectedGroup(c *gin.Context, relayInfo *relaycommon
 	// The selected group is paid; clear a FreeModel flag frozen when the
 	// initial group was free so downstream state stays consistent.
 	relayInfo.PriceData.FreeModel = false
+	if isResellerBilling(relayInfo) {
+		return nil
+	}
 
 	if relayInfo.Billing == nil {
 		return PreConsumeBilling(c, snap.EstimatedQuotaAfterGroup, relayInfo)

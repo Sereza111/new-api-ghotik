@@ -34,9 +34,28 @@ describe('reseller pricing', () => {
     })
   })
 
-  test('keeps preview calculations inside the supported token range', () => {
+  test('uses the configured base cost for package prices', () => {
+    expect(calculateResellerQuote(50, 80, 0.08)).toEqual({
+      cost: 4,
+      clientPrice: 7.2,
+      profit: 3.2,
+    })
+  })
+
+  test('keeps calculations inside the supported token range', () => {
     expect(calculateResellerQuote(Number.NaN, 80).cost).toBe(0.12)
     expect(calculateResellerQuote(RESELLER_MAX_MILLIONS + 1, 80).cost).toBe(120)
+  })
+
+  test('rejects client labels longer than the server limit', () => {
+    const result = resellerDraftSchema.safeParse({
+      clientLabel: 'a'.repeat(51),
+      tokenMillions: 10,
+      markupPercent: 80,
+      term: 'unlimited',
+    })
+
+    expect(result.success).toBe(false)
   })
 
   test('rejects quotas below one million tokens', () => {

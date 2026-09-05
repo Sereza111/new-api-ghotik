@@ -127,6 +127,15 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
 	}
+	if model.IsResellerTokenKey(relayInfo.TokenKey) && !resellerRelaySupportsRawTokenAccounting(relayInfo) {
+		newAPIError = types.NewErrorWithStatusCode(
+			fmt.Errorf("reseller keys only support endpoints with reliable token usage"),
+			types.ErrorCodeInvalidRequest,
+			http.StatusBadRequest,
+			types.ErrOptionWithSkipRetry(),
+		)
+		return
+	}
 
 	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
 	needCountToken := constant.CountToken
@@ -154,6 +163,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	relayInfo.SetEstimatePromptTokens(tokens)
+	if meta != nil {
+		relayInfo.SetEstimateCompletionTokens(meta.MaxTokens)
+	}
 
 	priceData, err := helper.ModelPriceHelper(c, relayInfo, tokens, meta)
 	if err != nil {
@@ -163,7 +175,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	// common.SetContextKey(c, constant.ContextKeyTokenCountMeta, meta)
 
-	if priceData.FreeModel {
+	if priceData.FreeModel && !model.IsResellerTokenKey(relayInfo.TokenKey) {
 		logger.LogInfo(c, fmt.Sprintf("模型 %s 免费，跳过预扣费", relayInfo.OriginModelName))
 	} else {
 		newAPIError = service.PreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo)
@@ -254,6 +266,27 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		gopool.Go(func() {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
 		})
+	}
+}
+
+func resellerRelaySupportsRawTokenAccounting(relayInfo *relaycommon.RelayInfo) bool {
+	if relayInfo == nil {
+		return false
+	}
+	switch relayInfo.RelayFormat {
+	case types.RelayFormatClaude,
+		types.RelayFormatGemini,
+		types.RelayFormatEmbedding,
+		types.RelayFormatRerank,
+		types.RelayFormatOpenAIResponses,
+		types.RelayFormatOpenAIResponsesCompaction,
+		types.RelayFormatOpenAIRealtime:
+		return true
+	case types.RelayFormatOpenAI:
+		return relayInfo.RelayMode == relayconstant.RelayModeChatCompletions ||
+			relayInfo.RelayMode == relayconstant.RelayModeCompletions
+	default:
+		return false
 	}
 }
 
@@ -421,6 +454,14 @@ func RelayMidjourney(c *gin.Context) {
 		})
 		return
 	}
+	if model.IsResellerTokenKey(relayInfo.TokenKey) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"description": "prepaid reseller keys are not supported by the legacy Midjourney API",
+			"type":        "invalid_request_error",
+			"code":        4,
+		})
+		return
+	}
 
 	var mjErr *taskdto.MidjourneyResponse
 	switch relayInfo.RelayMode {
@@ -572,6 +613,13 @@ func executeTaskSubmissionWith(
 	relayInfo *relaycommon.RelayInfo,
 	submit taskSubmitAttempt,
 ) (*taskSubmissionOutcome, *taskdto.TaskError) {
+	if relayInfo != nil && model.IsResellerTokenKey(relayInfo.TokenKey) {
+		return nil, service.TaskErrorWrapperLocal(
+			errors.New("prepaid reseller keys support token-metered synchronous APIs only"),
+			"reseller_key_task_unsupported",
+			http.StatusBadRequest,
+		)
+	}
 	diagnostics := newTaskPluginSubmitDiagnostics(c)
 	diagnostics.start(relayInfo)
 	var result *relay.TaskSubmitResult

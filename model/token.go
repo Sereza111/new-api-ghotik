@@ -11,6 +11,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const resellerTokenKeyPrefix = "rsl"
+
 type Token struct {
 	Id                 int            `json:"id"`
 	UserId             int            `json:"user_id" gorm:"index"`
@@ -108,6 +110,14 @@ func GetAllUserTokens(userId int, startIdx int, num int) ([]*Token, error) {
 	var err error
 	err = DB.Where("user_id = ?", userId).Order("id desc").Limit(num).Offset(startIdx).Find(&tokens).Error
 	return tokens, err
+}
+
+func NewResellerTokenKey() (string, error) {
+	key, err := common.GenerateKey()
+	if err != nil {
+		return "", err
+	}
+	return resellerTokenKeyPrefix + "_" + key, nil
 }
 
 // sanitizeLikePattern 校验并清洗用户输入的 LIKE 搜索模式。
@@ -316,6 +326,36 @@ func (token *Token) Update() (err error) {
 		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "auto_groups").Updates(token).Error
 }
 
+// UpdateResellerMetadata only updates fields that do not alter a prepaid
+// reseller key's purchased allocation or expiry.
+func (token *Token) UpdateResellerMetadata() error {
+	if !IsResellerTokenKey(token.Key) {
+		return errors.New("token is not a reseller key")
+	}
+	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
+		// Redis is an acceleration layer; an outage must not prevent the
+		// owner from disabling or otherwise updating a reseller key in SQL.
+		common.SysLog("failed to invalidate reseller token cache before metadata update: " + cacheErr.Error())
+	}
+	err := DB.Model(&Token{}).Where("id = ? AND user_id = ?", token.Id, token.UserId).Updates(map[string]interface{}{
+		"name":                 token.Name,
+		"status":               token.Status,
+		"model_limits_enabled": token.ModelLimitsEnabled,
+		"model_limits":         token.ModelLimits,
+		"allow_ips":            token.AllowIps,
+		"group":                token.Group,
+		"cross_group_retry":    token.CrossGroupRetry,
+		"auto_groups":          token.AutoGroups,
+	}).Error
+	if err != nil {
+		return err
+	}
+	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
+		common.SysLog("failed to refresh reseller token cache fence after metadata update: " + cacheErr.Error())
+	}
+	return nil
+}
+
 func (token *Token) SelectUpdate() (err error) {
 	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
 		common.SysLog("failed to invalidate token cache before status update: " + cacheErr.Error())
@@ -325,6 +365,9 @@ func (token *Token) SelectUpdate() (err error) {
 }
 
 func (token *Token) Delete() (err error) {
+	if IsResellerTokenKey(token.Key) {
+		return ErrResellerTokenDeletionNotAllowed
+	}
 	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
 		common.SysLog("failed to invalidate token cache before delete: " + cacheErr.Error())
 	}
@@ -371,12 +414,21 @@ func DeleteTokenById(id int, userId int) (err error) {
 	if err != nil {
 		return err
 	}
+	if IsResellerTokenKey(token.Key) {
+		return ErrResellerTokenDeletionNotAllowed
+	}
 	return token.Delete()
 }
 
 func IncreaseTokenQuota(tokenId int, key string, quota int) (err error) {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
+	}
+	if quota == 0 {
+		return nil
+	}
+	if IsResellerTokenKey(key) {
+		return increaseResellerTokenQuota(tokenId, key, quota)
 	}
 	if common.RedisEnabled {
 		gopool.Go(func() {
@@ -408,6 +460,12 @@ func increaseTokenQuota(id int, quota int) (err error) {
 func DecreaseTokenQuota(id int, key string, quota int) (err error) {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
+	}
+	if quota == 0 {
+		return nil
+	}
+	if IsResellerTokenKey(key) {
+		return decreaseResellerTokenQuota(id, key, quota)
 	}
 	if common.RedisEnabled {
 		gopool.Go(func() {
@@ -454,6 +512,12 @@ func BatchDeleteTokens(ids []int, userId int) (int, error) {
 		tx.Rollback()
 		return 0, err
 	}
+	for _, token := range tokens {
+		if IsResellerTokenKey(token.Key) {
+			tx.Rollback()
+			return 0, ErrResellerTokenDeletionNotAllowed
+		}
+	}
 	if err := invalidateTokensCache(tokens); err != nil {
 		common.SysLog("failed to invalidate token cache before batch delete: " + err.Error())
 	}
@@ -475,6 +539,14 @@ func GetTokenKeysByIds(ids []int, userId int) ([]Token, error) {
 	err := DB.Select("id", commonKeyCol).
 		Where("user_id = ? AND id IN (?)", userId, ids).
 		Find(&tokens).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, token := range tokens {
+		if IsResellerTokenKey(token.Key) {
+			return nil, ErrResellerTokenSecretUnavailable
+		}
+	}
 	return tokens, err
 }
 

@@ -17,30 +17,36 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Check, CircleDashed, Globe2, Server } from 'lucide-react'
-import { nanoid } from 'nanoid'
-import { useCallback, useMemo, useState, type FormEvent } from 'react'
+import { CircleAlert, Globe2, RefreshCw, Server } from 'lucide-react'
+import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { CopyButton } from '@/components/copy-button'
 import { SectionPageLayout } from '@/components/layout'
-import { Badge } from '@/components/ui/badge'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Spinner } from '@/components/ui/spinner'
 import { FortuneAtmosphere } from '@/features/home/components/fortune-atmosphere'
 
 import { GothicResellerCards } from './components/gothic-reseller-cards'
 import { ResellerConfigurator } from './components/reseller-configurator'
 import { ResellerKeyVault } from './components/reseller-key-vault'
 import {
+  useCreateResellerKey,
+  useResellerConfig,
+  useResellerKeys,
+  useRevealResellerKey,
+} from './hooks/use-reseller'
+import {
   calculateResellerQuote,
   DEFAULT_RESELLER_ENDPOINT,
-  normalizeResellerEndpoint,
+  RESELLER_BASE_COST_PER_MILLION,
   resellerDraftSchema,
 } from './lib/pricing'
-import type { DemoResellerKey, ResellerDraftValues } from './types'
+import type { ResellerDraftValues } from './types'
 
 const DEFAULT_DRAFT: ResellerDraftValues = {
   clientLabel: '',
@@ -49,20 +55,25 @@ const DEFAULT_DRAFT: ResellerDraftValues = {
   term: 'unlimited',
 }
 
-const RESELLER_ENDPOINT_STORAGE_KEY = 'vl-reseller-endpoint'
+const PACKAGE_SKELETON_IDS = [
+  'package-1',
+  'package-2',
+  'package-3',
+  'package-4',
+]
+const FORM_SKELETON_IDS = ['field-1', 'field-2', 'field-3', 'field-4']
 
 export function Reseller() {
   const { i18n, t } = useTranslation()
-  const [preparedKeys, setPreparedKeys] = useState<DemoResellerKey[]>([])
-  const [resellerEndpoint, setResellerEndpoint] = useState(() => {
-    if (typeof window === 'undefined') return DEFAULT_RESELLER_ENDPOINT
-    const stored = window.localStorage.getItem(RESELLER_ENDPOINT_STORAGE_KEY)
-    return stored
-      ? normalizeResellerEndpoint(stored) || DEFAULT_RESELLER_ENDPOINT
-      : DEFAULT_RESELLER_ENDPOINT
-  })
-  const [endpointDraft, setEndpointDraft] = useState(resellerEndpoint)
-  const [endpointError, setEndpointError] = useState(false)
+  const configQuery = useResellerConfig()
+  const keysQuery = useResellerKeys()
+  const createKeyMutation = useCreateResellerKey()
+  const revealKeyMutation = useRevealResellerKey()
+  const pendingIssueRequest = useRef<{
+    id: string
+    fingerprint: string
+  } | null>(null)
+  const [revealedKeys, setRevealedKeys] = useState<Record<number, string>>({})
   const form = useForm<ResellerDraftValues>({
     resolver: zodResolver(resellerDraftSchema),
     defaultValues: DEFAULT_DRAFT,
@@ -89,59 +100,170 @@ export function Reseller() {
     (value: number) => moneyFormatter.format(value),
     [moneyFormatter]
   )
-  const quote = calculateResellerQuote(tokenMillions, markupPercent)
+  const baseCostPerMillion =
+    configQuery.data?.base_cost_per_million ?? RESELLER_BASE_COST_PER_MILLION
+  const configuredEndpoint =
+    configQuery.data?.default_endpoint || DEFAULT_RESELLER_ENDPOINT
+  const revealingKeyId = revealKeyMutation.isPending
+    ? revealKeyMutation.variables
+    : null
+  const quote = calculateResellerQuote(
+    tokenMillions,
+    markupPercent,
+    baseCostPerMillion
+  )
 
-  const handleEndpointSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const normalized = normalizeResellerEndpoint(endpointDraft)
-    if (!normalized) {
-      setEndpointError(true)
-      toast.error(t('Enter a valid HTTP(S) address.'))
-      return
-    }
-
-    setResellerEndpoint(normalized)
-    setEndpointDraft(normalized)
-    setEndpointError(false)
-    window.localStorage.setItem(RESELLER_ENDPOINT_STORAGE_KEY, normalized)
-    toast.success(t('Setting saved'))
-  }
-
-  const handlePrepareKey = (values: ResellerDraftValues) => {
-    const keyNumber = preparedKeys.length + 1
+  const handleIssueKey = async (values: ResellerDraftValues) => {
+    const keyNumber = (keysQuery.data?.length ?? 0) + 1
     const clientLabel =
       values.clientLabel.trim() ||
       t('Client key {{number}}', { number: keyNumber })
-    const preparedQuote = calculateResellerQuote(
-      values.tokenMillions,
-      values.markupPercent
-    )
 
-    setPreparedKeys((current) => [
-      {
-        ...values,
-        ...preparedQuote,
-        clientLabel,
-        id: nanoid(),
-        key: `sk-vl-demo-${nanoid(18)}`,
-        endpoint: resellerEndpoint,
-      },
-      ...current,
-    ])
-    toast.success(t('Demo key prepared'))
+    const requestPayload = {
+      client_label: clientLabel,
+      token_millions: values.tokenMillions,
+      markup_percent: values.markupPercent,
+      term: values.term,
+    }
+    const fingerprint = JSON.stringify(requestPayload)
+    let issueRequest = pendingIssueRequest.current
+    if (issueRequest?.fingerprint !== fingerprint) {
+      issueRequest = {
+        id: crypto.randomUUID(),
+        fingerprint,
+      }
+      pendingIssueRequest.current = issueRequest
+    }
+
+    try {
+      const createdKey = await createKeyMutation.mutateAsync({
+        ...requestPayload,
+        request_id: issueRequest.id,
+      })
+
+      pendingIssueRequest.current = null
+      setRevealedKeys((current) => ({
+        ...current,
+        [createdKey.id]: createdKey.key,
+      }))
+      form.reset({ ...values, clientLabel: '' })
+      toast.success(t('Reseller key issued'))
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? t(error.message)
+          : t('Failed to issue reseller key')
+      )
+    }
+  }
+
+  const handleRevealKey = async (id: number) => {
+    try {
+      const key = await revealKeyMutation.mutateAsync(id)
+      setRevealedKeys((current) => ({ ...current, [id]: key }))
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? t(error.message) : t('Failed to reveal key')
+      )
+    }
+  }
+
+  let packageContent: ReactNode
+  if (configQuery.isPending) {
+    packageContent = (
+      <div
+        className='grid grid-cols-2 gap-3 lg:grid-cols-4'
+        aria-label={t('Loading reseller pricing')}
+      >
+        {PACKAGE_SKELETON_IDS.map((id) => (
+          <Skeleton key={id} className='aspect-[310/735] w-full rounded-none' />
+        ))}
+      </div>
+    )
+  } else if (configQuery.isError) {
+    packageContent = (
+      <Alert variant='destructive' className='bg-transparent'>
+        <CircleAlert aria-hidden='true' />
+        <AlertTitle>{t('Failed to load reseller pricing')}</AlertTitle>
+        <AlertDescription className='flex flex-col items-start gap-3'>
+          <span>
+            {t('Pricing is unavailable until the connection is restored.')}
+          </span>
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            disabled={configQuery.isFetching}
+            onClick={() => void configQuery.refetch()}
+          >
+            {configQuery.isFetching ? (
+              <Spinner data-icon='inline-start' aria-hidden='true' />
+            ) : (
+              <RefreshCw data-icon='inline-start' aria-hidden='true' />
+            )}
+            {t('Retry')}
+          </Button>
+        </AlertDescription>
+      </Alert>
+    )
+  } else {
+    packageContent = (
+      <GothicResellerCards
+        tokenMillions={tokenMillions}
+        markupPercent={markupPercent}
+        baseCostPerMillion={baseCostPerMillion}
+        formatMoney={formatMoney}
+        onSelect={(nextTokenMillions) => {
+          form.setValue('tokenMillions', nextTokenMillions, {
+            shouldDirty: true,
+            shouldValidate: true,
+          })
+        }}
+      />
+    )
+  }
+
+  let configuratorContent: ReactNode
+  if (configQuery.isPending) {
+    configuratorContent = (
+      <section
+        className='reseller-tool-card flex min-h-80 flex-col gap-4 p-4'
+        aria-label={t('Loading key setup')}
+      >
+        <Skeleton className='h-6 w-40' />
+        <Skeleton className='h-4 w-64 max-w-full' />
+        <div className='mt-3 grid gap-4 sm:grid-cols-2'>
+          {FORM_SKELETON_IDS.map((id) => (
+            <Skeleton key={id} className='h-16 w-full' />
+          ))}
+        </div>
+      </section>
+    )
+  } else if (configQuery.isError) {
+    configuratorContent = (
+      <section className='reseller-tool-card flex min-h-80 items-center justify-center p-4'>
+        <p className='text-muted-foreground text-sm'>
+          {t('Key setup is unavailable.')}
+        </p>
+      </section>
+    )
+  } else {
+    configuratorContent = (
+      <ResellerConfigurator
+        form={form}
+        quote={quote}
+        formatMoney={formatMoney}
+        onSubmit={handleIssueKey}
+        isSubmitting={createKeyMutation.isPending}
+      />
+    )
   }
 
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>{t('Reseller')}</SectionPageLayout.Title>
-      <SectionPageLayout.Actions>
-        <Badge variant='outline' className='gap-1.5'>
-          <CircleDashed aria-hidden='true' />
-          {t('Preview mode')}
-        </Badge>
-      </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
-        <div className='reseller-page-surface mx-auto w-full max-w-7xl'>
+        <div className='reseller-page-surface w-full'>
           <FortuneAtmosphere />
           <div className='reseller-page-content flex flex-col gap-8'>
             <section className='reseller-intro-band'>
@@ -154,7 +276,7 @@ export function Reseller() {
                 </h2>
                 <p className='text-muted-foreground mt-3 max-w-2xl text-sm leading-6'>
                   {t(
-                    'Client usage is deducted from the key quota: input, output, and cache tokens.'
+                    'Usage deducted from the key quota: input tokens + output tokens - cached tokens.'
                   )}
                 </p>
               </div>
@@ -162,64 +284,28 @@ export function Reseller() {
               <div className='reseller-endpoint-panel'>
                 <div className='flex items-center gap-2'>
                   <Globe2 className='text-primary size-4' aria-hidden='true' />
-                  <label
-                    htmlFor='reseller-endpoint'
-                    className='text-sm font-medium'
-                  >
+                  <p className='text-sm font-medium'>
                     {t('Reseller endpoint')}
-                  </label>
-                  <Badge variant='secondary' className='ms-auto'>
-                    {t('Editable')}
-                  </Badge>
-                </div>
-                <form
-                  className='mt-3 flex min-w-0 items-start gap-2'
-                  onSubmit={handleEndpointSubmit}
-                >
-                  <Input
-                    id='reseller-endpoint'
-                    type='text'
-                    value={endpointDraft}
-                    autoComplete='url'
-                    aria-invalid={endpointError}
-                    aria-describedby={
-                      endpointError ? 'reseller-endpoint-error' : undefined
-                    }
-                    onChange={(event) => {
-                      setEndpointDraft(event.target.value)
-                      if (endpointError) setEndpointError(false)
-                    }}
-                  />
-                  <Button type='submit' size='sm' className='shrink-0'>
-                    <Check data-icon='inline-start' />
-                    {t('Save')}
-                  </Button>
-                </form>
-                {endpointError ? (
-                  <p
-                    id='reseller-endpoint-error'
-                    className='text-destructive mt-2 text-xs'
-                    role='alert'
-                  >
-                    {t('Enter a valid HTTP(S) address.')}
                   </p>
-                ) : null}
-                <div className='bg-background/70 mt-2 flex min-w-0 items-center gap-2 rounded-md border py-1.5 ps-3 pe-1.5'>
-                  <Server
-                    className='text-muted-foreground size-4 shrink-0'
-                    aria-hidden='true'
-                  />
-                  <code className='min-w-0 flex-1 truncate text-xs'>
-                    {resellerEndpoint}
-                  </code>
-                  <CopyButton
-                    value={resellerEndpoint}
-                    tooltip={t('Copy endpoint')}
-                    aria-label={t('Copy endpoint')}
-                  />
                 </div>
+                {configQuery.data ? (
+                  <div className='reseller-secret-row mt-3'>
+                    <Server
+                      className='text-muted-foreground size-4 shrink-0'
+                      aria-hidden='true'
+                    />
+                    <code className='min-w-0 flex-1 truncate text-xs'>
+                      {configuredEndpoint}
+                    </code>
+                    <CopyButton
+                      value={configuredEndpoint}
+                      tooltip={t('Copy endpoint')}
+                      aria-label={t('Copy endpoint')}
+                    />
+                  </div>
+                ) : null}
                 <p className='text-muted-foreground mt-2 text-xs leading-5'>
-                  {t('Address used in prepared keys.')}
+                  {t('Clients use this address with issued reseller keys.')}
                 </p>
               </div>
             </section>
@@ -237,32 +323,34 @@ export function Reseller() {
                     {t('Select a preset or enter any amount from 1M tokens.')}
                   </p>
                 </div>
-                <p className='text-muted-foreground text-xs'>
-                  {t('Base cost')}: {formatMoney(0.12)} / 1M
-                </p>
+                {configQuery.data ? (
+                  <p className='text-muted-foreground text-xs'>
+                    {t('Base cost')}: {formatMoney(baseCostPerMillion)} / 1M
+                  </p>
+                ) : null}
               </div>
 
-              <GothicResellerCards
-                tokenMillions={tokenMillions}
-                markupPercent={markupPercent}
-                formatMoney={formatMoney}
-                onSelect={(nextTokenMillions) => {
-                  form.setValue('tokenMillions', nextTokenMillions, {
-                    shouldDirty: true,
-                    shouldValidate: true,
-                  })
-                }}
-              />
+              {packageContent}
             </section>
 
-            <div className='grid items-start gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]'>
-              <ResellerConfigurator
-                form={form}
-                quote={quote}
+            <div className='grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]'>
+              {configuratorContent}
+              <ResellerKeyVault
+                keys={keysQuery.data ?? []}
                 formatMoney={formatMoney}
-                onSubmit={handlePrepareKey}
+                revealedKeys={revealedKeys}
+                revealingKeyId={revealingKeyId}
+                isLoading={keysQuery.isPending}
+                isFetching={keysQuery.isFetching}
+                isError={keysQuery.isError}
+                errorMessage={
+                  keysQuery.error instanceof Error
+                    ? t(keysQuery.error.message)
+                    : undefined
+                }
+                onRetry={() => void keysQuery.refetch()}
+                onReveal={(id) => void handleRevealKey(id)}
               />
-              <ResellerKeyVault keys={preparedKeys} formatMoney={formatMoney} />
             </div>
           </div>
         </div>

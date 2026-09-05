@@ -42,6 +42,7 @@ const CARD_ART = {
 type GothicResellerCardsProps = {
   tokenMillions: number
   markupPercent: number
+  baseCostPerMillion: number
   formatMoney: (value: number) => string
   onSelect: (tokenMillions: number) => void
 }
@@ -96,7 +97,8 @@ export function GothicResellerCards(props: GothicResellerCardsProps) {
           {RESELLER_PACKAGE_OPTIONS.map((item, index) => {
             const packageCost = calculateResellerQuote(
               item.tokenMillions,
-              props.markupPercent
+              props.markupPercent,
+              props.baseCostPerMillion
             ).cost
             return (
               <ResellerPackageCard

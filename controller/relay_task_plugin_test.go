@@ -32,6 +32,23 @@ type taskSubmissionTestBilling struct {
 	refunds   int
 }
 
+func TestExecuteTaskSubmissionRejectsResellerKeysBeforeUpstream(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	called := false
+
+	outcome, taskErr := executeTaskSubmissionWith(c, &relaycommon.RelayInfo{TokenKey: "rsl_task-not-supported"}, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+		called = true
+		return &relay.TaskSubmitResult{}, nil
+	})
+
+	assert.Nil(t, outcome)
+	require.NotNil(t, taskErr)
+	assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+	assert.Equal(t, "reseller_key_task_unsupported", taskErr.Code)
+	assert.False(t, called)
+}
+
 func (b *taskSubmissionTestBilling) Settle(int) error {
 	*b.events = append(*b.events, "settle")
 	if b.onSettle != nil {

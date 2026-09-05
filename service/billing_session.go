@@ -30,79 +30,157 @@ type BillingSession struct {
 	tokenConsumed    int  // 令牌额度实际扣减量
 	extraReserved    int  // 发送前补充预扣的额度（订阅退款时需要单独回滚）
 	trusted          bool // 是否命中信任额度旁路
+	fullBalanceHeld  bool // reseller generation reserved the complete token balance
 	fundingSettled   bool // funding.Settle 已成功，资金来源已提交
 	settled          bool // Settle 全部完成（资金 + 令牌）
 	refunded         bool // Refund 已调用
+	refundInFlight   bool // synchronous reseller refund is being persisted
 	mu               sync.Mutex
 }
 
+func (s *BillingSession) resellerOperationID(phase string) string {
+	if strings.TrimSpace(s.relayInfo.RequestId) == "" {
+		s.relayInfo.RequestId = common.NewRequestId()
+	}
+	return s.relayInfo.RequestId + ":" + phase
+}
+
 // Settle 根据实际消耗额度进行结算。
-// 资金来源和令牌额度分两步提交：若资金来源已提交但令牌调整失败，
-// 会标记 fundingSettled 防止 Refund 对已提交的资金来源执行退款。
+// 资金来源和令牌额度分两步提交。若资金来源已提交但令牌调整失败，
+// fundingSettled 会防止重复调整资金，而会话保持可重试状态。
 func (s *BillingSession) Settle(actualQuota int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.settled {
 		return nil
 	}
+	if s.refundInFlight {
+		return errors.New("billing refund is in progress")
+	}
+	if s.fullBalanceHeld && actualQuota > s.preConsumedQuota {
+		// A prepaid generation request holds the complete allocation before it
+		// reaches an upstream provider. If the provider reports more usage than
+		// the allocation, consume the held balance without creating debt or
+		// turning a successful request into a full refund.
+		actualQuota = s.preConsumedQuota
+	}
 	delta := actualQuota - s.preConsumedQuota
 	if delta == 0 {
 		s.settled = true
 		return nil
 	}
+	isReseller := isResellerBilling(s.relayInfo)
 	// 1) 调整资金来源（仅在尚未提交时执行，防止重复调用）
 	if !s.fundingSettled {
 		if err := s.funding.Settle(delta); err != nil {
 			return err
 		}
-		s.fundingSettled = true
+		// Reseller funding is a no-op; defer the marker until the token
+		// adjustment succeeds so a failed SQL settlement remains refundable.
+		if !isReseller {
+			s.fundingSettled = true
+		}
 	}
 	// 2) 调整令牌额度
 	var tokenErr error
 	if !s.relayInfo.IsPlayground {
-		if delta > 0 {
+		if isReseller {
+			tokenErr = model.ApplyResellerTokenQuotaAdjustment(
+				s.relayInfo.TokenId,
+				s.relayInfo.TokenKey,
+				-delta,
+				s.resellerOperationID("settle"),
+			)
+		} else if delta > 0 {
 			tokenErr = model.DecreaseTokenQuota(s.relayInfo.TokenId, s.relayInfo.TokenKey, delta)
 		} else {
 			tokenErr = model.IncreaseTokenQuota(s.relayInfo.TokenId, s.relayInfo.TokenKey, -delta)
 		}
 		if tokenErr != nil {
-			// 资金来源已提交，令牌调整失败只能记录日志；标记 settled 防止 Refund 误退资金
+			if isReseller {
+				s.fundingSettled = false
+			}
 			common.SysLog(fmt.Sprintf("error adjusting token quota after funding settled (userId=%d, tokenId=%d, delta=%d): %s",
 				s.relayInfo.UserId, s.relayInfo.TokenId, delta, tokenErr.Error()))
+			return tokenErr
 		}
 	}
+	s.fundingSettled = true
 	// 3) 更新 relayInfo 上的订阅 PostDelta（用于日志）
 	if s.funding.Source() == BillingSourceSubscription {
 		s.relayInfo.SubscriptionPostDelta += int64(delta)
 	}
 	s.settled = true
-	return tokenErr
+	return nil
 }
 
-// Refund 退还所有预扣费，幂等安全，异步执行。
+// Refund 退还所有预扣费，幂等安全。
+//
+// Wallet/subscription refunds retain their historical asynchronous behavior.
+// A reseller allocation is different: its only funding source is the prepaid
+// token itself, so marking the session refunded before the SQL credit could
+// permanently lose the allocation on a transient database/cache failure.  We
+// therefore perform that token credit synchronously and leave the state
+// retryable when it fails.
 func (s *BillingSession) Refund(c *gin.Context) {
 	s.mu.Lock()
-	if s.settled || s.refunded || !s.needsRefundLocked() {
+	if s.settled || s.refunded || s.refundInFlight || !s.needsRefundLocked() {
 		s.mu.Unlock()
 		return
 	}
+	isReseller := isResellerBilling(s.relayInfo)
+	if isReseller {
+		s.refundInFlight = true
+	}
 	s.refunded = true
-	s.mu.Unlock()
+	if isReseller {
+		// The reseller path must not mark refunded until the durable token credit
+		// below succeeds.  Keep the old value only for the non-reseller async
+		// path.
+		s.refunded = false
+	}
 
-	logger.LogInfo(c, fmt.Sprintf("用户 %d 请求失败, 返还预扣费（token_quota=%s, funding=%s）",
-		s.relayInfo.UserId,
-		logger.FormatQuota(s.tokenConsumed),
-		s.funding.Source(),
-	))
-
-	// 复制需要的值到闭包中
+	// Copy values while holding the session lock.  The reseller path executes
+	// the credit before releasing the in-flight marker; the other paths hand
+	// them to the existing asynchronous worker.
+	userID := s.relayInfo.UserId
+	tokenConsumed := s.tokenConsumed
+	fundingSource := s.funding.Source()
 	tokenId := s.relayInfo.TokenId
 	tokenKey := s.relayInfo.TokenKey
 	isPlayground := s.relayInfo.IsPlayground
-	tokenConsumed := s.tokenConsumed
 	extraReserved := s.extraReserved
 	subscriptionId := s.relayInfo.SubscriptionId
 	funding := s.funding
+	s.mu.Unlock()
+
+	logger.LogInfo(c, fmt.Sprintf("用户 %d 请求失败, 返还预扣费（token_quota=%s, funding=%s）",
+		userID,
+		logger.FormatQuota(tokenConsumed),
+		fundingSource,
+	))
+
+	if isReseller {
+		var refundErr error
+		if tokenConsumed > 0 && !isPlayground {
+			refundErr = model.ApplyResellerTokenQuotaAdjustment(
+				tokenId,
+				tokenKey,
+				tokenConsumed,
+				s.resellerOperationID("refund"),
+			)
+		}
+		s.mu.Lock()
+		s.refundInFlight = false
+		if refundErr == nil {
+			s.refunded = true
+		}
+		s.mu.Unlock()
+		if refundErr != nil {
+			common.SysLog("error refunding reseller token quota: " + refundErr.Error())
+		}
+		return
+	}
 
 	gopool.Go(func() {
 		// 1) 退还资金来源
@@ -147,7 +225,15 @@ func (s *BillingSession) needsRefundLocked() bool {
 
 // GetPreConsumedQuota 返回实际预扣的额度。
 func (s *BillingSession) GetPreConsumedQuota() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.preConsumedQuota
+}
+
+func (s *BillingSession) hasFullBalanceReservation() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.fullBalanceHeld
 }
 
 func (s *BillingSession) Reserve(targetQuota int) error {
@@ -263,6 +349,8 @@ func (s *BillingSession) reserveFunding(delta int) error {
 			)
 		}
 		return nil
+	case *PrepaidTokenFunding:
+		return nil
 	default:
 		return types.NewError(fmt.Errorf("unsupported funding source: %s", s.funding.Source()), types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
 	}
@@ -280,6 +368,8 @@ func (s *BillingSession) rollbackFundingReserve(delta int) {
 		if err := model.PostConsumeUserSubscriptionDelta(funding.subscriptionId, -int64(delta)); err != nil {
 			common.SysLog("error rolling back subscription funding reserve: " + err.Error())
 		}
+	case *PrepaidTokenFunding:
+		return
 	}
 }
 
@@ -357,6 +447,17 @@ func (s *BillingSession) syncRelayInfo() {
 func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preConsumedQuota int) (*BillingSession, *types.NewAPIError) {
 	if relayInfo == nil {
 		return nil, types.NewError(fmt.Errorf("relayInfo is nil"), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
+	}
+
+	if model.IsResellerTokenKey(relayInfo.TokenKey) {
+		session := &BillingSession{
+			relayInfo: relayInfo,
+			funding:   &PrepaidTokenFunding{},
+		}
+		if apiErr := session.preConsume(c, preConsumedQuota); apiErr != nil {
+			return nil, apiErr
+		}
+		return session, nil
 	}
 
 	pref := common.NormalizeBillingPreference(relayInfo.UserSetting.BillingPreference)

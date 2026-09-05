@@ -280,6 +280,13 @@ func SetApiRouter(router *gin.Engine) {
 			tokenRoute.POST("/batch", controller.DeleteTokenBatch)
 			tokenRoute.POST("/batch/keys", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.GetTokenKeysBatch)
 		}
+		resellerRoute := apiRouter.Group("/reseller")
+		resellerRoute.Use(middleware.UserAuth())
+		{
+			resellerRoute.GET("/config", controller.GetResellerConfig)
+			resellerRoute.GET("/keys", controller.GetResellerKeys)
+			resellerRoute.POST("/keys", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.AddResellerKey)
+		}
 
 		usageRoute := apiRouter.Group("/usage")
 		usageRoute.Use(middleware.CORS(), middleware.CriticalRateLimit())

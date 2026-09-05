@@ -103,6 +103,9 @@ func taskIsSubscription(task *model.Task) bool {
 
 // taskAdjustFunding 调整任务的资金来源（钱包或订阅），delta > 0 表示扣费，delta < 0 表示退还。
 func taskAdjustFunding(task *model.Task, delta int) error {
+	if task.PrivateData.BillingSource == BillingSourceReseller {
+		return nil
+	}
 	if taskIsSubscription(task) {
 		return model.PostConsumeUserSubscriptionDelta(task.PrivateData.SubscriptionId, int64(delta))
 	}
@@ -131,6 +134,20 @@ func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) {
 	if err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf("调整令牌额度失败 (delta=%d, task=%s): %s", delta, task.TaskID, err.Error()))
 	}
+}
+
+func taskAdjustResellerTokenQuota(ctx context.Context, task *model.Task, delta int) error {
+	if task.PrivateData.TokenId <= 0 || delta == 0 {
+		return nil
+	}
+	tokenKey := resolveTokenKey(ctx, task.PrivateData.TokenId, task.TaskID)
+	if tokenKey == "" {
+		return fmt.Errorf("reseller token %d is unavailable", task.PrivateData.TokenId)
+	}
+	if delta > 0 {
+		return model.DecreaseTokenQuota(task.PrivateData.TokenId, tokenKey, delta)
+	}
+	return model.IncreaseTokenQuota(task.PrivateData.TokenId, tokenKey, -delta)
 }
 
 // taskBillingOther 从 task 的 BillingContext 构建日志 Other 字段。
@@ -226,7 +243,14 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 	}
 
 	// 2. 退还令牌额度
-	taskAdjustTokenQuota(ctx, task, -quota)
+	if task.PrivateData.BillingSource == BillingSourceReseller {
+		if err := taskAdjustResellerTokenQuota(ctx, task, -quota); err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("退还 reseller 令牌额度失败 task %s: %s", task.TaskID, err.Error()))
+			return false
+		}
+	} else {
+		taskAdjustTokenQuota(ctx, task, -quota)
+	}
 
 	// 3. 回减预扣时累计的用户和渠道用量，请求次数保持不变
 	model.UpdateUserUsedQuota(task.UserId, -quota)
@@ -289,7 +313,14 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	}
 
 	// 调整令牌额度
-	taskAdjustTokenQuota(ctx, task, quotaDelta)
+	if task.PrivateData.BillingSource == BillingSourceReseller {
+		if err := taskAdjustResellerTokenQuota(ctx, task, quotaDelta); err != nil {
+			logger.LogError(ctx, fmt.Sprintf("reseller 任务令牌差额结算失败 task %s: %s", task.TaskID, err.Error()))
+			return
+		}
+	} else {
+		taskAdjustTokenQuota(ctx, task, quotaDelta)
+	}
 
 	task.Quota = actualQuota
 	if err := task.UpdateQuota(); err != nil {
@@ -336,6 +367,11 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTokens int) bool {
 	if totalTokens <= 0 {
 		return false
+	}
+	if task.PrivateData.BillingSource == BillingSourceReseller {
+		actualQuota, clamp := resellerTokenQuota(totalTokens)
+		RecalculateTaskQuota(ctx, task, actualQuota, fmt.Sprintf("reseller raw token settlement: tokens=%d", totalTokens), clamp)
+		return true
 	}
 
 	modelName := taskModelName(task)
