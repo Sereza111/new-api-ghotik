@@ -164,6 +164,7 @@ func AddResellerKey(c *gin.Context) {
 		ExpiredTime:    expiredTime,
 		RemainQuota:    request.TokenMillions * 1_000_000,
 		UnlimitedQuota: false,
+		QuotaMode:      model.TokenQuotaModeTokens,
 		AllowIps:       common.GetPointer(""),
 	}
 	metadata := model.ResellerKey{

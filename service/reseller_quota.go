@@ -19,6 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 package service
 
 import (
+	"strings"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -31,6 +33,19 @@ func isResellerBilling(relayInfo *relaycommon.RelayInfo) bool {
 		(relayInfo.BillingSource == BillingSourceReseller || model.IsResellerTokenKey(relayInfo.TokenKey))
 }
 
+func usesRawTokenQuota(relayInfo *relaycommon.RelayInfo) bool {
+	return isResellerBilling(relayInfo) ||
+		(relayInfo != nil && relayInfo.TokenQuotaMode == model.TokenQuotaModeTokens)
+}
+
+// tracksRawTokenQuota reports whether a raw-token key has a finite allocation
+// that must be reserved and settled. Unlimited keys retain the historical
+// money-quota semantics: they are still billed through the user's wallet or
+// subscription, but no token-key balance is mutated.
+func tracksRawTokenQuota(relayInfo *relaycommon.RelayInfo) bool {
+	return usesRawTokenQuota(relayInfo) && relayInfo != nil && !relayInfo.TokenUnlimited
+}
+
 func resellerTokenQuota(parts ...int) (int, *common.QuotaClamp) {
 	total := decimal.Zero
 	for _, part := range parts {
@@ -39,6 +54,54 @@ func resellerTokenQuota(parts ...int) (int, *common.QuotaClamp) {
 		}
 	}
 	return common.QuotaFromDecimalChecked(total)
+}
+
+func hasReportedTextTokenUsage(usage *dto.Usage) bool {
+	if usage == nil {
+		return false
+	}
+	return usage.PromptTokens > 0 || usage.CompletionTokens > 0 || usage.TotalTokens > 0 ||
+		usage.InputTokens > 0 || usage.OutputTokens > 0 || usage.PromptCacheHitTokens > 0 ||
+		usage.PromptTokensDetails.CachedTokens > 0 || usage.PromptTokensDetails.CacheCreationTokensTotal() > 0 ||
+		(usage.InputTokensDetails != nil && (usage.InputTokensDetails.CachedTokens > 0 ||
+			usage.InputTokensDetails.CacheCreationTokensTotal() > 0))
+}
+
+// authoritativeTextTokenQuota accepts only usage measured by the upstream.
+// Local token counts and BillingUsage values explicitly marked as estimated
+// are useful for monetary billing, but cannot release a finite raw-token
+// reservation. A structured/source-tagged upstream usage remains authoritative
+// even when every counter is zero, so a genuine zero can refund the hold.
+func authoritativeTextTokenQuota(usage *dto.Usage, locallyCounted bool, fallbackPromptTokens int) (int, *common.QuotaClamp, bool) {
+	if usage == nil || locallyCounted {
+		return 0, nil, false
+	}
+	if usage.BillingUsage != nil && usage.BillingUsage.Estimated {
+		return 0, nil, false
+	}
+
+	effectiveUsage := usage
+	if normalizedUsage, ok := usageFromBillingUsage(usage); ok {
+		effectiveUsage = normalizedUsage
+	} else if !hasReportedTextTokenUsage(usage) && strings.TrimSpace(usage.UsageSource) == "" {
+		return 0, nil, false
+	}
+
+	if !hasReportedTextTokenUsage(effectiveUsage) {
+		// A source-tagged all-zero object is an explicit upstream report, not a
+		// missing-usage fallback. Do not replace it with the prompt estimate.
+		fallbackPromptTokens = 0
+	}
+	quota, clamp := resellerTextTokenQuota(effectiveUsage, fallbackPromptTokens)
+	return quota, clamp, true
+}
+
+func hasReportedRealtimeTokenUsage(usage *dto.RealtimeUsage) bool {
+	if usage == nil {
+		return false
+	}
+	return usage.TotalTokens > 0 || usage.InputTokens > 0 || usage.OutputTokens > 0 ||
+		usage.InputTokenDetails.CachedTokens > 0
 }
 
 // Every accepted reseller request is reserved against the complete prepaid

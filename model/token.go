@@ -13,6 +13,11 @@ import (
 
 const resellerTokenKeyPrefix = "rsl"
 
+const (
+	TokenQuotaModeMoney  = "money"
+	TokenQuotaModeTokens = "tokens"
+)
+
 type Token struct {
 	Id                 int            `json:"id"`
 	UserId             int            `json:"user_id" gorm:"index"`
@@ -24,6 +29,7 @@ type Token struct {
 	ExpiredTime        int64          `json:"expired_time" gorm:"bigint;default:-1"` // -1 means never expired
 	RemainQuota        int            `json:"remain_quota" gorm:"default:0"`
 	UnlimitedQuota     bool           `json:"unlimited_quota"`
+	QuotaMode          string         `json:"quota_mode" gorm:"type:varchar(16)"`
 	ModelLimitsEnabled bool           `json:"model_limits_enabled"`
 	ModelLimits        string         `json:"model_limits" gorm:"type:text"`
 	AllowIps           *string        `json:"allow_ips" gorm:"default:''"`
@@ -32,6 +38,35 @@ type Token struct {
 	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
 	AutoGroups         string         `json:"-" gorm:"type:text"`
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
+}
+
+func NormalizeTokenQuotaMode(mode string) (string, bool) {
+	switch strings.TrimSpace(mode) {
+	case "", TokenQuotaModeMoney:
+		return TokenQuotaModeMoney, true
+	case TokenQuotaModeTokens:
+		return TokenQuotaModeTokens, true
+	default:
+		return "", false
+	}
+}
+
+func (token *Token) EffectiveQuotaMode() string {
+	if token != nil && IsResellerTokenKey(token.Key) {
+		return TokenQuotaModeTokens
+	}
+	if token == nil {
+		return TokenQuotaModeMoney
+	}
+	mode, ok := NormalizeTokenQuotaMode(token.QuotaMode)
+	if !ok {
+		return TokenQuotaModeMoney
+	}
+	return mode
+}
+
+func (token *Token) UsesTokenQuota() bool {
+	return token != nil && token.EffectiveQuotaMode() == TokenQuotaModeTokens
 }
 
 func (token *Token) GetAutoGroups() ([]string, error) {
@@ -249,7 +284,10 @@ func ValidateUserToken(key string) (token *Token, err error) {
 			return token, ErrTokenInvalid
 		}
 		if !token.UnlimitedQuota && token.RemainQuota <= 0 {
-			if !common.RedisEnabled {
+			// Raw-token keys reserve their complete finite allocation while a request
+			// is in flight. Do not persist an exhausted status for that temporary
+			// reservation; the remaining balance itself still rejects concurrent use.
+			if !common.RedisEnabled && !token.UsesTokenQuota() {
 				token.Status = common.TokenStatusExhausted
 				err := token.SelectUpdate()
 				if err != nil {
@@ -311,19 +349,62 @@ func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 }
 
 func (token *Token) Insert() error {
-	var err error
-	err = DB.Create(token).Error
-	return err
+	mode, ok := NormalizeTokenQuotaMode(token.QuotaMode)
+	if !ok {
+		return errors.New("invalid token quota mode")
+	}
+	if IsResellerTokenKey(token.Key) {
+		mode = TokenQuotaModeTokens
+	}
+	token.QuotaMode = mode
+	return DB.Create(token).Error
 }
 
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (token *Token) Update() (err error) {
+	mode, ok := NormalizeTokenQuotaMode(token.QuotaMode)
+	if !ok {
+		return errors.New("invalid token quota mode")
+	}
+	token.QuotaMode = mode
+	// Resolve the persisted allocation mode before selecting writable fields.
+	// Callers may pass a legacy/partial Token with an empty QuotaMode; treating
+	// that snapshot as money-denominated could overwrite a raw-token balance
+	// while a request is holding it. The mode is immutable, so the database row
+	// is the authority for existing tokens.
+	rawQuota := token.UsesTokenQuota() || IsResellerTokenKey(token.Key)
+	mutationKey := token.Key
+	if token.Id > 0 {
+		var persisted Token
+		queryErr := DB.Where("id = ?", token.Id).First(&persisted).Error
+		if queryErr != nil && !errors.Is(queryErr, gorm.ErrRecordNotFound) {
+			return queryErr
+		}
+		if queryErr == nil {
+			if persisted.Key != "" {
+				mutationKey = persisted.Key
+			}
+			rawQuota = rawQuota || persisted.UsesTokenQuota() || IsResellerTokenKey(persisted.Key)
+			if token.QuotaMode == TokenQuotaModeMoney && persisted.QuotaMode == TokenQuotaModeTokens {
+				// Keep the in-memory object consistent with the immutable persisted
+				// mode even when this update came from a legacy partial payload.
+				token.QuotaMode = TokenQuotaModeTokens
+			}
+		}
+	}
 	// 写库前失效缓存并设置 fence，防止并发读者把过期快照重新写回缓存。
-	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
+	if cacheErr := invalidateTokenCacheForMutation(mutationKey); cacheErr != nil {
 		common.SysLog("failed to invalidate token cache before update: " + cacheErr.Error())
 	}
-	return DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
-		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "auto_groups").Updates(token).Error
+	// QuotaMode is immutable after creation: changing it would reinterpret the
+	// existing remain/used counters in a different unit. Raw-token allocations
+	// are immutable too, because overwriting remain_quota could race an in-flight
+	// hard reservation.
+	fields := []string{"name", "status", "expired_time", "model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "auto_groups"}
+	if !rawQuota {
+		fields = append(fields, "remain_quota", "unlimited_quota")
+	}
+	return DB.Model(token).Select(fields).Updates(token).Error
 }
 
 // UpdateResellerMetadata only updates fields that do not alter a prepaid

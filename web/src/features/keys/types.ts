@@ -29,6 +29,11 @@ export const apiKeySchema = z.object({
   status: z.number(), // 1: enabled, 2: disabled, 3: expired, 4: exhausted
   remain_quota: z.number(),
   used_quota: z.number(),
+  quota_mode: z.preprocess(
+    (value) =>
+      value === undefined || value === null || value === '' ? 'money' : value,
+    z.enum(['money', 'tokens'])
+  ),
   unlimited_quota: z.boolean(),
   expired_time: z.number(), // -1 for never expires
   created_time: z.number(),
@@ -49,6 +54,7 @@ export const apiKeySchema = z.object({
 })
 
 export type ApiKey = z.infer<typeof apiKeySchema>
+export type ApiKeyQuotaMode = ApiKey['quota_mode']
 
 // ============================================================================
 // API Request/Response Types
@@ -86,6 +92,7 @@ export interface SearchApiKeysParams {
 export interface ApiKeyFormData {
   name: string
   remain_quota: number
+  quota_mode: ApiKeyQuotaMode
   expired_time: number
   unlimited_quota: boolean
   model_limits_enabled: boolean

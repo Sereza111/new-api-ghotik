@@ -42,7 +42,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
-import { formatQuota } from '@/lib/format'
+import { toIntlLocale } from '@/i18n/languages'
 import { cn } from '@/lib/utils'
 
 import { getApiKeys, searchApiKeys } from '../api'
@@ -52,6 +52,7 @@ import {
   API_KEY_STATUSES,
   ERROR_MESSAGES,
 } from '../constants'
+import { formatApiKeyQuota } from '../lib'
 import type { ApiKey } from '../types'
 import { ApiKeyCell, UnlimitedQuotaBadge } from './api-keys-cells'
 import { useApiKeysColumns } from './api-keys-columns'
@@ -100,8 +101,9 @@ function ApiKeysMobileList({
   table: TanstackTable<ApiKey>
   isLoading: boolean
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const rows = table.getRowModel().rows
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
 
   if (isLoading) return <ApiKeysMobileSkeleton />
 
@@ -168,13 +170,29 @@ function ApiKeysMobileList({
             <div className='flex items-center justify-between gap-2 text-xs'>
               <span className='text-muted-foreground'>{t('Quota')}</span>
               {apiKey.unlimited_quota ? (
-                <UnlimitedQuotaBadge used={apiKey.used_quota} />
+                <UnlimitedQuotaBadge
+                  used={apiKey.used_quota}
+                  quotaMode={apiKey.quota_mode}
+                />
               ) : (
                 <span className='font-medium tabular-nums'>
-                  {formatQuota(apiKey.remain_quota)}
+                  {formatApiKeyQuota(
+                    apiKey.remain_quota,
+                    apiKey.quota_mode,
+                    t('Tokens'),
+                    locale,
+                    false
+                  )}
                   <span className='text-muted-foreground font-normal'>
                     {' / '}
-                    {formatQuota(total)}
+                    {formatApiKeyQuota(
+                      total,
+                      apiKey.quota_mode,
+                      t('Tokens'),
+                      locale,
+                      false
+                    )}
+                    {apiKey.quota_mode === 'tokens' ? 'M' : ''}
                   </span>
                 </span>
               )}

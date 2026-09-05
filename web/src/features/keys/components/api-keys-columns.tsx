@@ -32,10 +32,10 @@ import { useMediaQuery } from '@/hooks'
 import { toIntlLocale } from '@/i18n/languages'
 import { getUserGroups } from '@/lib/api'
 import dayjs from '@/lib/dayjs'
-import { formatQuota } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { API_KEY_STATUSES } from '../constants'
+import { formatApiKeyQuota } from '../lib'
 import type { ApiKey } from '../types'
 import { ApiKeyGroupCell } from './api-key-group-cell'
 import { ApiKeyTimestampCell } from './api-key-timestamp-cell'
@@ -147,23 +147,38 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
       cell: ({ row }) => {
         const apiKey = row.original
         if (apiKey.unlimited_quota) {
-          return <UnlimitedQuotaBadge used={apiKey.used_quota} />
+          return (
+            <UnlimitedQuotaBadge
+              used={apiKey.used_quota}
+              quotaMode={apiKey.quota_mode}
+            />
+          )
         }
 
         const used = apiKey.used_quota
         const remaining = apiKey.remain_quota
         const total = used + remaining
         const percentage = total > 0 ? (remaining / total) * 100 : 0
+        const quotaUnit = apiKey.quota_mode === 'tokens' ? 'M' : ''
+        const formatKeyQuota = (quota: number, includeUnit = true) =>
+          formatApiKeyQuota(
+            quota,
+            apiKey.quota_mode,
+            t('Tokens'),
+            locale,
+            includeUnit
+          )
 
         return (
           <Tooltip>
             <TooltipTrigger render={<div className='w-[150px] space-y-1' />}>
               <div className='flex justify-between text-xs'>
                 <span className='font-medium tabular-nums'>
-                  {formatQuota(remaining)}
+                  {formatKeyQuota(remaining, false)}
                 </span>
                 <span className='text-muted-foreground tabular-nums'>
-                  {formatQuota(total)}
+                  {formatKeyQuota(total, false)}
+                  {quotaUnit}
                 </span>
               </div>
               <Progress
@@ -174,14 +189,14 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
             <TooltipContent>
               <div className='space-y-1 text-xs'>
                 <div>
-                  {t('Used:')} {formatQuota(used)}
+                  {t('Used:')} {formatKeyQuota(used)}
                 </div>
                 <div>
-                  {t('Remaining:')} {formatQuota(remaining)} (
+                  {t('Remaining:')} {formatKeyQuota(remaining)} (
                   {percentage.toFixed(1)}%)
                 </div>
                 <div>
-                  {t('Total:')} {formatQuota(total)}
+                  {t('Total:')} {formatKeyQuota(total)}
                 </div>
               </div>
             </TooltipContent>

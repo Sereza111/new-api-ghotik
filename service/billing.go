@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -22,51 +23,6 @@ const (
 // PreConsumeBilling 根据用户计费偏好创建 BillingSession 并执行预扣费。
 // 会话存储在 relayInfo.Billing 上，供后续 Settle / Refund 使用。
 func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
-	fullBalanceHeld := false
-	if isResellerBilling(relayInfo) {
-		estimatedPromptTokens := relayInfo.GetEstimatePromptTokens()
-		if estimatedPromptTokens < common.PreConsumedQuota {
-			estimatedPromptTokens = common.PreConsumedQuota
-		}
-		var clamp *common.QuotaClamp
-		preConsumedQuota, clamp = resellerTokenQuota(
-			estimatedPromptTokens,
-			relayInfo.GetEstimateCompletionTokens(),
-		)
-		noteQuotaClamp(relayInfo, clamp)
-		if resellerNeedsFullBalanceReservation(relayInfo) {
-			// The auth middleware's context snapshot may be stale (or absent for
-			// websocket/embedded callers).  Read the current allocation directly
-			// from SQL so the hard-cap reservation cannot be based on Redis data.
-			if relayInfo.TokenId > 0 {
-				currentToken, tokenErr := model.GetTokenByIds(relayInfo.TokenId, relayInfo.UserId)
-				if tokenErr != nil {
-					return types.NewError(tokenErr, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
-				}
-				if currentToken.Key != strings.TrimPrefix(relayInfo.TokenKey, "sk-") ||
-					currentToken.UnlimitedQuota || currentToken.RemainQuota <= 0 {
-					return types.NewErrorWithStatusCode(
-						model.ErrResellerTokenQuotaInsufficient,
-						types.ErrorCodePreConsumeTokenQuotaFailed,
-						http.StatusForbidden,
-						types.ErrOptionWithSkipRetry(),
-						types.ErrOptionWithNoRecordErrorLog(),
-					)
-				}
-				if preConsumedQuota > currentToken.RemainQuota {
-					return types.NewErrorWithStatusCode(
-						model.ErrResellerTokenQuotaInsufficient,
-						types.ErrorCodePreConsumeTokenQuotaFailed,
-						http.StatusForbidden,
-						types.ErrOptionWithSkipRetry(),
-						types.ErrOptionWithNoRecordErrorLog(),
-					)
-				}
-				preConsumedQuota = currentToken.RemainQuota
-				fullBalanceHeld = true
-			}
-		}
-	}
 	if relayInfo != nil && relayInfo.QuotaClamp != nil {
 		return types.NewErrorWithStatusCode(
 			relayInfo.QuotaClamp,
@@ -82,6 +38,85 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 			http.StatusBadRequest,
 			types.ErrOptionWithSkipRetry(),
 		)
+	}
+
+	fullBalanceHeld := false
+	if usesRawTokenQuota(relayInfo) {
+		estimatedPromptTokens := relayInfo.GetEstimatePromptTokens()
+		if estimatedPromptTokens < common.PreConsumedQuota {
+			estimatedPromptTokens = common.PreConsumedQuota
+		}
+		var clamp *common.QuotaClamp
+		rawPreConsumedQuota, clamp := resellerTokenQuota(
+			estimatedPromptTokens,
+			relayInfo.GetEstimateCompletionTokens(),
+		)
+		noteQuotaClamp(relayInfo, clamp)
+		if clamp != nil {
+			return types.NewErrorWithStatusCode(
+				clamp,
+				types.ErrorCodeModelPriceError,
+				http.StatusBadRequest,
+				types.ErrOptionWithSkipRetry(),
+			)
+		}
+
+		// The context snapshot may be stale. Read the current allocation directly
+		// from SQL before making a hard-cap reservation.
+		if relayInfo.TokenId <= 0 || relayInfo.UserId <= 0 {
+			return types.NewError(model.ErrTokenInvalid, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
+		}
+		currentToken, tokenErr := model.GetTokenByIds(relayInfo.TokenId, relayInfo.UserId)
+		if tokenErr != nil {
+			return types.NewError(tokenErr, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
+		}
+		quotaErr := model.ErrTokenQuotaInsufficient
+		if isResellerBilling(relayInfo) {
+			quotaErr = model.ErrResellerTokenQuotaInsufficient
+		}
+		if currentToken.Key != strings.TrimPrefix(relayInfo.TokenKey, "sk-") || !currentToken.UsesTokenQuota() {
+			return types.NewErrorWithStatusCode(
+				quotaErr,
+				types.ErrorCodePreConsumeTokenQuotaFailed,
+				http.StatusForbidden,
+				types.ErrOptionWithSkipRetry(),
+				types.ErrOptionWithNoRecordErrorLog(),
+			)
+		}
+		relayInfo.TokenUnlimited = currentToken.UnlimitedQuota
+		if currentToken.UnlimitedQuota {
+			if isResellerBilling(relayInfo) {
+				// Prepaid reseller allocations are finite by construction. Refuse
+				// malformed legacy rows instead of silently turning them into an
+				// unmetered reseller key.
+				return types.NewErrorWithStatusCode(
+					quotaErr,
+					types.ErrorCodePreConsumeTokenQuotaFailed,
+					http.StatusForbidden,
+					types.ErrOptionWithSkipRetry(),
+					types.ErrOptionWithNoRecordErrorLog(),
+				)
+			}
+			// Unlimited raw-token keys do not reserve or mutate the token-key
+			// counters. Their monetary usage is still settled normally below.
+			rawPreConsumedQuota = 0
+		} else {
+			if currentToken.RemainQuota <= 0 || rawPreConsumedQuota > currentToken.RemainQuota {
+				return types.NewErrorWithStatusCode(
+					quotaErr,
+					types.ErrorCodePreConsumeTokenQuotaFailed,
+					http.StatusForbidden,
+					types.ErrOptionWithSkipRetry(),
+					types.ErrOptionWithNoRecordErrorLog(),
+				)
+			}
+			rawPreConsumedQuota = currentToken.RemainQuota
+			fullBalanceHeld = true
+		}
+		relayInfo.TokenQuotaPreConsumed = rawPreConsumedQuota
+		if isResellerBilling(relayInfo) {
+			preConsumedQuota = rawPreConsumedQuota
+		}
 	}
 	session, apiErr := NewBillingSession(c, relayInfo, preConsumedQuota)
 	if apiErr != nil {
@@ -122,6 +157,13 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 		}
 
 		if err := relayInfo.Billing.Settle(actualQuota); err != nil {
+			// Raw-token reservations are hard caps and must not be left held when
+			// settlement fails. Refund is synchronous/idempotent for this mode; the
+			// session remains retryable if the compensating write also encounters a
+			// transient database error.
+			if usesRawTokenQuota(relayInfo) {
+				relayInfo.Billing.Refund(ctx)
+			}
 			return err
 		}
 
@@ -137,6 +179,9 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 	}
 
 	// 回退：无 BillingSession 时使用旧路径
+	if usesRawTokenQuota(relayInfo) && !isResellerBilling(relayInfo) {
+		return errors.New("raw token quota billing session is missing")
+	}
 	quotaDelta := actualQuota - relayInfo.FinalPreConsumedQuota
 	if quotaDelta != 0 {
 		return PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true)

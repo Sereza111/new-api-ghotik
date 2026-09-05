@@ -33,10 +33,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { toIntlLocale } from '@/i18n/languages'
 import { copyToClipboard } from '@/lib/copy-to-clipboard'
-import { formatQuota } from '@/lib/format'
 
-import type { ApiKey } from '../types'
+import { formatApiKeyQuota } from '../lib'
+import type { ApiKey, ApiKeyQuotaMode } from '../types'
 import { useApiKeys } from './api-keys-provider'
 
 export function ApiKeyCell({ apiKey }: { apiKey: ApiKey }) {
@@ -144,11 +145,17 @@ export function ApiKeyCell({ apiKey }: { apiKey: ApiKey }) {
 
 type UnlimitedQuotaBadgeProps = {
   used: number
+  quotaMode?: ApiKeyQuotaMode
 }
 
 export function UnlimitedQuotaBadge(props: UnlimitedQuotaBadgeProps) {
-  const { t } = useTranslation()
-  const formattedUsed = formatQuota(props.used)
+  const { t, i18n } = useTranslation()
+  const formattedUsed = formatApiKeyQuota(
+    props.used,
+    props.quotaMode,
+    t('Tokens'),
+    toIntlLocale(i18n.resolvedLanguage || i18n.language)
+  )
 
   return (
     <Popover>

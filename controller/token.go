@@ -34,7 +34,35 @@ func (input *tokenAutoGroupsInput) UnmarshalJSON(data []byte) error {
 
 type tokenRequest struct {
 	model.Token
-	AutoGroups tokenAutoGroupsInput `json:"auto_groups"`
+	AutoGroups        tokenAutoGroupsInput `json:"auto_groups"`
+	QuotaMode         *string              `json:"quota_mode"`
+	remainQuotaSet    bool                 `json:"-"`
+	unlimitedQuotaSet bool                 `json:"-"`
+	expiredTimeSet    bool                 `json:"-"`
+}
+
+// UnmarshalJSON keeps track of whether allocation fields were sent. Raw-token
+// allocations are immutable after creation, but metadata/status updates should
+// still work with partial payloads that omit those fields.
+func (input *tokenRequest) UnmarshalJSON(data []byte) error {
+	type tokenRequestAlias tokenRequest
+	var decoded tokenRequestAlias
+	if err := common.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*input = tokenRequest(decoded)
+	var presence struct {
+		RemainQuota    *int   `json:"remain_quota"`
+		UnlimitedQuota *bool  `json:"unlimited_quota"`
+		ExpiredTime    *int64 `json:"expired_time"`
+	}
+	if err := common.Unmarshal(data, &presence); err != nil {
+		return err
+	}
+	input.remainQuotaSet = presence.RemainQuota != nil
+	input.unlimitedQuotaSet = presence.UnlimitedQuota != nil
+	input.expiredTimeSet = presence.ExpiredTime != nil
+	return nil
 }
 
 type tokenResponse struct {
@@ -58,6 +86,7 @@ func buildMaskedTokenResponse(token *model.Token) *tokenResponse {
 	}
 	maskedToken := *token
 	maskedToken.Key = token.GetMaskedKey()
+	maskedToken.QuotaMode = token.EffectiveQuotaMode()
 	autoGroups, err := token.GetAutoGroups()
 	if err != nil {
 		common.SysError(fmt.Sprintf("failed to parse auto groups for token %d: %v", token.Id, err))
@@ -216,6 +245,7 @@ func GetTokenStatus(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"object":          "credit_summary",
+		"quota_mode":      token.EffectiveQuotaMode(),
 		"total_granted":   token.RemainQuota,
 		"total_used":      0, // not supported currently
 		"total_available": token.RemainQuota,
@@ -261,6 +291,7 @@ func GetTokenUsage(c *gin.Context) {
 		"data": gin.H{
 			"object":               "token_usage",
 			"name":                 token.Name,
+			"quota_mode":           token.EffectiveQuotaMode(),
 			"total_granted":        token.RemainQuota + token.UsedQuota,
 			"total_used":           token.UsedQuota,
 			"total_available":      token.RemainQuota,
@@ -280,6 +311,16 @@ func AddToken(c *gin.Context) {
 		return
 	}
 	token := request.Token
+	quotaMode := model.TokenQuotaModeMoney
+	if request.QuotaMode != nil {
+		var ok bool
+		quotaMode, ok = model.NormalizeTokenQuotaMode(*request.QuotaMode)
+		if !ok {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
+	}
+	token.QuotaMode = quotaMode
 	if len(token.Name) > 50 {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 		return
@@ -291,6 +332,9 @@ func AddToken(c *gin.Context) {
 			return
 		}
 		maxQuotaValue := maxTokenQuota()
+		if token.UsesTokenQuota() {
+			maxQuotaValue = common.MaxQuota
+		}
 		if token.RemainQuota > maxQuotaValue {
 			common.ApiErrorI18n(c, i18n.MsgTokenQuotaExceedMax, map[string]any{"Max": maxQuotaValue})
 			return
@@ -333,6 +377,7 @@ func AddToken(c *gin.Context) {
 		ExpiredTime:        token.ExpiredTime,
 		RemainQuota:        token.RemainQuota,
 		UnlimitedQuota:     token.UnlimitedQuota,
+		QuotaMode:          token.QuotaMode,
 		ModelLimitsEnabled: token.ModelLimitsEnabled,
 		ModelLimits:        token.ModelLimits,
 		AllowIps:           token.AllowIps,
@@ -379,21 +424,34 @@ func UpdateToken(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 		return
 	}
-	if !token.UnlimitedQuota {
-		if token.RemainQuota < 0 {
-			common.ApiErrorI18n(c, i18n.MsgTokenQuotaNegative)
-			return
-		}
-		maxQuotaValue := maxTokenQuota()
-		if token.RemainQuota > maxQuotaValue {
-			common.ApiErrorI18n(c, i18n.MsgTokenQuotaExceedMax, map[string]any{"Max": maxQuotaValue})
-			return
-		}
-	}
 	cleanToken, err := model.GetTokenByIds(token.Id, userId)
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if statusOnly == "" && request.QuotaMode != nil {
+		quotaMode, ok := model.NormalizeTokenQuotaMode(*request.QuotaMode)
+		if !ok || quotaMode != cleanToken.EffectiveQuotaMode() {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
+	}
+	if statusOnly == "" {
+		// Raw-token allocations are immutable. The dashboard may submit a stale
+		// snapshot of these fields while editing metadata; the merge below keeps
+		// the durable values instead of treating that payload as an allocation
+		// reset.
+		if !cleanToken.UsesTokenQuota() && !token.UnlimitedQuota {
+			if token.RemainQuota < 0 {
+				common.ApiErrorI18n(c, i18n.MsgTokenQuotaNegative)
+				return
+			}
+			maxQuotaValue := maxTokenQuota()
+			if token.RemainQuota > maxQuotaValue {
+				common.ApiErrorI18n(c, i18n.MsgTokenQuotaExceedMax, map[string]any{"Max": maxQuotaValue})
+				return
+			}
+		}
 	}
 	if token.Status == common.TokenStatusEnabled {
 		if cleanToken.Status == common.TokenStatusExpired && cleanToken.ExpiredTime <= common.GetTimestamp() && cleanToken.ExpiredTime != -1 {
@@ -410,8 +468,10 @@ func UpdateToken(c *gin.Context) {
 	} else {
 		// If you add more fields, please also update token.Update()
 		cleanToken.Name = token.Name
-		if !model.IsResellerTokenKey(cleanToken.Key) {
+		if !model.IsResellerTokenKey(cleanToken.Key) && (request.expiredTimeSet || !cleanToken.UsesTokenQuota()) {
 			cleanToken.ExpiredTime = token.ExpiredTime
+		}
+		if !model.IsResellerTokenKey(cleanToken.Key) && !cleanToken.UsesTokenQuota() {
 			cleanToken.RemainQuota = token.RemainQuota
 			cleanToken.UnlimitedQuota = token.UnlimitedQuota
 		}

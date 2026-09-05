@@ -62,9 +62,11 @@ import {
 } from '@/components/ui/sheet'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useStatus } from '@/hooks/use-status'
 import { getUserModels, getUserGroups } from '@/lib/api'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
+import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import {
@@ -75,13 +77,16 @@ import {
 } from '../api'
 import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import {
+  MAX_TOKEN_QUOTA_MILLIONS,
   getApiKeyFormSchema,
   type ApiKeyFormValues,
   getApiKeyFormDefaultValues,
+  quotaMillionsToUnits,
+  quotaUnitsToMillions,
   transformFormDataToPayload,
   transformApiKeyToFormDefaults,
 } from '../lib'
-import type { ApiKey } from '../types'
+import type { ApiKey, ApiKeyQuotaMode } from '../types'
 import {
   ApiKeyGroupCombobox,
   type ApiKeyGroupOption,
@@ -353,12 +358,35 @@ export function ApiKeysMutateDrawer({
   const { meta: currencyMeta } = getCurrencyDisplay()
   const currencyLabel = getCurrencyLabel()
   const tokensOnly = currencyMeta.kind === 'tokens'
-  const quotaLabel = t('Quota ({{currency}})', { currency: currencyLabel })
-  const quotaPlaceholder = tokensOnly
-    ? t('Enter quota in tokens')
-    : t('Enter quota in {{currency}}', { currency: currencyLabel })
   const autoGroupsMode = form.watch('auto_groups_mode')
   const unlimitedQuota = form.watch('unlimited_quota')
+  const quotaMode = form.watch('quota_mode')
+  const tokenQuotaMode = quotaMode === 'tokens'
+  const rawQuotaIsImmutable =
+    isUpdate &&
+    (currentRow?.quota_mode === 'tokens' ||
+      apiKeyData?.data?.quota_mode === 'tokens')
+  const quotaLabel = t('Quota ({{currency}})', {
+    currency: tokenQuotaMode ? t('Million tokens') : currencyLabel,
+  })
+  let quotaPlaceholder = t('Enter quota in {{currency}}', {
+    currency: currencyLabel,
+  })
+  let quotaDescription = t('Enter the quota amount in {{currency}}', {
+    currency: currencyLabel,
+  })
+  let quotaStep = 0.01
+  if (tokenQuotaMode) {
+    quotaPlaceholder = t('Enter quota in millions of tokens')
+    quotaDescription = quotaPlaceholder
+    // Keep six decimal places available so an allocation can be expressed
+    // down to a single token while the UI still displays millions.
+    quotaStep = 0.000001
+  } else if (tokensOnly) {
+    quotaPlaceholder = t('Enter quota in tokens')
+    quotaDescription = t('Enter the quota amount in tokens')
+    quotaStep = 1
+  }
 
   return (
     <Sheet
@@ -609,36 +637,98 @@ export function ApiKeysMutateDrawer({
                 iconTone='success'
               />
               {!unlimitedQuota && (
-                <FormField
-                  control={form.control}
-                  name='remain_quota_dollars'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{quotaLabel}</FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          type='number'
-                          step={tokensOnly ? 1 : 0.01}
-                          placeholder={quotaPlaceholder}
-                          onChange={(e) =>
-                            field.onChange(
-                              Number.parseFloat(e.target.value) || 0
-                            )
-                          }
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        {tokensOnly
-                          ? t('Enter the quota amount in tokens')
-                          : t('Enter the quota amount in {{currency}}', {
-                              currency: currencyLabel,
-                            })}
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                <div className='grid gap-4 sm:grid-cols-2'>
+                  <FormField
+                    control={form.control}
+                    name='quota_mode'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel id='quota-unit-label'>
+                          {t('Quota unit')}
+                        </FormLabel>
+                        <FormControl>
+                          <ToggleGroup
+                            value={[field.value]}
+                            onValueChange={(values) => {
+                              const nextMode = values.find(
+                                (value) => value !== field.value
+                              ) as ApiKeyQuotaMode | undefined
+                              if (!nextMode) return
+
+                              const amount =
+                                form.getValues('remain_quota_amount') || 0
+                              const quotaUnits =
+                                field.value === 'tokens'
+                                  ? quotaMillionsToUnits(amount)
+                                  : parseQuotaFromDollars(amount)
+                              const nextAmount =
+                                nextMode === 'tokens'
+                                  ? quotaUnitsToMillions(quotaUnits)
+                                  : quotaUnitsToDollars(quotaUnits)
+
+                              field.onChange(nextMode)
+                              form.setValue('remain_quota_amount', nextAmount, {
+                                shouldDirty: true,
+                                shouldValidate: true,
+                              })
+                            }}
+                            aria-labelledby='quota-unit-label'
+                            variant='outline'
+                            className='w-full'
+                          >
+                            <ToggleGroupItem
+                              value='money'
+                              className='flex-1'
+                              disabled={isUpdate}
+                            >
+                              {t('Billing currency')} ({currencyLabel})
+                            </ToggleGroupItem>
+                            <ToggleGroupItem
+                              value='tokens'
+                              className='flex-1'
+                              disabled={isUpdate}
+                            >
+                              {t('Million tokens')}
+                            </ToggleGroupItem>
+                          </ToggleGroup>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='remain_quota_amount'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{quotaLabel}</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            type='number'
+                            min='0'
+                            step={quotaStep}
+                            max={
+                              tokenQuotaMode
+                                ? MAX_TOKEN_QUOTA_MILLIONS
+                                : undefined
+                            }
+                            disabled={rawQuotaIsImmutable}
+                            placeholder={quotaPlaceholder}
+                            onChange={(e) =>
+                              field.onChange(
+                                Number.parseFloat(e.target.value) || 0
+                              )
+                            }
+                          />
+                        </FormControl>
+                        <FormDescription>{quotaDescription}</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
               )}
 
               <FormField
@@ -658,6 +748,7 @@ export function ApiKeysMutateDrawer({
                       <Switch
                         checked={field.value}
                         onCheckedChange={field.onChange}
+                        disabled={rawQuotaIsImmutable}
                       />
                     </FormControl>
                   </FormItem>

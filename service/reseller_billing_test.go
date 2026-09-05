@@ -24,6 +24,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -353,6 +355,85 @@ func TestPostTextConsumeQuotaSettlesRawResellerTokens(t *testing.T) {
 	var user model.User
 	require.NoError(t, model.DB.First(&user, 53).Error)
 	assert.Equal(t, 100_000, user.Quota)
+}
+
+func TestPostTextConsumeQuotaRequiresAuthoritativeRawTokenUsage(t *testing.T) {
+	tests := []struct {
+		name           string
+		usage          *dto.Usage
+		locallyCounted bool
+		wantRemaining  int
+		wantUsed       int
+	}{
+		{
+			name: "locally counted usage keeps the complete reservation",
+			usage: &dto.Usage{
+				PromptTokens: 100, CompletionTokens: 40, TotalTokens: 140,
+				UsageSemantic: dto.BillingUsageSemanticOpenAI,
+			},
+			locallyCounted: true,
+			wantRemaining:  0,
+			wantUsed:       1_000,
+		},
+		{
+			name: "estimated billing usage keeps the complete reservation",
+			usage: &dto.Usage{
+				PromptTokens: 100, CompletionTokens: 40, TotalTokens: 140,
+				BillingUsage: dto.NewEstimatedGeminiChatBillingUsage(&dto.Usage{
+					PromptTokens: 100, CompletionTokens: 40, TotalTokens: 140,
+				}),
+			},
+			wantRemaining: 0,
+			wantUsed:      1_000,
+		},
+		{
+			name:          "missing usage keeps the complete reservation",
+			usage:         nil,
+			wantRemaining: 0,
+			wantUsed:      1_000,
+		},
+		{
+			name: "explicit upstream zero releases the reservation",
+			usage: &dto.Usage{BillingUsage: &dto.BillingUsage{
+				Source:      dto.BillingUsageSourceOAIChat,
+				Semantic:    dto.BillingUsageSemanticOpenAI,
+				OpenAIUsage: &dto.Usage{},
+			}},
+			wantRemaining: 1_000,
+			wantUsed:      0,
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			truncate(t)
+			seedUser(t, 153, 100_000)
+			seedToken(t, 154, 153, "rsl_raw-authority", 1_000)
+			seedChannel(t, 159)
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			if testCase.locallyCounted {
+				common.SetContextKey(ctx, constant.ContextKeyLocalCountTokens, true)
+			}
+			relayInfo := &relaycommon.RelayInfo{
+				TokenId: 154, TokenKey: "rsl_raw-authority", UserId: 153, OriginModelName: "priced-model",
+				StartTime:   time.Now(),
+				ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 159},
+				PriceData: types.PriceData{
+					ModelRatio: 1, CompletionRatio: 1,
+					GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+				},
+			}
+			relayInfo.SetEstimatePromptTokens(77)
+			require.Nil(t, PreConsumeBilling(ctx, 20, relayInfo))
+
+			PostTextConsumeQuota(ctx, relayInfo, testCase.usage, nil)
+
+			var token model.Token
+			require.NoError(t, model.DB.First(&token, 154).Error)
+			assert.Equal(t, testCase.wantRemaining, token.RemainQuota)
+			assert.Equal(t, testCase.wantUsed, token.UsedQuota)
+		})
+	}
 }
 
 func TestRealtimeResellerReserveAndSettlementAreRawAndWalletFree(t *testing.T) {

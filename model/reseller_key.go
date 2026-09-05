@@ -154,6 +154,7 @@ func CreatePrepaidResellerTokenWithRequestID(token *Token, metadata *ResellerKey
 		token.RemainQuota != metadata.TokenMillions*1_000_000 || token.UsedQuota != 0 {
 		return false, nil, errors.New("invalid reseller token allocation")
 	}
+	token.QuotaMode = TokenQuotaModeTokens
 	if metadata.MarkupPercent <= 0 || metadata.BaseCostPerMillion == "" || metadata.Endpoint == "" || metadata.CreatedTime != token.CreatedTime {
 		return false, nil, errors.New("invalid reseller commercial metadata")
 	}
@@ -283,39 +284,30 @@ func increaseResellerTokenQuota(id int, key string, quota int) error {
 	return nil
 }
 
-// ApplyResellerTokenQuotaAdjustment applies a signed durable quota mutation
-// once. Positive values refund quota; negative values consume quota.
-func ApplyResellerTokenQuotaAdjustment(id int, key string, adjustment int, operationID string) error {
+// ApplyTokenQuotaAdjustmentOnce applies a signed durable mutation to a
+// raw-token key exactly once. Positive values refund quota; negative values
+// consume quota. The existing operation ledger is shared with reseller keys
+// so an ambiguous commit can be recognized safely on retry.
+func ApplyTokenQuotaAdjustmentOnce(id int, key string, adjustment int, operationID string) error {
 	key = strings.TrimPrefix(key, "sk-")
 	operationID = strings.TrimSpace(operationID)
 	if id <= 0 || key == "" || operationID == "" || utf8.RuneCountInString(operationID) > 128 ||
 		strings.ContainsAny(operationID, "\r\n") {
-		return errors.New("invalid reseller quota operation")
+		return errors.New("invalid token quota operation")
 	}
 	if adjustment == 0 {
 		return nil
 	}
 	if adjustment < common.MinQuota || adjustment > common.MaxQuota {
-		return errors.New("reseller quota adjustment is out of range")
+		return errors.New("token quota adjustment is out of range")
 	}
 
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		var token Token
-		if err := lockForUpdate(tx).
-			Where("id = ? AND unlimited_quota = ?", id, false).
-			Where(clause.Eq{Column: clause.Column{Name: "key"}, Value: key}).
-			First(&token).Error; err != nil {
-			return err
-		}
-		if !IsResellerTokenKey(token.Key) {
-			return errors.New("token is not a reseller key")
-		}
-
 		var existing ResellerQuotaOperation
 		lookup := tx.Where("operation_id = ?", operationID).First(&existing)
 		if lookup.Error == nil {
 			if existing.TokenId != id || existing.Adjustment != adjustment {
-				return errors.New("reseller quota operation conflicts with an existing mutation")
+				return errors.New("token quota operation conflicts with an existing mutation")
 			}
 			return nil
 		}
@@ -323,8 +315,28 @@ func ApplyResellerTokenQuotaAdjustment(id int, key string, adjustment int, opera
 			return lookup.Error
 		}
 
+		var token Token
+		if err := lockForUpdate(tx).
+			Where("id = ?", id).
+			Where(clause.Eq{Column: clause.Column{Name: "key"}, Value: key}).
+			First(&token).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrTokenQuotaTargetNotFound
+		} else if err != nil {
+			return err
+		}
+		if !token.UsesTokenQuota() {
+			return errors.New("token does not use raw-token quota")
+		}
+		if token.UnlimitedQuota {
+			// Unlimited keys preserve the historical semantics of money-denominated
+			// tokens: their wallet/subscription usage is billable, but the key's
+			// remain/used counters are not a hard cap and must never be mutated by
+			// raw-token reservation or settlement.
+			return nil
+		}
+
 		query := tx.Model(&Token{}).
-			Where("id = ? AND unlimited_quota = ?", id, false).
+			Where("id = ?", id).
 			Where(clause.Eq{Column: clause.Column{Name: "key"}, Value: key})
 		updates := map[string]interface{}{
 			"accessed_time": common.GetTimestamp(),
@@ -335,7 +347,9 @@ func ApplyResellerTokenQuotaAdjustment(id int, key string, adjustment int, opera
 			updates["used_quota"] = gorm.Expr("used_quota - ?", adjustment)
 		} else {
 			amount := -adjustment
-			query = query.Where("remain_quota >= ?", amount)
+			if !token.UnlimitedQuota {
+				query = query.Where("remain_quota >= ?", amount)
+			}
 			updates["remain_quota"] = gorm.Expr("remain_quota - ?", amount)
 			updates["used_quota"] = gorm.Expr("used_quota + ?", amount)
 		}
@@ -344,7 +358,17 @@ func ApplyResellerTokenQuotaAdjustment(id int, key string, adjustment int, opera
 			return result.Error
 		}
 		if result.RowsAffected != 1 {
-			return ErrResellerTokenQuotaInsufficient
+			var count int64
+			if err := tx.Model(&Token{}).
+				Where("id = ?", id).
+				Where(clause.Eq{Column: clause.Column{Name: "key"}, Value: key}).
+				Count(&count).Error; err != nil {
+				return err
+			}
+			if count == 0 {
+				return ErrTokenQuotaTargetNotFound
+			}
+			return ErrTokenQuotaInsufficient
 		}
 		return tx.Create(&ResellerQuotaOperation{
 			OperationId: operationID,
@@ -367,7 +391,20 @@ func ApplyResellerTokenQuotaAdjustment(id int, key string, adjustment int, opera
 		return err
 	}
 	if cacheErr := invalidateTokenCacheForMutation(key); cacheErr != nil {
-		common.SysLog("failed to invalidate reseller token cache after idempotent adjustment: " + cacheErr.Error())
+		common.SysLog("failed to invalidate raw token cache after idempotent adjustment: " + cacheErr.Error())
 	}
 	return nil
+}
+
+// ApplyResellerTokenQuotaAdjustment preserves the reseller-specific API and
+// error contract while using the shared raw-token idempotency ledger.
+func ApplyResellerTokenQuotaAdjustment(id int, key string, adjustment int, operationID string) error {
+	if !IsResellerTokenKey(key) {
+		return errors.New("token is not a reseller key")
+	}
+	err := ApplyTokenQuotaAdjustmentOnce(id, key, adjustment, operationID)
+	if errors.Is(err, ErrTokenQuotaInsufficient) {
+		return ErrResellerTokenQuotaInsufficient
+	}
+	return err
 }

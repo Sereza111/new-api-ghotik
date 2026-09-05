@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
@@ -112,9 +113,10 @@ func reserveUserQuotaDB(id int, quota int) (bool, error) {
 	return result.RowsAffected == 1, result.Error
 }
 
-func reserveTokenQuotaDB(id int, quota int) (bool, error) {
+func reserveTokenQuotaDB(id int, key string, quota int) (bool, error) {
+	key = strings.TrimPrefix(key, "sk-")
 	result := DB.Model(&Token{}).
-		Where("id = ? AND remain_quota >= ?", id, quota).
+		Where("id = ? AND "+commonKeyCol+" = ? AND remain_quota >= ?", id, key, quota).
 		Updates(map[string]interface{}{
 			"remain_quota":  gorm.Expr("remain_quota - ?", quota),
 			"used_quota":    gorm.Expr("used_quota + ?", quota),
@@ -158,7 +160,7 @@ func TryReserveTokenQuota(id int, key string, quota int, unlimited bool) (bool, 
 		return true, DecreaseTokenQuota(id, key, quota)
 	}
 	if !common.RedisEnabled {
-		return reserveTokenQuotaDB(id, quota)
+		return reserveTokenQuotaDB(id, key, quota)
 	}
 
 	result, err := cacheTryReserveTokenQuota(id, key, int64(quota))
@@ -171,7 +173,7 @@ func TryReserveTokenQuota(id int, key string, quota int, unlimited bool) (bool, 
 		if err != nil {
 			common.SysLog("token quota cache reserve unavailable, falling back to database: " + err.Error())
 		}
-		return reserveTokenQuotaDB(id, quota)
+		return reserveTokenQuotaDB(id, key, quota)
 	}
 	if result == cacheQuotaInsufficient {
 		return false, nil

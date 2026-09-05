@@ -89,6 +89,7 @@ type RelayInfo struct {
 	UsingGroup        string // 使用的分组，当auto跨分组重试时，会变动
 	UserGroup         string // 用户所在分组
 	TokenUnlimited    bool
+	TokenQuotaMode    string
 	StartTime         time.Time
 	FirstResponseTime time.Time
 	isFirstResponse   bool
@@ -118,6 +119,13 @@ type RelayInfo struct {
 	SendResponseCount      int
 	ReceivedResponseCount  int
 	FinalPreConsumedQuota  int // 最终预消耗的配额
+	// TokenQuotaPreConsumed is the token-key reservation. It differs from
+	// FinalPreConsumedQuota when a raw-token key is backed by priced wallet or
+	// subscription billing.
+	TokenQuotaPreConsumed int
+	// TokenQuotaActual is populated by token-metered response handlers before
+	// settlement. Nil distinguishes a measured zero from missing accounting.
+	TokenQuotaActual *int
 	// ForcePreConsume 为 true 时禁用 BillingSession 的信任额度旁路，
 	// 强制预扣全额。用于异步任务（视频/音乐生成等），因为请求返回后任务仍在运行，
 	// 必须在提交前锁定全额。
@@ -518,6 +526,7 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		TokenId:        common.GetContextKeyInt(c, constant.ContextKeyTokenId),
 		TokenKey:       common.GetContextKeyString(c, constant.ContextKeyTokenKey),
 		TokenUnlimited: common.GetContextKeyBool(c, constant.ContextKeyTokenUnlimited),
+		TokenQuotaMode: common.GetContextKeyString(c, constant.ContextKeyTokenQuotaMode),
 		TokenGroup:     tokenGroup,
 
 		isFirstResponse: true,

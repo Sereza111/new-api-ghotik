@@ -127,9 +127,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
 	}
-	if model.IsResellerTokenKey(relayInfo.TokenKey) && !resellerRelaySupportsRawTokenAccounting(relayInfo) {
+	if relayUsesRawTokenQuota(relayInfo) && !relaySupportsRawTokenAccounting(relayInfo) {
 		newAPIError = types.NewErrorWithStatusCode(
-			fmt.Errorf("reseller keys only support endpoints with reliable token usage"),
+			fmt.Errorf("raw-token quota keys only support endpoints with reliable token usage"),
 			types.ErrorCodeInvalidRequest,
 			http.StatusBadRequest,
 			types.ErrOptionWithSkipRetry(),
@@ -175,7 +175,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	// common.SetContextKey(c, constant.ContextKeyTokenCountMeta, meta)
 
-	if priceData.FreeModel && !model.IsResellerTokenKey(relayInfo.TokenKey) {
+	if priceData.FreeModel && !relayUsesRawTokenQuota(relayInfo) {
 		logger.LogInfo(c, fmt.Sprintf("模型 %s 免费，跳过预扣费", relayInfo.OriginModelName))
 	} else {
 		newAPIError = service.PreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo)
@@ -269,7 +269,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 }
 
-func resellerRelaySupportsRawTokenAccounting(relayInfo *relaycommon.RelayInfo) bool {
+func relayUsesRawTokenQuota(relayInfo *relaycommon.RelayInfo) bool {
+	return relayInfo != nil &&
+		(model.IsResellerTokenKey(relayInfo.TokenKey) || relayInfo.TokenQuotaMode == model.TokenQuotaModeTokens)
+}
+
+func relaySupportsRawTokenAccounting(relayInfo *relaycommon.RelayInfo) bool {
 	if relayInfo == nil {
 		return false
 	}
@@ -454,9 +459,9 @@ func RelayMidjourney(c *gin.Context) {
 		})
 		return
 	}
-	if model.IsResellerTokenKey(relayInfo.TokenKey) {
+	if relayUsesRawTokenQuota(relayInfo) {
 		c.JSON(http.StatusForbidden, gin.H{
-			"description": "prepaid reseller keys are not supported by the legacy Midjourney API",
+			"description": "raw-token quota keys are not supported by the legacy Midjourney API",
 			"type":        "invalid_request_error",
 			"code":        4,
 		})
@@ -613,10 +618,16 @@ func executeTaskSubmissionWith(
 	relayInfo *relaycommon.RelayInfo,
 	submit taskSubmitAttempt,
 ) (*taskSubmissionOutcome, *taskdto.TaskError) {
-	if relayInfo != nil && model.IsResellerTokenKey(relayInfo.TokenKey) {
+	if relayUsesRawTokenQuota(relayInfo) {
+		message := "raw-token quota keys support token-metered synchronous APIs only"
+		code := "raw_token_quota_task_unsupported"
+		if model.IsResellerTokenKey(relayInfo.TokenKey) {
+			message = "prepaid reseller keys support token-metered synchronous APIs only"
+			code = "reseller_key_task_unsupported"
+		}
 		return nil, service.TaskErrorWrapperLocal(
-			errors.New("prepaid reseller keys support token-metered synchronous APIs only"),
-			"reseller_key_task_unsupported",
+			errors.New(message),
+			code,
 			http.StatusBadRequest,
 		)
 	}
