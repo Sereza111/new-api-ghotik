@@ -85,6 +85,21 @@ export async function updateApiKey(
   return res.data
 }
 
+export async function setResellerKeyTotalQuota(
+  id: number,
+  tokenMillions: number,
+  expectedTotalMillions: number,
+  requestId: string
+): Promise<ApiResponse> {
+  const res = await api.post(`/api/reseller/keys/${id}/quota`, {
+    mode: 'set',
+    token_millions: tokenMillions,
+    expected_total_millions: expectedTotalMillions,
+    request_id: requestId,
+  })
+  return res.data
+}
+
 // Delete a single API key
 export async function deleteApiKey(id: number): Promise<ApiResponse> {
   const res = await api.delete(`/api/token/${id}/`)

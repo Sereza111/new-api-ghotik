@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -419,7 +420,247 @@ func TestResellerTokenDeleteMethodRemovesKeyWithoutRefund(t *testing.T) {
 	require.NoError(t, token.Delete())
 	assert.ErrorIs(t, DB.First(&Token{}, token.Id).Error, gorm.ErrRecordNotFound)
 	assert.ErrorIs(t, DB.Where("token_id = ?", token.Id).First(&ResellerKey{}).Error, gorm.ErrRecordNotFound)
-	assert.Equal(t, 1_000, getUserQuotaFromDB(t, user.Id), "deleting a purchased key must not refund its quota")
+	assert.Equal(t, 900, getUserQuotaFromDB(t, user.Id), "deleting a purchased key must not refund its quota")
+}
+
+func testManualResellerQuotaAdjustment(t *testing.T, db *gorm.DB, databaseType common.DatabaseType) {
+	t.Helper()
+	previousDB := DB
+	previousMainDatabaseType := common.MainDatabaseType()
+	previousLogDatabaseType := common.LogDatabaseType()
+	previousQuotaPerUnit := common.QuotaPerUnit
+	previousRedisEnabled := common.RedisEnabled
+	DB = db
+	common.SetDatabaseTypes(databaseType, previousLogDatabaseType)
+	common.QuotaPerUnit = 500_000
+	common.RedisEnabled = false
+	initCol()
+	defer func() {
+		DB = previousDB
+		common.SetDatabaseTypes(previousMainDatabaseType, previousLogDatabaseType)
+		common.QuotaPerUnit = previousQuotaPerUnit
+		common.RedisEnabled = previousRedisEnabled
+		initCol()
+	}()
+
+	require.NoError(t, db.AutoMigrate(
+		&User{}, &Token{}, &ResellerKey{}, &ResellerSubscription{}, &ResellerQuotaOperation{},
+	))
+	suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
+	username := "manual-reseller-quota-" + suffix
+	key := "rsl_manual_" + suffix
+	user := User{
+		Username: username, Password: "unused", Status: common.UserStatusEnabled,
+		Role: common.RoleCommonUser, Group: "default", Quota: 1_000_000,
+	}
+	require.NoError(t, db.Create(&user).Error)
+	now := common.GetTimestamp()
+	subscription := ResellerSubscription{
+		UserId: user.Id, Status: ResellerSubscriptionStatusActive,
+		StartTime: now - 1, EndTime: now + 24*60*60,
+		ListPrice: "10.00", PaidPrice: "10.00", ChargedQuota: 5_000_000,
+		DurationDays: 30, RequestId: "manual-quota-subscription-" + suffix, CreatedTime: now,
+	}
+	require.NoError(t, db.Create(&subscription).Error)
+	token := Token{
+		UserId: user.Id, Key: key, Name: "manual quota", Status: common.TokenStatusEnabled,
+		CreatedTime: now, AccessedTime: now, ExpiredTime: -1,
+		RemainQuota: 6_000_000, UsedQuota: 4_000_000, QuotaMode: TokenQuotaModeTokens,
+		UnlimitedQuota: false, Group: "default",
+	}
+	require.NoError(t, db.Create(&token).Error)
+	metadata := ResellerKey{
+		TokenId: token.Id, UserId: user.Id, TokenMillions: 10, MarkupPercent: 20,
+		BaseCostPerMillion: "0.12", Endpoint: "https://pugshop.ru/v1", CreatedTime: now,
+	}
+	require.NoError(t, db.Create(&metadata).Error)
+	defer func() {
+		require.NoError(t, db.Where("user_id = ?", user.Id).Delete(&ResellerQuotaOperation{}).Error)
+		require.NoError(t, db.Where("id = ?", metadata.Id).Delete(&ResellerKey{}).Error)
+		require.NoError(t, db.Where("id = ?", subscription.Id).Delete(&ResellerSubscription{}).Error)
+		require.NoError(t, db.Unscoped().Where("id = ?", token.Id).Delete(&Token{}).Error)
+		require.NoError(t, db.Where("id = ?", user.Id).Delete(&User{}).Error)
+	}()
+
+	addRequestID := "manual-quota-add-" + suffix
+	record, applied, err := AdjustResellerTokenQuota(
+		token.Id, user.Id, ResellerQuotaAdjustmentAdd, 2, 10, addRequestID, true,
+	)
+	require.NoError(t, err)
+	assert.True(t, applied)
+	assert.Equal(t, 12, record.Metadata.TokenMillions)
+	assert.Equal(t, 8_000_000, record.Token.RemainQuota)
+	assert.Equal(t, 4_000_000, record.Token.UsedQuota)
+	assert.Equal(t, 880_000, getUserQuotaFromDB(t, user.Id), "two million tokens cost 0.24 USD at the saved rate")
+
+	record, applied, err = AdjustResellerTokenQuota(
+		token.Id, user.Id, ResellerQuotaAdjustmentSet, 14, 12, "manual-quota-set-up-"+suffix, true,
+	)
+	require.NoError(t, err)
+	assert.True(t, applied)
+	assert.Equal(t, 14, record.Metadata.TokenMillions)
+	assert.Equal(t, 10_000_000, record.Token.RemainQuota)
+	assert.Equal(t, 4_000_000, record.Token.UsedQuota)
+	assert.Equal(t, 760_000, getUserQuotaFromDB(t, user.Id), "setting a higher total charges only the upward delta")
+
+	require.NoError(t, db.Model(&ResellerSubscription{}).Where("id = ?", subscription.Id).
+		Update("end_time", now-1).Error)
+	subtractRequestID := "manual-quota-subtract-" + suffix
+	record, applied, err = AdjustResellerTokenQuota(
+		token.Id, user.Id, ResellerQuotaAdjustmentSubtract, 5, 14, subtractRequestID, false,
+	)
+	require.NoError(t, err)
+	assert.True(t, applied)
+	assert.Equal(t, 9, record.Metadata.TokenMillions)
+	assert.Equal(t, 5_000_000, record.Token.RemainQuota)
+	assert.Equal(t, 4_000_000, record.Token.UsedQuota)
+	assert.Equal(t, 760_000, getUserQuotaFromDB(t, user.Id), "removing unused quota never refunds the wallet")
+
+	replay, applied, err := AdjustResellerTokenQuota(
+		token.Id, user.Id, ResellerQuotaAdjustmentAdd, 2, 10, addRequestID, false,
+	)
+	require.NoError(t, err)
+	assert.False(t, applied)
+	assert.Equal(t, 9, replay.Metadata.TokenMillions, "a late replay returns the current allocation")
+	assert.Equal(t, 5_000_000, replay.Token.RemainQuota)
+	assert.Equal(t, 760_000, getUserQuotaFromDB(t, user.Id), "an idempotent replay must not debit the wallet")
+
+	_, _, err = AdjustResellerTokenQuota(
+		token.Id, user.Id, ResellerQuotaAdjustmentAdd, 1, 10, addRequestID, true,
+	)
+	assert.ErrorIs(t, err, ErrResellerQuotaOperationConflict)
+	_, _, err = AdjustResellerTokenQuota(
+		token.Id, user.Id, ResellerQuotaAdjustmentAdd, 2, 9, addRequestID, true,
+	)
+	assert.ErrorIs(t, err, ErrResellerQuotaOperationConflict)
+	_, _, err = AdjustResellerTokenQuota(
+		token.Id, user.Id, ResellerQuotaAdjustmentAdd, 1, 9, "manual-quota-no-purchase-"+suffix, false,
+	)
+	assert.ErrorIs(t, err, ErrResellerQuotaPurchaseRequired)
+	_, _, err = AdjustResellerTokenQuota(
+		token.Id, user.Id, ResellerQuotaAdjustmentAdd, 1, 9, "manual-quota-expired-subscription-"+suffix, true,
+	)
+	assert.ErrorIs(t, err, ErrResellerSubscriptionRequired)
+	assert.Equal(t, 760_000, getUserQuotaFromDB(t, user.Id), "a rejected purchase must leave the wallet unchanged")
+
+	_, _, err = AdjustResellerTokenQuota(
+		token.Id, user.Id, ResellerQuotaAdjustmentSet, 7, 8, "manual-quota-stale-set-"+suffix, false,
+	)
+	assert.ErrorIs(t, err, ErrResellerQuotaStateConflict)
+	storedAfterStale := getTokenFromDB(t, token.Id)
+	assert.Equal(t, 5_000_000, storedAfterStale.RemainQuota)
+	assert.Equal(t, 4_000_000, storedAfterStale.UsedQuota)
+	assert.Equal(t, 760_000, getUserQuotaFromDB(t, user.Id), "a stale set must not change the wallet")
+
+	require.NoError(t, db.Model(&Token{}).Where("id = ?", token.Id).Update("expired_time", now-1).Error)
+	_, _, err = AdjustResellerTokenQuota(
+		token.Id, user.Id, ResellerQuotaAdjustmentAdd, 1, 9, "manual-quota-expired-key-"+suffix, true,
+	)
+	assert.ErrorIs(t, err, ErrResellerQuotaKeyExpired)
+	storedAfterExpiredTopUp := getTokenFromDB(t, token.Id)
+	assert.Equal(t, 5_000_000, storedAfterExpiredTopUp.RemainQuota)
+	assert.Equal(t, 4_000_000, storedAfterExpiredTopUp.UsedQuota)
+	var metadataAfterExpiredTopUp ResellerKey
+	require.NoError(t, db.Where("id = ?", metadata.Id).First(&metadataAfterExpiredTopUp).Error)
+	assert.Equal(t, 9, metadataAfterExpiredTopUp.TokenMillions)
+	assert.Equal(t, 760_000, getUserQuotaFromDB(t, user.Id), "an expired-key top-up must roll back every paid mutation")
+
+	replay, applied, err = AdjustResellerTokenQuota(
+		token.Id, user.Id, ResellerQuotaAdjustmentAdd, 2, 10, addRequestID, false,
+	)
+	require.NoError(t, err)
+	assert.False(t, applied)
+	assert.Equal(t, 9, replay.Metadata.TokenMillions, "an exact replay remains available after key expiration")
+
+	_, _, err = AdjustResellerTokenQuota(
+		token.Id, user.Id, ResellerQuotaAdjustmentSet, 0, 9, "manual-quota-set-zero-"+suffix, false,
+	)
+	assert.ErrorIs(t, err, ErrResellerQuotaAdjustmentInvalid)
+	_, _, err = AdjustResellerTokenQuota(
+		token.Id, user.Id, ResellerQuotaAdjustmentSubtract, 9, 9, "manual-quota-subtract-zero-"+suffix, false,
+	)
+	assert.ErrorIs(t, err, ErrResellerQuotaAllocationOutOfRange)
+
+	record, applied, err = AdjustResellerTokenQuota(
+		token.Id, user.Id, ResellerQuotaAdjustmentSet, 6, 9, "manual-quota-set-"+suffix, false,
+	)
+	require.NoError(t, err)
+	assert.True(t, applied)
+	assert.Equal(t, 6, record.Metadata.TokenMillions)
+	assert.Equal(t, 2_000_000, record.Token.RemainQuota)
+	assert.Equal(t, 4_000_000, record.Token.UsedQuota)
+	assert.Equal(t, 760_000, getUserQuotaFromDB(t, user.Id))
+
+	_, _, err = AdjustResellerTokenQuota(
+		token.Id, user.Id, ResellerQuotaAdjustmentSubtract, 3, 6, "manual-quota-below-used-"+suffix, false,
+	)
+	assert.ErrorIs(t, err, ErrResellerTokenQuotaInsufficient)
+	stored := getTokenFromDB(t, token.Id)
+	assert.Equal(t, 2_000_000, stored.RemainQuota)
+	assert.Equal(t, 4_000_000, stored.UsedQuota)
+	var storedMetadata ResellerKey
+	require.NoError(t, db.Where("id = ?", metadata.Id).First(&storedMetadata).Error)
+	assert.Equal(t, 6, storedMetadata.TokenMillions)
+	var operationCount int64
+	require.NoError(t, db.Model(&ResellerQuotaOperation{}).Where("user_id = ?", user.Id).Count(&operationCount).Error)
+	assert.EqualValues(t, 4, operationCount)
+}
+
+func TestAdjustResellerTokenQuotaReplayReconcilesCaches(t *testing.T) {
+	truncateTables(t)
+	resetBatchUpdateTestState(t)
+	redisServer := useUserCacheMiniRedis(t)
+	previousQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 500_000
+	t.Cleanup(func() { common.QuotaPerUnit = previousQuotaPerUnit })
+
+	user := createReserveTestUser(t, 1_000_000)
+	token, metadata := newResellerPurchase(t, user.Id, 10)
+	token.QuotaMode = TokenQuotaModeTokens
+	token.RemainQuota = 6_000_000
+	token.UsedQuota = 4_000_000
+	require.NoError(t, DB.Create(&token).Error)
+	metadata.TokenId = token.Id
+	require.NoError(t, DB.Create(&metadata).Error)
+
+	cachePublishResult := -1
+	var cachePublishErr error
+	callbackName := "test:reseller-quota-cache-fence"
+	require.NoError(t, DB.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if cachePublishResult != -1 || tx.Statement.Schema == nil || tx.Statement.Schema.Name != "Token" {
+			return
+		}
+		cachePublishResult, cachePublishErr = cacheInitToken(token)
+	}))
+	t.Cleanup(func() { require.NoError(t, DB.Callback().Update().Remove(callbackName)) })
+
+	requestID := "quota-cache-replay"
+	_, applied, err := AdjustResellerTokenQuota(
+		token.Id, user.Id, ResellerQuotaAdjustmentAdd, 2, 10, requestID, true,
+	)
+	require.NoError(t, err)
+	require.True(t, applied)
+	require.NoError(t, cachePublishErr)
+	assert.Zero(t, cachePublishResult, "the mutation fence must block a stale snapshot before the token update")
+
+	// Recreate stale snapshots after the first mutation's fence expires. A retry
+	// must evict both even though its durable operation is already complete.
+	redisServer.FastForward(time.Duration(tokenCacheFenceSeconds+1) * time.Second)
+	cacheResult, err := cacheInitToken(token)
+	require.NoError(t, err)
+	require.Equal(t, 1, cacheResult)
+	require.NoError(t, populateUserCache(user))
+
+	replayed, applied, err := AdjustResellerTokenQuota(
+		token.Id, user.Id, ResellerQuotaAdjustmentAdd, 2, 10, requestID, false,
+	)
+	require.NoError(t, err)
+	assert.False(t, applied)
+	assert.Equal(t, 12, replayed.Metadata.TokenMillions)
+	_, err = cacheGetTokenByKey(token.Key)
+	assert.Error(t, err, "an idempotent replay must evict a stale token snapshot")
+	_, err = cacheGetUserBase(user.Id)
+	assert.Error(t, err, "a paid idempotent replay must evict a stale wallet snapshot")
 }
 
 func testResellerKeyMigration(t *testing.T, db *gorm.DB) {
@@ -511,6 +752,38 @@ func TestResellerKeyMigrationPostgreSQL(t *testing.T) {
 	db, err := gorm.Open(postgres.New(postgres.Config{DSN: dsn, PreferSimpleProtocol: true}), &gorm.Config{})
 	require.NoError(t, err)
 	testResellerKeyMigration(t, db)
+}
+
+func TestManualResellerQuotaAdjustmentSQLite(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:manual-reseller-quota?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	testManualResellerQuotaAdjustment(t, db, common.DatabaseTypeSQLite)
+}
+
+func TestManualResellerQuotaAdjustmentMySQL(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_MYSQL_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_MYSQL_DSN is not configured")
+	}
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	testManualResellerQuotaAdjustment(t, db, common.DatabaseTypeMySQL)
+}
+
+func TestManualResellerQuotaAdjustmentPostgreSQL(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN is not configured")
+	}
+	db, err := gorm.Open(postgres.New(postgres.Config{DSN: dsn, PreferSimpleProtocol: true}), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	testManualResellerQuotaAdjustment(t, db, common.DatabaseTypePostgreSQL)
 }
 
 func TestUpdateOptionRejectsNonCanonicalResellerValues(t *testing.T) {

@@ -290,6 +290,7 @@ func SetApiRouter(router *gin.Engine) {
 			resellerRoute.POST("/keys", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.AddResellerKey)
 			resellerRoute.DELETE("/keys/:id", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.DeleteResellerKey)
 			resellerRoute.POST("/keys/:id/reissue", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.ReissueResellerKey)
+			resellerRoute.POST("/keys/:id/quota", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.AdjustResellerKeyQuota)
 		}
 
 		usageRoute := apiRouter.Group("/usage")

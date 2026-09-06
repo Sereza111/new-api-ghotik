@@ -21,25 +21,42 @@ package model
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 var (
-	ErrResellerTokenDeletionNotAllowed = errors.New("reseller keys cannot be deleted; disable the key instead")
-	ErrResellerTokenSecretUnavailable  = errors.New("reseller key secrets cannot be bulk exported")
-	ErrResellerTokenQuotaInsufficient  = errors.New("reseller key quota is insufficient")
-	errResellerWalletInsufficient      = errors.New("reseller wallet quota is insufficient")
+	ErrResellerTokenDeletionNotAllowed   = errors.New("reseller keys cannot be deleted; disable the key instead")
+	ErrResellerTokenSecretUnavailable    = errors.New("reseller key secrets cannot be bulk exported")
+	ErrResellerTokenQuotaInsufficient    = errors.New("reseller key quota is insufficient")
+	ErrResellerQuotaAdjustmentInvalid    = errors.New("invalid reseller quota adjustment")
+	ErrResellerQuotaAllocationOutOfRange = errors.New("reseller quota allocation must be between 1 and 1000 million tokens")
+	ErrResellerQuotaOperationConflict    = errors.New("reseller quota operation conflicts with an existing mutation")
+	ErrResellerQuotaStateConflict        = errors.New("reseller quota changed; refresh the key and retry")
+	ErrResellerQuotaKeyExpired           = errors.New("expired reseller key quota cannot be increased")
+	ErrResellerQuotaPurchaseRequired     = errors.New("reseller quota increase requires an authorized purchase")
+	ErrResellerQuotaWalletInsufficient   = errors.New("insufficient balance to increase reseller quota")
+	errResellerWalletInsufficient        = errors.New("reseller wallet quota is insufficient")
 )
 
-// ResellerKey stores immutable commercial terms separately from the token
-// secret. BaseCostPerMillion is decimal text so its purchase-time value is
-// preserved identically by SQLite, MySQL, and PostgreSQL.
+const (
+	ResellerQuotaAdjustmentAdd      = "add"
+	ResellerQuotaAdjustmentSubtract = "subtract"
+	ResellerQuotaAdjustmentSet      = "set"
+)
+
+// ResellerKey stores commercial terms separately from the token secret.
+// TokenMillions tracks the current purchased allocation. BaseCostPerMillion
+// is an immutable decimal snapshot so later top-ups use the original price
+// identically on SQLite, MySQL, and PostgreSQL.
 type ResellerKey struct {
 	Id                 int    `json:"id"`
 	TokenId            int    `json:"token_id" gorm:"uniqueIndex"`
@@ -71,6 +88,291 @@ type ResellerQuotaOperation struct {
 	UserId      int    `json:"user_id" gorm:"index"`
 	Adjustment  int    `json:"adjustment"`
 	CreatedTime int64  `json:"created_time" gorm:"bigint"`
+}
+
+type manualResellerQuotaOperation struct {
+	Mode                  string
+	RequestedMillions     int
+	ExpectedTotalMillions int
+}
+
+func manualResellerQuotaOperationScope(userID int, tokenID int, requestID string) string {
+	digest := common.Sha256Raw([]byte(strconv.Itoa(userID) + ":" + strconv.Itoa(tokenID) + ":" + requestID))
+	return fmt.Sprintf("manual:%x", digest)
+}
+
+func (operation manualResellerQuotaOperation) durableID(scope string) string {
+	return scope + ":" + operation.Mode + ":" + strconv.Itoa(operation.RequestedMillions) + ":" +
+		strconv.Itoa(operation.ExpectedTotalMillions)
+}
+
+func parseManualResellerQuotaOperation(scope string, durableID string) (manualResellerQuotaOperation, bool) {
+	var operation manualResellerQuotaOperation
+	prefix := scope + ":"
+	if !strings.HasPrefix(durableID, prefix) {
+		return operation, false
+	}
+	parts := strings.Split(strings.TrimPrefix(durableID, prefix), ":")
+	if len(parts) != 3 {
+		return operation, false
+	}
+	requestedMillions, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return operation, false
+	}
+	expectedTotalMillions, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return operation, false
+	}
+	operation = manualResellerQuotaOperation{
+		Mode:                  parts[0],
+		RequestedMillions:     requestedMillions,
+		ExpectedTotalMillions: expectedTotalMillions,
+	}
+	return operation, true
+}
+
+// AdjustResellerTokenQuota changes the purchased allocation of an owned
+// reseller key in whole millions. Increasing it charges the owner's wallet at
+// the key's snapshotted cost, while decreasing it discards only unused quota
+// and never refunds money. The wallet, token, metadata, and idempotency marker
+// are committed in one transaction.
+func AdjustResellerTokenQuota(id int, userID int, mode string, amountMillions int, expectedTotalMillions int, requestID string, purchaseAuthorized bool) (*ResellerKeyWithToken, bool, error) {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	requestID = strings.TrimSpace(requestID)
+	if id <= 0 || userID <= 0 || requestID == "" || utf8.RuneCountInString(requestID) > 128 ||
+		strings.IndexFunc(requestID, unicode.IsControl) >= 0 {
+		return nil, false, ErrResellerQuotaAdjustmentInvalid
+	}
+	if mode != ResellerQuotaAdjustmentAdd && mode != ResellerQuotaAdjustmentSubtract &&
+		mode != ResellerQuotaAdjustmentSet {
+		return nil, false, ErrResellerQuotaAdjustmentInvalid
+	}
+	if amountMillions <= 0 || amountMillions > 1000 || expectedTotalMillions <= 0 || expectedTotalMillions > 1000 {
+		return nil, false, ErrResellerQuotaAdjustmentInvalid
+	}
+	requestScope := manualResellerQuotaOperationScope(userID, id, requestID)
+
+	var result ResellerKeyWithToken
+	var previousKey string
+	var durableOperationID string
+	applied := false
+	walletDebited := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		// Keep the lock order aligned with reseller purchases: owner first, then
+		// token and metadata. This avoids deadlocks with concurrent paid actions.
+		var owner User
+		if err := lockForUpdate(tx).Where("id = ?", userID).First(&owner).Error; err != nil {
+			return err
+		}
+		if err := lockForUpdate(tx).Where("id = ? AND user_id = ?", id, userID).First(&result.Token).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return gorm.ErrRecordNotFound
+			}
+			return err
+		}
+		if !IsResellerTokenKey(result.Token.Key) || !result.Token.UsesTokenQuota() || result.Token.UnlimitedQuota {
+			return ErrResellerQuotaAdjustmentInvalid
+		}
+		previousKey = result.Token.Key
+		if err := lockForUpdate(tx).Where("token_id = ? AND user_id = ?", id, userID).First(&result.Metadata).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return gorm.ErrRecordNotFound
+			}
+			return err
+		}
+		if result.Metadata.TokenMillions <= 0 || result.Metadata.TokenMillions > 1000 {
+			return ErrResellerQuotaAdjustmentInvalid
+		}
+		currentAllocation, err := common.QuotaFromDecimalStrict(
+			decimal.NewFromInt(int64(result.Metadata.TokenMillions)).Mul(decimal.NewFromInt(1_000_000)),
+		)
+		if err != nil || result.Token.RemainQuota < 0 || result.Token.UsedQuota < 0 ||
+			result.Token.RemainQuota > currentAllocation || result.Token.UsedQuota > currentAllocation ||
+			result.Token.RemainQuota+result.Token.UsedQuota != currentAllocation {
+			return ErrResellerQuotaAdjustmentInvalid
+		}
+
+		// A matching marker makes retries read-only. Return the currently locked
+		// key state so a late replay cannot replace newer UI state with stale data.
+		var existing ResellerQuotaOperation
+		lookup := tx.Where("operation_id LIKE ?", requestScope+":%").First(&existing)
+		if lookup.Error == nil {
+			operation, ok := parseManualResellerQuotaOperation(requestScope, existing.OperationId)
+			if !ok || operation.Mode != mode || operation.RequestedMillions != amountMillions ||
+				operation.ExpectedTotalMillions != expectedTotalMillions ||
+				existing.TokenId != id || existing.UserId != userID {
+				return ErrResellerQuotaOperationConflict
+			}
+			return nil
+		}
+		if !errors.Is(lookup.Error, gorm.ErrRecordNotFound) {
+			return lookup.Error
+		}
+		if result.Metadata.TokenMillions != expectedTotalMillions {
+			return ErrResellerQuotaStateConflict
+		}
+
+		targetTotalMillions := result.Metadata.TokenMillions
+		switch mode {
+		case ResellerQuotaAdjustmentAdd:
+			targetTotalMillions += amountMillions
+		case ResellerQuotaAdjustmentSubtract:
+			targetTotalMillions -= amountMillions
+		case ResellerQuotaAdjustmentSet:
+			targetTotalMillions = amountMillions
+		}
+		if targetTotalMillions < 1 || targetTotalMillions > 1000 {
+			return ErrResellerQuotaAllocationOutOfRange
+		}
+		targetAllocation, err := common.QuotaFromDecimalStrict(
+			decimal.NewFromInt(int64(targetTotalMillions)).Mul(decimal.NewFromInt(1_000_000)),
+		)
+		if err != nil {
+			return ErrResellerQuotaAdjustmentInvalid
+		}
+		if targetAllocation < result.Token.UsedQuota {
+			return ErrResellerTokenQuotaInsufficient
+		}
+		deltaMillions := targetTotalMillions - result.Metadata.TokenMillions
+		deltaTokens := targetAllocation - currentAllocation
+		if deltaMillions > 0 {
+			if result.Token.ExpiredTime != -1 && result.Token.ExpiredTime <= common.GetTimestamp() {
+				return ErrResellerQuotaKeyExpired
+			}
+			if !purchaseAuthorized {
+				return ErrResellerQuotaPurchaseRequired
+			}
+			activeSubscription, err := getActiveResellerSubscriptionAt(tx, userID, common.GetTimestamp())
+			if err != nil {
+				return err
+			}
+			if activeSubscription == nil {
+				return ErrResellerSubscriptionRequired
+			}
+			baseCost, err := decimal.NewFromString(result.Metadata.BaseCostPerMillion)
+			if err != nil || !baseCost.IsPositive() {
+				return ErrResellerQuotaAdjustmentInvalid
+			}
+			purchaseCost := decimal.NewFromInt(int64(deltaMillions)).Mul(baseCost).Round(2)
+			walletQuota, err := common.WalletQuotaFromDecimalStrict(
+				purchaseCost.Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
+			)
+			if err != nil || walletQuota <= 0 {
+				return ErrResellerQuotaAdjustmentInvalid
+			}
+			walletResult := tx.Model(&User{}).
+				Where("id = ? AND quota >= ?", userID, walletQuota).
+				Update("quota", gorm.Expr("quota - ?", walletQuota))
+			if walletResult.Error != nil {
+				return walletResult.Error
+			}
+			if walletResult.RowsAffected != 1 {
+				return ErrResellerQuotaWalletInsufficient
+			}
+			walletDebited = true
+		}
+
+		// Fence readers before the token row changes. Otherwise a concurrent cache
+		// miss can publish its pre-mutation snapshot after the transaction commits
+		// and the post-commit invalidation has run.
+		if cacheErr := invalidateTokenCacheForMutation(previousKey); cacheErr != nil {
+			common.SysLog("failed to fence reseller token cache before manual quota adjustment: " + cacheErr.Error())
+		}
+		result.Metadata.TokenMillions = targetTotalMillions
+		result.Token.RemainQuota += deltaTokens
+		if result.Token.RemainQuota < 0 || result.Token.RemainQuota+result.Token.UsedQuota != targetAllocation {
+			return ErrResellerQuotaAdjustmentInvalid
+		}
+		if err := tx.Model(&Token{}).Where("id = ? AND user_id = ?", id, userID).
+			Update("remain_quota", result.Token.RemainQuota).Error; err != nil {
+			return err
+		}
+		metadataUpdate := tx.Model(&ResellerKey{}).
+			Where("token_id = ? AND user_id = ? AND token_millions = ?", id, userID, expectedTotalMillions).
+			Update("token_millions", result.Metadata.TokenMillions)
+		if metadataUpdate.Error != nil {
+			return metadataUpdate.Error
+		}
+		if metadataUpdate.RowsAffected != 1 && deltaMillions != 0 {
+			return ErrResellerQuotaStateConflict
+		}
+		operation := manualResellerQuotaOperation{
+			Mode:                  mode,
+			RequestedMillions:     amountMillions,
+			ExpectedTotalMillions: expectedTotalMillions,
+		}
+		durableOperationID = operation.durableID(requestScope)
+		if utf8.RuneCountInString(durableOperationID) > 128 {
+			return ErrResellerQuotaAdjustmentInvalid
+		}
+		if err := tx.Create(&ResellerQuotaOperation{
+			OperationId: durableOperationID,
+			TokenId:     id,
+			UserId:      userID,
+			Adjustment:  deltaTokens,
+			CreatedTime: common.GetTimestamp(),
+		}).Error; err != nil {
+			return err
+		}
+		applied = true
+		return nil
+	})
+	if err != nil {
+		// If the transaction lost a race at the unique operation index, treat a
+		// matching durable marker as a successful replay. This also covers an
+		// ambiguous commit response without applying a second adjustment.
+		var existing ResellerQuotaOperation
+		if lookupErr := DB.Where("operation_id LIKE ?", requestScope+":%").First(&existing).Error; lookupErr == nil &&
+			existing.TokenId == id && existing.UserId == userID {
+			operation, ok := parseManualResellerQuotaOperation(requestScope, existing.OperationId)
+			var token Token
+			if ok && operation.Mode == mode && operation.RequestedMillions == amountMillions &&
+				operation.ExpectedTotalMillions == expectedTotalMillions {
+				if tokenErr := DB.Where("id = ? AND user_id = ?", id, userID).First(&token).Error; tokenErr == nil {
+					var metadata ResellerKey
+					if metadataErr := DB.Where("token_id = ? AND user_id = ?", id, userID).First(&metadata).Error; metadataErr == nil {
+						result = ResellerKeyWithToken{Metadata: metadata, Token: token}
+						previousKey = token.Key
+						err = nil
+					}
+				}
+			}
+		}
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	paidAdjustment := mode == ResellerQuotaAdjustmentAdd ||
+		(mode == ResellerQuotaAdjustmentSet && amountMillions > expectedTotalMillions)
+	if walletDebited || paidAdjustment {
+		if cacheErr := invalidateUserCache(userID); cacheErr != nil {
+			common.SysLog("failed to invalidate user quota cache after reseller quota purchase: " + cacheErr.Error())
+		}
+	}
+	// Successful idempotent replays reconcile caches as well. The original
+	// process may have stopped after the durable commit but before invalidation.
+	if cacheErr := invalidateTokenCacheForMutation(previousKey); cacheErr != nil {
+		common.SysLog("failed to invalidate reseller token cache after manual quota adjustment: " + cacheErr.Error())
+	}
+	return &result, applied, nil
+}
+
+func GetUserResellerKeyByTokenID(userID int, tokenID int) (*ResellerKeyWithToken, error) {
+	if userID <= 0 || tokenID <= 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var record ResellerKeyWithToken
+	if err := DB.Where("id = ? AND user_id = ?", tokenID, userID).First(&record.Token).Error; err != nil {
+		return nil, err
+	}
+	if !IsResellerTokenKey(record.Token.Key) {
+		return nil, gorm.ErrRecordNotFound
+	}
+	if err := DB.Where("token_id = ? AND user_id = ?", tokenID, userID).First(&record.Metadata).Error; err != nil {
+		return nil, err
+	}
+	return &record, nil
 }
 
 func IsResellerTokenKey(key string) bool {

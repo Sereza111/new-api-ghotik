@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import {
+  adjustResellerKeyQuota,
   createResellerKey,
   deleteResellerKey,
   getResellerConfig,
@@ -58,6 +59,7 @@ const resellerKey: ResellerKey = {
   status: 1,
   cost: 2,
   client_price: 3.6,
+  base_cost_per_million: 0.08,
 }
 
 const subscription = {
@@ -184,6 +186,70 @@ describe('reseller API', () => {
       requestConfig
     )
   })
+
+  test('adjusts reseller quota through the dedicated idempotent endpoint', async () => {
+    const adjustedKey = {
+      ...resellerKey,
+      remaining_tokens: 20_000_000,
+      used_tokens: 5_000_000,
+    }
+    const request = {
+      mode: 'set' as const,
+      token_millions: 20,
+      expected_total_millions: 25,
+      request_id: 'quota-adjustment-1',
+    }
+    apiMock.post.mockResolvedValue({
+      data: { success: true, data: adjustedKey },
+    })
+
+    await expect(adjustResellerKeyQuota(42, request)).resolves.toEqual(
+      adjustedKey
+    )
+    expect(apiMock.post).toHaveBeenCalledWith(
+      '/api/reseller/keys/42/quota',
+      request,
+      requestConfig
+    )
+  })
+
+  test.each([
+    [
+      403,
+      { message: 'insufficient balance to increase reseller quota' },
+      'insufficient balance to increase reseller quota',
+    ],
+    [
+      409,
+      {
+        error: { message: 'reseller quota changed; refresh the key and retry' },
+      },
+      'reseller quota changed; refresh the key and retry',
+    ],
+    [
+      400,
+      { error: 'invalid reseller quota adjustment' },
+      'invalid reseller quota adjustment',
+    ],
+  ])(
+    'surfaces the server reason from a %s quota response',
+    async (status, data, expectedMessage) => {
+      apiMock.post.mockRejectedValue({
+        isAxiosError: true,
+        message: 'Request failed',
+        response: { status, data },
+      })
+
+      await expect(
+        adjustResellerKeyQuota(42, {
+          mode: 'add',
+          token_millions: 1,
+          expected_total_millions: 25,
+          request_id: `quota-error-${status}`,
+        })
+      ).rejects.toThrow(expectedMessage)
+    }
+  )
 
   test('reveals a stored key and adds the public prefix once', async () => {
     apiMock.post.mockResolvedValue({

@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
+  adjustResellerKeyQuota,
   createResellerKey,
   deleteResellerKey,
   getResellerConfig,
@@ -32,6 +33,7 @@ import type {
   PurchaseResellerSubscriptionRequest,
   ResellerConfig,
   ResellerKey,
+  ResellerQuotaAdjustmentRequest,
 } from '../types'
 
 export const resellerQueryKeys = {
@@ -118,6 +120,31 @@ export function useReissueResellerKey() {
           ) ?? [reissuedKey]
       )
     },
+  })
+}
+
+export function useAdjustResellerKeyQuota() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      id,
+      request,
+    }: {
+      id: number
+      request: ResellerQuotaAdjustmentRequest
+    }) => adjustResellerKeyQuota(id, request),
+    onSuccess: (adjustedKey) => {
+      queryClient.setQueryData<ResellerKey[]>(
+        resellerQueryKeys.keys,
+        (currentKeys) =>
+          currentKeys?.map((item) =>
+            item.id === adjustedKey.id ? adjustedKey : item
+          ) ?? [adjustedKey]
+      )
+    },
+    onError: () =>
+      queryClient.invalidateQueries({ queryKey: resellerQueryKeys.keys }),
   })
 }
 

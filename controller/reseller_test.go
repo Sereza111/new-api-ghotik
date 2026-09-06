@@ -97,6 +97,7 @@ func TestAddResellerKeyCreatesUsableToken(t *testing.T) {
 	assert.Equal(t, "30-days", created.Term)
 	assert.Equal(t, 6.0, created.Cost)
 	assert.Equal(t, 10.8, created.ClientPrice)
+	assert.Equal(t, 0.12, created.BaseCostPerMillion)
 	assert.True(t, strings.HasPrefix(created.Key, "sk-rsl_"))
 	assert.NotContains(t, created.Key, "rsl80_")
 
@@ -199,6 +200,7 @@ func TestGetResellerKeysMasksSecretsAndExcludesRegularTokens(t *testing.T) {
 	assert.Equal(t, 20, items[0].MarkupPercent)
 	assert.Equal(t, 1.2, items[0].Cost)
 	assert.Equal(t, 1.44, items[0].ClientPrice)
+	assert.Equal(t, 0.12, items[0].BaseCostPerMillion)
 	assert.Equal(t, "https://pugshop.ru/v1", items[0].Endpoint)
 	assert.Equal(t, "sk-"+resellerToken.GetMaskedKey(), items[0].Key)
 	assert.NotContains(t, recorder.Body.String(), resellerToken.Key)
@@ -267,6 +269,256 @@ func TestGenericTokenPartialUpdatePreservesResellerGroup(t *testing.T) {
 	assert.Equal(t, "Renamed", stored.Name)
 	assert.Equal(t, common.TokenStatusEnabled, stored.Status)
 	assert.Equal(t, "default", stored.Group)
+}
+
+func TestAdjustResellerKeyQuotaChargesAddAndDoesNotRefundSubtract(t *testing.T) {
+	db := setupResellerControllerTestDB(t)
+	confirmPaymentComplianceForTest(t)
+	previousQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 500_000
+	t.Cleanup(func() { common.QuotaPerUnit = previousQuotaPerUnit })
+	require.NoError(t, db.Create(&model.User{
+		Id: 46, Username: "quota-adjust-owner", Status: common.UserStatusEnabled,
+		Group: "default", Quota: 1_000_000,
+	}).Error)
+	seedActiveResellerSubscription(t, db, 46)
+	key, err := model.NewResellerTokenKey()
+	require.NoError(t, err)
+	now := common.GetTimestamp()
+	token := model.Token{
+		UserId: 46, Key: key, Name: "Adjustable client", Status: common.TokenStatusEnabled,
+		CreatedTime: now, AccessedTime: now, ExpiredTime: -1,
+		RemainQuota: 6_000_000, UsedQuota: 4_000_000,
+		QuotaMode: model.TokenQuotaModeTokens, Group: "default",
+	}
+	require.NoError(t, db.Create(&token).Error)
+	require.NoError(t, db.Create(&model.ResellerKey{
+		TokenId: token.Id, UserId: 46, TokenMillions: 10, MarkupPercent: 20,
+		BaseCostPerMillion: "0.12", Endpoint: "https://pugshop.ru/v1", CreatedTime: now,
+	}).Error)
+
+	addBody := map[string]any{
+		"mode": "add", "token_millions": 2, "expected_total_millions": 10,
+		"request_id": "controller-quota-add-1",
+	}
+	addContext, addRecorder := newAuthenticatedContext(
+		t, http.MethodPost, "/api/reseller/keys/"+strconv.Itoa(token.Id)+"/quota", addBody, 46,
+	)
+	addContext.Params = append(addContext.Params, gin.Param{Key: "id", Value: strconv.Itoa(token.Id)})
+	addContext.Set("group", "default")
+	AdjustResellerKeyQuota(addContext)
+	addResponse := decodeAPIResponse(t, addRecorder)
+	require.True(t, addResponse.Success, addResponse.Message)
+	var added resellerKeyResponse
+	require.NoError(t, common.Unmarshal(addResponse.Data, &added))
+	assert.Equal(t, 12, added.TokenMillions)
+	assert.Equal(t, 8_000_000, added.RemainingTokens)
+	assert.Equal(t, 4_000_000, added.UsedTokens)
+	var owner model.User
+	require.NoError(t, db.First(&owner, 46).Error)
+	assert.Equal(t, 880_000, owner.Quota)
+
+	replayContext, replayRecorder := newAuthenticatedContext(
+		t, http.MethodPost, "/api/reseller/keys/"+strconv.Itoa(token.Id)+"/quota", addBody, 46,
+	)
+	replayContext.Params = append(replayContext.Params, gin.Param{Key: "id", Value: strconv.Itoa(token.Id)})
+	AdjustResellerKeyQuota(replayContext)
+	replayResponse := decodeAPIResponse(t, replayRecorder)
+	require.True(t, replayResponse.Success, replayResponse.Message)
+	require.NoError(t, db.First(&owner, 46).Error)
+	assert.Equal(t, 880_000, owner.Quota, "replaying request_id must not charge twice")
+
+	staleContext, staleRecorder := newAuthenticatedContext(
+		t, http.MethodPost, "/api/reseller/keys/"+strconv.Itoa(token.Id)+"/quota", map[string]any{
+			"mode": "set", "token_millions": 11, "expected_total_millions": 10,
+			"request_id": "controller-quota-stale-set",
+		}, 46,
+	)
+	staleContext.Params = append(staleContext.Params, gin.Param{Key: "id", Value: strconv.Itoa(token.Id)})
+	AdjustResellerKeyQuota(staleContext)
+	assert.Equal(t, http.StatusConflict, staleRecorder.Code)
+	staleResponse := decodeAPIResponse(t, staleRecorder)
+	assert.False(t, staleResponse.Success)
+	assert.Contains(t, staleResponse.Message, "refresh")
+
+	require.NoError(t, db.Model(&model.Token{}).Where("id = ?", token.Id).Update("expired_time", now-1).Error)
+	expiredContext, expiredRecorder := newAuthenticatedContext(
+		t, http.MethodPost, "/api/reseller/keys/"+strconv.Itoa(token.Id)+"/quota", map[string]any{
+			"mode": "add", "token_millions": 1, "expected_total_millions": 12,
+			"request_id": "controller-quota-expired-add",
+		}, 46,
+	)
+	expiredContext.Params = append(expiredContext.Params, gin.Param{Key: "id", Value: strconv.Itoa(token.Id)})
+	expiredContext.Set("group", "default")
+	AdjustResellerKeyQuota(expiredContext)
+	assert.Equal(t, http.StatusConflict, expiredRecorder.Code)
+	expiredResponse := decodeAPIResponse(t, expiredRecorder)
+	assert.False(t, expiredResponse.Success)
+	assert.Contains(t, expiredResponse.Message, "expired")
+	require.NoError(t, db.First(&owner, 46).Error)
+	assert.Equal(t, 880_000, owner.Quota, "an expired-key top-up must not debit the wallet")
+	var unchangedToken model.Token
+	require.NoError(t, db.First(&unchangedToken, token.Id).Error)
+	assert.Equal(t, 8_000_000, unchangedToken.RemainQuota)
+	var unchangedMetadata model.ResellerKey
+	require.NoError(t, db.Where("token_id = ?", token.Id).First(&unchangedMetadata).Error)
+	assert.Equal(t, 12, unchangedMetadata.TokenMillions)
+
+	require.NoError(t, db.Model(&model.ResellerSubscription{}).Where("user_id = ?", 46).
+		Update("end_time", now-1).Error)
+	subtractContext, subtractRecorder := newAuthenticatedContext(
+		t, http.MethodPost, "/api/reseller/keys/"+strconv.Itoa(token.Id)+"/quota", map[string]any{
+			"mode": "subtract", "token_millions": 3, "expected_total_millions": 12,
+			"request_id": "controller-quota-subtract-1",
+		}, 46,
+	)
+	subtractContext.Params = append(subtractContext.Params, gin.Param{Key: "id", Value: strconv.Itoa(token.Id)})
+	AdjustResellerKeyQuota(subtractContext)
+	subtractResponse := decodeAPIResponse(t, subtractRecorder)
+	require.True(t, subtractResponse.Success, subtractResponse.Message)
+	var subtracted resellerKeyResponse
+	require.NoError(t, common.Unmarshal(subtractResponse.Data, &subtracted))
+	assert.Equal(t, 9, subtracted.TokenMillions)
+	assert.Equal(t, 5_000_000, subtracted.RemainingTokens)
+	require.NoError(t, db.First(&owner, 46).Error)
+	assert.Equal(t, 880_000, owner.Quota, "subtracting quota must not refund the wallet")
+	var auditCount int64
+	require.NoError(t, db.Model(&model.Log{}).
+		Where("user_id = ? AND type = ?", 46, model.LogTypeManage).
+		Count(&auditCount).Error)
+	assert.EqualValues(t, 2, auditCount, "only newly applied adjustments should create audit entries")
+}
+
+func TestAdjustResellerKeyQuotaRequiresStableRequestID(t *testing.T) {
+	db := setupResellerControllerTestDB(t)
+	key, err := model.NewResellerTokenKey()
+	require.NoError(t, err)
+	token := model.Token{
+		UserId: 47, Key: key, Name: "Stable adjustment", Status: common.TokenStatusEnabled,
+		ExpiredTime: -1, RemainQuota: 1_000_000, QuotaMode: model.TokenQuotaModeTokens, Group: "default",
+	}
+	require.NoError(t, db.Create(&token).Error)
+	require.NoError(t, db.Create(&model.ResellerKey{
+		TokenId: token.Id, UserId: 47, TokenMillions: 1, MarkupPercent: 20,
+		BaseCostPerMillion: "0.12", Endpoint: "https://pugshop.ru/v1",
+	}).Error)
+
+	context, recorder := newAuthenticatedContext(
+		t, http.MethodPost, "/api/reseller/keys/"+strconv.Itoa(token.Id)+"/quota", map[string]any{
+			"mode": "set", "token_millions": 1, "expected_total_millions": 1,
+		}, 47,
+	)
+	context.Params = append(context.Params, gin.Param{Key: "id", Value: strconv.Itoa(token.Id)})
+	AdjustResellerKeyQuota(context)
+
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	response := decodeAPIResponse(t, recorder)
+	assert.False(t, response.Success)
+	assert.Contains(t, response.Message, "request_id is required")
+
+	missingExpectedContext, missingExpectedRecorder := newAuthenticatedContext(
+		t, http.MethodPost, "/api/reseller/keys/"+strconv.Itoa(token.Id)+"/quota", map[string]any{
+			"mode": "set", "token_millions": 1, "request_id": "missing-expected-total",
+		}, 47,
+	)
+	missingExpectedContext.Params = append(
+		missingExpectedContext.Params,
+		gin.Param{Key: "id", Value: strconv.Itoa(token.Id)},
+	)
+	AdjustResellerKeyQuota(missingExpectedContext)
+	assert.Equal(t, http.StatusBadRequest, missingExpectedRecorder.Code)
+	missingExpectedResponse := decodeAPIResponse(t, missingExpectedRecorder)
+	assert.False(t, missingExpectedResponse.Success)
+	assert.Contains(t, missingExpectedResponse.Message, "invalid reseller quota adjustment request")
+
+	var stored model.Token
+	require.NoError(t, db.First(&stored, token.Id).Error)
+	assert.Equal(t, 1_000_000, stored.RemainQuota)
+}
+
+func TestAdjustResellerKeyQuotaRejectsZeroAllocation(t *testing.T) {
+	setupResellerControllerTestDB(t)
+	for _, mode := range []string{"set", "subtract"} {
+		t.Run(mode, func(t *testing.T) {
+			context, recorder := newAuthenticatedContext(
+				t, http.MethodPost, "/api/reseller/keys/1/quota", map[string]any{
+					"mode": mode, "token_millions": 0, "expected_total_millions": 1,
+					"request_id": "zero-" + mode,
+				}, 48,
+			)
+			context.Params = append(context.Params, gin.Param{Key: "id", Value: "1"})
+
+			AdjustResellerKeyQuota(context)
+
+			assert.Equal(t, http.StatusBadRequest, recorder.Code)
+			response := decodeAPIResponse(t, recorder)
+			assert.False(t, response.Success)
+			assert.Contains(t, response.Message, "between 1 and 1000")
+		})
+	}
+
+	context, recorder := newAuthenticatedContext(
+		t, http.MethodPost, "/api/reseller/keys/1/quota", map[string]any{
+			"mode": "set", "token_millions": 1, "expected_total_millions": 0,
+			"request_id": "zero-expected-total",
+		}, 48,
+	)
+	context.Params = append(context.Params, gin.Param{Key: "id", Value: "1"})
+	AdjustResellerKeyQuota(context)
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	response := decodeAPIResponse(t, recorder)
+	assert.False(t, response.Success)
+	assert.Contains(t, response.Message, "expected total must be between 1 and 1000")
+}
+
+func TestAdjustResellerKeyQuotaRejectsInsufficientWallet(t *testing.T) {
+	db := setupResellerControllerTestDB(t)
+	confirmPaymentComplianceForTest(t)
+	previousQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 500_000
+	t.Cleanup(func() { common.QuotaPerUnit = previousQuotaPerUnit })
+	require.NoError(t, db.Create(&model.User{
+		Id: 49, Username: "quota-adjust-empty-wallet", Status: common.UserStatusEnabled,
+		Group: "default", Quota: 10,
+	}).Error)
+	seedActiveResellerSubscription(t, db, 49)
+	key, err := model.NewResellerTokenKey()
+	require.NoError(t, err)
+	now := common.GetTimestamp()
+	token := model.Token{
+		UserId: 49, Key: key, Name: "No funds", Status: common.TokenStatusEnabled,
+		CreatedTime: now, AccessedTime: now, ExpiredTime: -1,
+		RemainQuota: 1_000_000, QuotaMode: model.TokenQuotaModeTokens, Group: "default",
+	}
+	require.NoError(t, db.Create(&token).Error)
+	require.NoError(t, db.Create(&model.ResellerKey{
+		TokenId: token.Id, UserId: 49, TokenMillions: 1, MarkupPercent: 20,
+		BaseCostPerMillion: "0.12", Endpoint: "https://pugshop.ru/v1", CreatedTime: now,
+	}).Error)
+	context, recorder := newAuthenticatedContext(
+		t, http.MethodPost, "/api/reseller/keys/"+strconv.Itoa(token.Id)+"/quota", map[string]any{
+			"mode": "add", "token_millions": 1, "expected_total_millions": 1,
+			"request_id": "insufficient-wallet-add",
+		}, 49,
+	)
+	context.Params = append(context.Params, gin.Param{Key: "id", Value: strconv.Itoa(token.Id)})
+	context.Set("group", "default")
+
+	AdjustResellerKeyQuota(context)
+
+	assert.Equal(t, http.StatusForbidden, recorder.Code)
+	response := decodeAPIResponse(t, recorder)
+	assert.False(t, response.Success)
+	assert.Contains(t, response.Message, "insufficient balance")
+	var stored model.Token
+	require.NoError(t, db.First(&stored, token.Id).Error)
+	assert.Equal(t, 1_000_000, stored.RemainQuota)
+	var metadata model.ResellerKey
+	require.NoError(t, db.Where("token_id = ?", token.Id).First(&metadata).Error)
+	assert.Equal(t, 1, metadata.TokenMillions)
+	var owner model.User
+	require.NoError(t, db.First(&owner, 49).Error)
+	assert.Equal(t, 10, owner.Quota)
 }
 
 func TestAddResellerKeyRejectsInvalidRequest(t *testing.T) {

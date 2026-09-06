@@ -36,6 +36,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
+	"gorm.io/gorm"
 )
 
 const (
@@ -54,21 +55,22 @@ type resellerKeyRequest struct {
 }
 
 type resellerKeyResponse struct {
-	Id              int     `json:"id"`
-	ClientLabel     string  `json:"client_label"`
-	TokenMillions   int     `json:"token_millions"`
-	RemainingTokens int     `json:"remaining_tokens"`
-	UsedTokens      int     `json:"used_tokens"`
-	MarkupPercent   int     `json:"markup_percent"`
-	Term            string  `json:"term"`
-	Endpoint        string  `json:"endpoint"`
-	Key             string  `json:"key"`
-	CreatedTime     int64   `json:"created_time"`
-	ExpiredTime     int64   `json:"expired_time"`
-	Status          int     `json:"status"`
-	Group           string  `json:"group"`
-	Cost            float64 `json:"cost"`
-	ClientPrice     float64 `json:"client_price"`
+	Id                 int     `json:"id"`
+	ClientLabel        string  `json:"client_label"`
+	TokenMillions      int     `json:"token_millions"`
+	RemainingTokens    int     `json:"remaining_tokens"`
+	UsedTokens         int     `json:"used_tokens"`
+	MarkupPercent      int     `json:"markup_percent"`
+	Term               string  `json:"term"`
+	Endpoint           string  `json:"endpoint"`
+	Key                string  `json:"key"`
+	CreatedTime        int64   `json:"created_time"`
+	ExpiredTime        int64   `json:"expired_time"`
+	Status             int     `json:"status"`
+	Group              string  `json:"group"`
+	Cost               float64 `json:"cost"`
+	ClientPrice        float64 `json:"client_price"`
+	BaseCostPerMillion float64 `json:"base_cost_per_million"`
 }
 
 type resellerAvailableGroup struct {
@@ -88,6 +90,13 @@ type resellerSubscriptionResponse struct {
 
 type resellerSubscriptionRequest struct {
 	RequestId string `json:"request_id"`
+}
+
+type resellerQuotaAdjustmentRequest struct {
+	Mode                  string `json:"mode"`
+	TokenMillions         *int   `json:"token_millions"`
+	ExpectedTotalMillions *int   `json:"expected_total_millions"`
+	RequestId             string `json:"request_id"`
 }
 
 func GetResellerConfig(c *gin.Context) {
@@ -296,6 +305,98 @@ func ReissueResellerKey(c *gin.Context) {
 	common.ApiSuccess(c, buildResellerKeyResponse(&record.Token, &record.Metadata, true))
 }
 
+func AdjustResellerKeyQuota(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		resellerBadRequest(c, "invalid reseller key id")
+		return
+	}
+	request := resellerQuotaAdjustmentRequest{}
+	if err := c.ShouldBindJSON(&request); err != nil || request.TokenMillions == nil || request.ExpectedTotalMillions == nil {
+		resellerBadRequest(c, "invalid reseller quota adjustment request")
+		return
+	}
+	mode := strings.ToLower(strings.TrimSpace(request.Mode))
+	if mode != model.ResellerQuotaAdjustmentAdd && mode != model.ResellerQuotaAdjustmentSubtract &&
+		mode != model.ResellerQuotaAdjustmentSet {
+		resellerBadRequest(c, "quota mode must be add, subtract, or set")
+		return
+	}
+	if *request.TokenMillions <= 0 || *request.TokenMillions > resellerMaxTokenMillions {
+		resellerBadRequest(c, "token amount must be between 1 and 1000 whole millions")
+		return
+	}
+	if *request.ExpectedTotalMillions < resellerMinTokenMillions || *request.ExpectedTotalMillions > resellerMaxTokenMillions {
+		resellerBadRequest(c, "expected total must be between 1 and 1000 whole millions")
+		return
+	}
+	requestID, ok := normalizeResellerRequestID(c, request.RequestId)
+	if !ok {
+		resellerBadRequest(c, "request_id is required and must be a printable value of at most 128 characters")
+		return
+	}
+
+	userID := c.GetInt("id")
+	record, applied, err := model.AdjustResellerTokenQuota(
+		id, userID, mode, *request.TokenMillions, *request.ExpectedTotalMillions, requestID, false,
+	)
+	if errors.Is(err, model.ErrResellerQuotaPurchaseRequired) {
+		if !requirePaymentCompliance(c) {
+			return
+		}
+		current, lookupErr := model.GetUserResellerKeyByTokenID(userID, id)
+		if lookupErr != nil {
+			if errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+				resellerStatusError(c, http.StatusNotFound, "reseller key not found")
+			} else {
+				common.ApiError(c, lookupErr)
+			}
+			return
+		}
+		userGroup, groupErr := getTokenRequestUserGroup(c)
+		if groupErr != nil {
+			common.ApiError(c, groupErr)
+			return
+		}
+		if !isResellerGroupAvailable(userGroup, current.Token.Group) {
+			resellerStatusError(c, http.StatusForbidden, "the reseller key routing group is no longer available")
+			return
+		}
+		record, applied, err = model.AdjustResellerTokenQuota(
+			id, userID, mode, *request.TokenMillions, *request.ExpectedTotalMillions, requestID, true,
+		)
+	}
+	if err != nil {
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			resellerStatusError(c, http.StatusNotFound, "reseller key not found")
+		case errors.Is(err, model.ErrResellerTokenQuotaInsufficient),
+			errors.Is(err, model.ErrResellerQuotaAllocationOutOfRange),
+			errors.Is(err, model.ErrResellerQuotaAdjustmentInvalid):
+			resellerBadRequest(c, err.Error())
+		case errors.Is(err, model.ErrResellerSubscriptionRequired),
+			errors.Is(err, model.ErrResellerQuotaWalletInsufficient):
+			resellerStatusError(c, http.StatusForbidden, err.Error())
+		case errors.Is(err, model.ErrResellerQuotaOperationConflict),
+			errors.Is(err, model.ErrResellerQuotaStateConflict),
+			errors.Is(err, model.ErrResellerQuotaKeyExpired):
+			resellerStatusError(c, http.StatusConflict, err.Error())
+		case errors.Is(err, model.ErrResellerQuotaPurchaseRequired):
+			resellerStatusError(c, http.StatusConflict, err.Error())
+		default:
+			common.ApiError(c, err)
+		}
+		return
+	}
+	if applied {
+		model.RecordLog(userID, model.LogTypeManage, fmt.Sprintf(
+			"Adjusted reseller key %d quota: mode=%s, expected_total=%d, amount=%s million tokens, remaining=%d tokens",
+			id, mode, *request.ExpectedTotalMillions, strconv.Itoa(*request.TokenMillions), record.Token.RemainQuota,
+		))
+	}
+	common.ApiSuccess(c, buildResellerKeyResponse(&record.Token, &record.Metadata, false))
+}
+
 func AddResellerKey(c *gin.Context) {
 	request := resellerKeyRequest{}
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -449,27 +550,29 @@ func buildResellerKeyResponse(token *model.Token, metadata *model.ResellerKey, r
 	clientPriceDecimal := costDecimal.Mul(decimal.NewFromInt(int64(100 + metadata.MarkupPercent))).Div(decimal.NewFromInt(100)).Round(2)
 	cost, _ := costDecimal.Float64()
 	clientPrice, _ := clientPriceDecimal.Float64()
+	baseCostPerMillion, _ := baseCost.Float64()
 	endpoint := strings.TrimRight(operation_setting.GetResellerSetting().Endpoint, "/")
 	key := "sk-" + token.GetMaskedKey()
 	if revealKey {
 		key = "sk-" + token.GetFullKey()
 	}
 	return resellerKeyResponse{
-		Id:              token.Id,
-		ClientLabel:     token.Name,
-		TokenMillions:   metadata.TokenMillions,
-		RemainingTokens: token.RemainQuota,
-		UsedTokens:      token.UsedQuota,
-		MarkupPercent:   metadata.MarkupPercent,
-		Term:            resellerTerm(token),
-		Endpoint:        endpoint,
-		Key:             key,
-		CreatedTime:     metadata.CreatedTime,
-		ExpiredTime:     token.ExpiredTime,
-		Status:          token.Status,
-		Group:           token.Group,
-		Cost:            cost,
-		ClientPrice:     clientPrice,
+		Id:                 token.Id,
+		ClientLabel:        token.Name,
+		TokenMillions:      metadata.TokenMillions,
+		RemainingTokens:    token.RemainQuota,
+		UsedTokens:         token.UsedQuota,
+		MarkupPercent:      metadata.MarkupPercent,
+		Term:               resellerTerm(token),
+		Endpoint:           endpoint,
+		Key:                key,
+		CreatedTime:        metadata.CreatedTime,
+		ExpiredTime:        token.ExpiredTime,
+		Status:             token.Status,
+		Group:              token.Group,
+		Cost:               cost,
+		ClientPrice:        clientPrice,
+		BaseCostPerMillion: baseCostPerMillion,
 	}
 }
 

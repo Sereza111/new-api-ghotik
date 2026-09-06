@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -32,10 +33,12 @@ type tokenPageResponse struct {
 }
 
 type tokenResponseItem struct {
-	ID     int    `json:"id"`
-	Name   string `json:"name"`
-	Key    string `json:"key"`
-	Status int    `json:"status"`
+	ID                         int      `json:"id"`
+	Name                       string   `json:"name"`
+	Key                        string   `json:"key"`
+	Status                     int      `json:"status"`
+	IsReseller                 bool     `json:"is_reseller"`
+	ResellerBaseCostPerMillion *float64 `json:"reseller_base_cost_per_million"`
 }
 
 type tokenKeyResponse struct {
@@ -99,7 +102,10 @@ func openTokenControllerTestDB(t *testing.T) *gorm.DB {
 func migrateTokenControllerTestDB(t *testing.T, db *gorm.DB) {
 	t.Helper()
 
-	if err := db.AutoMigrate(&model.User{}, &model.Token{}, &model.ResellerKey{}, &model.ResellerSubscription{}, &model.Log{}); err != nil {
+	if err := db.AutoMigrate(
+		&model.User{}, &model.Token{}, &model.ResellerKey{}, &model.ResellerSubscription{},
+		&model.ResellerQuotaOperation{}, &model.Log{},
+	); err != nil {
 		t.Fatalf("failed to migrate token table: %v", err)
 	}
 }
@@ -504,9 +510,37 @@ func TestGetTokenMasksKeyInResponse(t *testing.T) {
 	if detail.Key != token.GetMaskedKey() {
 		t.Fatalf("expected masked detail key %q, got %q", token.GetMaskedKey(), detail.Key)
 	}
+	if detail.ResellerBaseCostPerMillion != nil {
+		t.Fatalf("regular token unexpectedly exposed reseller base cost: %v", *detail.ResellerBaseCostPerMillion)
+	}
+	if strings.Contains(recorder.Body.String(), "reseller_base_cost_per_million") {
+		t.Fatalf("regular token detail should omit reseller pricing metadata: %s", recorder.Body.String())
+	}
 	if strings.Contains(recorder.Body.String(), token.Key) {
 		t.Fatalf("detail response leaked raw token key: %s", recorder.Body.String())
 	}
+}
+
+func TestGetTokenExplicitlyMarksResellerKey(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	token := seedToken(t, db, 1, "reseller-token", "rsl_reseller1234token5678")
+	require.NoError(t, db.Create(&model.ResellerKey{
+		TokenId: token.Id, UserId: 1, TokenMillions: 1, MarkupPercent: 20,
+		BaseCostPerMillion: "0.12", Endpoint: "https://pugshop.ru/v1", CreatedTime: token.CreatedTime,
+	}).Error)
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/"+strconv.Itoa(token.Id), nil, 1)
+	ctx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(token.Id)}}
+	GetToken(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, "API message: %s", response.Message)
+
+	var detail tokenResponseItem
+	require.NoError(t, common.Unmarshal(response.Data, &detail))
+	require.True(t, detail.IsReseller)
+	require.NotNil(t, detail.ResellerBaseCostPerMillion)
+	require.Equal(t, 0.12, *detail.ResellerBaseCostPerMillion)
 }
 
 func TestUpdateTokenMasksKeyInResponse(t *testing.T) {

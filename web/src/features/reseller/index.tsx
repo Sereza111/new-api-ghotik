@@ -46,6 +46,7 @@ import { ResellerConfigurator } from './components/reseller-configurator'
 import { ResellerKeyVault } from './components/reseller-key-vault'
 import { ResellerSubscriptionBand } from './components/reseller-subscription-band'
 import {
+  useAdjustResellerKeyQuota,
   useCreateResellerKey,
   useDeleteResellerKey,
   usePurchaseResellerSubscription,
@@ -60,7 +61,10 @@ import {
   RESELLER_BASE_COST_PER_MILLION,
   resellerDraftSchema,
 } from './lib/pricing'
-import type { ResellerDraftValues } from './types'
+import type {
+  ResellerDraftValues,
+  ResellerQuotaAdjustmentRequest,
+} from './types'
 
 const DEFAULT_DRAFT: ResellerDraftValues = {
   clientLabel: '',
@@ -87,6 +91,7 @@ export function Reseller() {
   const purchaseSubscriptionMutation = usePurchaseResellerSubscription()
   const deleteKeyMutation = useDeleteResellerKey()
   const reissueKeyMutation = useReissueResellerKey()
+  const adjustQuotaMutation = useAdjustResellerKeyQuota()
   const revealKeyMutation = useRevealResellerKey()
   const refetchResellerConfig = configQuery.refetch
   const pendingIssueRequest = useRef<{
@@ -159,6 +164,9 @@ export function Reseller() {
     : null
   const reissuingKeyId = reissueKeyMutation.isPending
     ? reissueKeyMutation.variables
+    : null
+  const adjustingKeyId = adjustQuotaMutation.isPending
+    ? (adjustQuotaMutation.variables?.id ?? null)
     : null
   const quote = calculateResellerQuote(
     tokenMillions,
@@ -314,6 +322,31 @@ export function Reseller() {
         error instanceof Error
           ? t(error.message)
           : t('Failed to reissue reseller key')
+      )
+      return false
+    }
+  }
+
+  const handleAdjustQuota = async (
+    id: number,
+    request: ResellerQuotaAdjustmentRequest
+  ): Promise<boolean> => {
+    try {
+      await adjustQuotaMutation.mutateAsync({ id, request })
+      if (
+        request.mode === 'add' ||
+        (request.mode === 'set' &&
+          request.token_millions > request.expected_total_millions)
+      ) {
+        void refreshAuthenticatedUser()
+      }
+      toast.success(t('Reseller quota updated'))
+      return true
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? t(error.message)
+          : t('Failed to adjust reseller quota')
       )
       return false
     }
@@ -521,6 +554,7 @@ export function Reseller() {
                 revealingKeyId={revealingKeyId}
                 deletingKeyId={deletingKeyId}
                 reissuingKeyId={reissuingKeyId}
+                adjustingKeyId={adjustingKeyId}
                 isLoading={keysQuery.isPending}
                 isFetching={keysQuery.isFetching}
                 isError={keysQuery.isError}
@@ -533,6 +567,7 @@ export function Reseller() {
                 onReveal={(id) => void handleRevealKey(id)}
                 onDelete={handleDeleteKey}
                 onReissue={handleReissueKey}
+                onAdjustQuota={handleAdjustQuota}
               />
             </div>
           </div>

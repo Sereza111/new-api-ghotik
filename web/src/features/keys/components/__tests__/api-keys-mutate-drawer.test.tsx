@@ -38,6 +38,7 @@ type ApiMethod = (url: string, data?: unknown) => Promise<{ data: unknown }>
 type MockableApi = {
   get: ApiMethod
   post: ApiMethod
+  put: ApiMethod
 }
 type RenderedDrawer = {
   queryClient: InstanceType<typeof QueryClient>
@@ -46,6 +47,7 @@ type RenderedDrawer = {
 const apiClient = api as unknown as MockableApi
 const originalGet = apiClient.get
 const originalPost = apiClient.post
+const originalPut = apiClient.put
 let renderedDrawer: RenderedDrawer | null = null
 
 const tokenModeApiKey = apiKeySchema.parse({
@@ -66,6 +68,16 @@ const tokenModeApiKey = apiKeySchema.parse({
   model_limits_enabled: false,
   model_limits: '',
   allow_ips: '',
+})
+
+const resellerTokenApiKey = apiKeySchema.parse({
+  ...tokenModeApiKey,
+  id: 43,
+  name: 'reseller token key',
+  remain_quota: 8_000_000,
+  used_quota: 2_000_000,
+  is_reseller: true,
+  reseller_base_cost_per_million: 0.12,
 })
 
 function installApiFixtures(createdPayloads: Array<Record<string, unknown>>) {
@@ -95,6 +107,8 @@ function installApiFixtures(createdPayloads: Array<Record<string, unknown>>) {
         }
       case `/api/token/${tokenModeApiKey.id}`:
         return { data: { success: true, data: tokenModeApiKey } }
+      case `/api/token/${resellerTokenApiKey.id}`:
+        return { data: { success: true, data: resellerTokenApiKey } }
       default:
         throw new Error(`Unexpected GET ${url}`)
     }
@@ -188,7 +202,11 @@ function findButton(text: string, required = true): HTMLButtonElement | null {
 }
 
 function getControlByLabel(
-  labelText: 'Name' | 'Quantity' | 'Quota (Million tokens)'
+  labelText:
+    | 'Name'
+    | 'Quantity'
+    | 'Quota (Million tokens)'
+    | 'Total quota (million tokens)'
 ): HTMLInputElement
 function getControlByLabel(labelText: 'Group'): HTMLButtonElement
 function getControlByLabel(labelText: 'Auto group order'): HTMLElement
@@ -247,6 +265,7 @@ function selectComboboxOption(
 afterEach(() => {
   apiClient.get = originalGet
   apiClient.post = originalPost
+  apiClient.put = originalPut
   localStorage.clear()
   if (renderedDrawer) {
     renderedDrawer.queryClient.clear()
@@ -369,5 +388,152 @@ describe('API keys mutate drawer quota mode', () => {
       'aria-disabled',
       'true'
     )
+  })
+
+  test('updates reseller metadata and its changed total quota separately', async () => {
+    const updatedPayloads: Array<Record<string, unknown>> = []
+    const quotaPayloads: Array<Record<string, unknown>> = []
+    installApiFixtures([])
+    apiClient.put = async (url, data) => {
+      expect(url).toBe('/api/token/')
+      updatedPayloads.push(data as Record<string, unknown>)
+      return { data: { success: true, data: resellerTokenApiKey } }
+    }
+    apiClient.post = async (url, data) => {
+      expect(url).toBe(`/api/reseller/keys/${resellerTokenApiKey.id}/quota`)
+      quotaPayloads.push(data as Record<string, unknown>)
+      return { data: { success: true } }
+    }
+    await renderDrawer(resellerTokenApiKey)
+
+    const totalQuotaInput = getControlByLabel(
+      'Total quota (million tokens)'
+    ) as HTMLInputElement
+    expect(totalQuotaInput).toHaveValue(10)
+    expect(totalQuotaInput).toBeEnabled()
+    expect(totalQuotaInput).toHaveAttribute('min', '2')
+    expect(totalQuotaInput).toHaveAttribute('max', '1000')
+    expect(totalQuotaInput).toHaveAttribute('step', '1')
+    expect(document.body).toHaveTextContent(
+      'Increasing it charges your balance; decreasing it does not refund funds.'
+    )
+    expect(getSwitchByLabel('Unlimited Quota')).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    )
+
+    changeInput(getControlByLabel('Name'), 'renamed reseller key')
+    changeInput(totalQuotaInput, '12')
+    fireEvent.click(findButton('Save changes', true))
+
+    expect(updatedPayloads).toHaveLength(0)
+    expect(await screen.findByText('Confirm paid quota increase')).toBeVisible()
+    expect(screen.getByText('2M')).toBeVisible()
+    expect(screen.getByText('$0.24')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm purchase' }))
+
+    await waitFor(() => expect(updatedPayloads).toHaveLength(1))
+    await waitFor(() => expect(quotaPayloads).toHaveLength(1))
+    expect(updatedPayloads[0]?.name).toBe('renamed reseller key')
+    expect(quotaPayloads[0]).toEqual({
+      mode: 'set',
+      token_millions: 12,
+      expected_total_millions: 10,
+      request_id: expect.any(String),
+    })
+  })
+
+  test('preserves and disables an established reseller group that is no longer selectable', async () => {
+    const unavailableGroupKey = apiKeySchema.parse({
+      ...resellerTokenApiKey,
+      group: 'archived-reseller',
+    })
+    const updatedPayloads: Array<Record<string, unknown>> = []
+    installApiFixtures([])
+    const fixtureGet = apiClient.get
+    apiClient.get = async (url, data) => {
+      if (url === `/api/token/${unavailableGroupKey.id}`) {
+        return { data: { success: true, data: unavailableGroupKey } }
+      }
+      return fixtureGet(url, data)
+    }
+    apiClient.put = async (_url, data) => {
+      updatedPayloads.push(data as Record<string, unknown>)
+      return { data: { success: true, data: unavailableGroupKey } }
+    }
+    await renderDrawer(unavailableGroupKey)
+
+    const groupTrigger = getControlByLabel('Group')
+    expect(groupTrigger).toBeDisabled()
+    expect(groupTrigger).toHaveTextContent('archived-reseller')
+
+    changeInput(getControlByLabel('Name'), 'metadata only')
+    fireEvent.click(findButton('Save changes', true))
+
+    await waitFor(() => expect(updatedPayloads).toHaveLength(1))
+    expect(updatedPayloads[0]?.group).toBe('archived-reseller')
+  })
+
+  test('does not call the reseller quota endpoint when total quota is unchanged', async () => {
+    const updatedPayloads: Array<Record<string, unknown>> = []
+    const quotaPayloads: Array<Record<string, unknown>> = []
+    installApiFixtures([])
+    apiClient.put = async (_url, data) => {
+      updatedPayloads.push(data as Record<string, unknown>)
+      return { data: { success: true, data: resellerTokenApiKey } }
+    }
+    apiClient.post = async (_url, data) => {
+      quotaPayloads.push(data as Record<string, unknown>)
+      return { data: { success: true } }
+    }
+    await renderDrawer(resellerTokenApiKey)
+
+    changeInput(getControlByLabel('Name'), 'metadata only')
+    fireEvent.click(findButton('Save changes', true))
+
+    await waitFor(() => expect(updatedPayloads).toHaveLength(1))
+    expect(quotaPayloads).toHaveLength(0)
+  })
+
+  test('reuses the reseller quota request id when the same total is retried', async () => {
+    const quotaPayloads: Array<Record<string, unknown>> = []
+    let detailFetches = 0
+    installApiFixtures([])
+    const fixtureGet = apiClient.get
+    apiClient.get = async (url, data) => {
+      if (url === `/api/token/${resellerTokenApiKey.id}`) detailFetches++
+      return fixtureGet(url, data)
+    }
+    apiClient.put = async () => ({ data: { success: true } })
+    apiClient.post = async (_url, data) => {
+      quotaPayloads.push(data as Record<string, unknown>)
+      return {
+        data:
+          quotaPayloads.length === 1
+            ? { success: false, message: 'temporary failure' }
+            : { success: true },
+      }
+    }
+    await renderDrawer(resellerTokenApiKey)
+    const detailFetchesBeforeFailure = detailFetches
+
+    changeInput(getControlByLabel('Total quota (million tokens)'), '12')
+    fireEvent.click(findButton('Save changes', true))
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Confirm purchase' })
+    )
+    await waitFor(() => expect(quotaPayloads).toHaveLength(1))
+    await waitFor(() =>
+      expect(detailFetches).toBeGreaterThan(detailFetchesBeforeFailure)
+    )
+    await waitFor(() => expect(findButton('Save changes', true)).toBeEnabled())
+    fireEvent.click(findButton('Save changes', true))
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Confirm purchase' })
+    )
+    await waitFor(() => expect(quotaPayloads).toHaveLength(2))
+
+    expect(quotaPayloads[1]?.request_id).toBe(quotaPayloads[0]?.request_id)
+    expect(quotaPayloads[1]?.expected_total_millions).toBe(10)
   })
 })

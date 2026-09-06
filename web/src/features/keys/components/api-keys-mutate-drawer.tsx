@@ -19,11 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, KeyRound, Settings2, WalletCards } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useForm, type SubmitErrorHandler } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { DateTimePicker } from '@/components/datetime-picker'
 import {
   SideDrawerSection,
@@ -64,16 +65,18 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useStatus } from '@/hooks/use-status'
-import { getUserModels, getUserGroups } from '@/lib/api'
+import { getSelf, getUserModels, getUserGroups } from '@/lib/api'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
 import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { useAuthStore, type AuthUser } from '@/stores/auth-store'
 
 import {
   createApiKey,
-  updateApiKey,
   getApiKey,
   getTokenAutoGroups,
+  setResellerKeyTotalQuota,
+  updateApiKey,
 } from '../api'
 import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import {
@@ -100,21 +103,35 @@ type ApiKeyMutateDrawerProps = {
   currentRow?: ApiKey
 }
 
+const MAX_RESELLER_TOTAL_QUOTA_MILLIONS = 1000
+
 export function ApiKeysMutateDrawer({
   open,
   onOpenChange,
   currentRow,
 }: ApiKeyMutateDrawerProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const isUpdate = !!currentRow
   const currentRowId = currentRow?.id
   const { triggerRefresh } = useApiKeys()
+  const setUser = useAuthStore((state) => state.auth.setUser)
   const { status, loading: statusLoading } = useStatus()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [initializedTarget, setInitializedTarget] = useState<string | null>(
     null
   )
+  const [pendingPaidQuotaChange, setPendingPaidQuotaChange] = useState<{
+    data: ApiKeyFormValues
+    expectedTotalMillions: number
+    deltaMillions: number
+    chargeUsd: number
+  } | null>(null)
+  const pendingResellerQuotaRequest = useRef<{
+    expectedTotalMillions: number
+    targetTotalMillions: number
+    requestId: string
+  } | null>(null)
   const defaultUseAutoGroup = status?.default_use_auto_group === true
 
   // Fetch models
@@ -141,6 +158,7 @@ export function ApiKeysMutateDrawer({
     data: apiKeyData,
     isFetched: apiKeyFetched,
     isFetching: apiKeyFetching,
+    refetch: refetchApiKey,
   } = useQuery({
     queryKey: ['api-key', currentRowId],
     queryFn: () => getApiKey(currentRowId ?? 0),
@@ -224,13 +242,17 @@ export function ApiKeysMutateDrawer({
     if (initializedTarget === target) return
     if (isUpdate && currentRow) {
       if (apiKeyData?.success && apiKeyData.data) {
-        form.reset(
-          transformApiKeyToFormDefaults(
-            apiKeyData.data,
-            availableAutoGroupNames,
-            maxAutoGroups
-          )
+        const defaults = transformApiKeyToFormDefaults(
+          apiKeyData.data,
+          availableAutoGroupNames,
+          maxAutoGroups
         )
+        if (apiKeyData.data.is_reseller) {
+          defaults.remain_quota_amount = quotaUnitsToMillions(
+            apiKeyData.data.remain_quota + apiKeyData.data.used_quota
+          )
+        }
+        form.reset(defaults)
         setInitializedTarget(target)
       }
     } else {
@@ -263,9 +285,48 @@ export function ApiKeysMutateDrawer({
     isUpdate && currentRow ? `update:${currentRow.id}` : 'create'
   const isFormInitialized = initializedTarget === formTarget
   const selectedGroup = form.watch('group')
+  const loadedApiKey =
+    apiKeyData?.success && apiKeyData.data ? apiKeyData.data : currentRow
+  const isResellerUpdate = Boolean(isUpdate && loadedApiKey?.is_reseller)
+  const usedTokenMillions = quotaUnitsToMillions(loadedApiKey?.used_quota ?? 0)
+  const minimumResellerTotalMillions = Math.max(1, Math.ceil(usedTokenMillions))
+  const currentResellerTotalQuota = quotaUnitsToMillions(
+    (loadedApiKey?.remain_quota ?? 0) + (loadedApiKey?.used_quota ?? 0)
+  )
+  const lockedResellerGroup =
+    isResellerUpdate && loadedApiKey?.group?.trim()
+      ? loadedApiKey.group.trim()
+      : null
+  const selectableGroups = useMemo(() => {
+    if (
+      !lockedResellerGroup ||
+      groups.some((group) => group.value === lockedResellerGroup)
+    ) {
+      return groups
+    }
+    return [
+      {
+        value: lockedResellerGroup,
+        label: lockedResellerGroup,
+        desc: lockedResellerGroup,
+      },
+      ...groups,
+    ]
+  }, [groups, lockedResellerGroup])
+  const resellerChargeFormatter = useMemo(
+    () =>
+      new Intl.NumberFormat(i18n.resolvedLanguage || 'en', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }),
+    [i18n.resolvedLanguage]
+  )
 
   // Correct group after groups load: if the form value is not in available groups, fall back
   useEffect(() => {
+    if (lockedResellerGroup) return
     if (groups.length === 0) return
     const currentGroup = selectedGroup
     if (currentGroup && !groups.some((g) => g.value === currentGroup)) {
@@ -280,19 +341,120 @@ export function ApiKeysMutateDrawer({
         form.setValue('cross_group_retry', false)
       }
     }
-  }, [groups, form, selectedGroup])
+  }, [groups, form, lockedResellerGroup, selectedGroup])
 
-  const onSubmit = async (data: ApiKeyFormValues) => {
+  const saveApiKey = async (
+    data: ApiKeyFormValues,
+    confirmedPaidIncrease?: { expectedTotalMillions: number }
+  ) => {
+    if (isResellerUpdate) {
+      const totalMillions = data.remain_quota_amount
+      if (
+        totalMillions === undefined ||
+        !Number.isInteger(totalMillions) ||
+        totalMillions < minimumResellerTotalMillions ||
+        totalMillions > MAX_RESELLER_TOTAL_QUOTA_MILLIONS
+      ) {
+        form.setError('remain_quota_amount', {
+          type: 'manual',
+          message: t(
+            'Total quota must be a whole number from {{min}} to {{max}} million tokens.',
+            {
+              min: minimumResellerTotalMillions,
+              max: MAX_RESELLER_TOTAL_QUOTA_MILLIONS,
+            }
+          ),
+        })
+        return
+      }
+
+      const baseCostPerMillion = loadedApiKey?.reseller_base_cost_per_million
+      const expectedTotalMillions =
+        confirmedPaidIncrease?.expectedTotalMillions ??
+        currentResellerTotalQuota
+      const deltaMillions = totalMillions - expectedTotalMillions
+      if (
+        !confirmedPaidIncrease &&
+        deltaMillions > 0 &&
+        typeof baseCostPerMillion === 'number' &&
+        Number.isFinite(baseCostPerMillion) &&
+        baseCostPerMillion > 0
+      ) {
+        setPendingPaidQuotaChange({
+          data,
+          expectedTotalMillions,
+          deltaMillions,
+          chargeUsd: deltaMillions * baseCostPerMillion,
+        })
+        return
+      }
+    }
+
+    let quotaUpdateAttempted = false
     setIsSubmitting(true)
     try {
       const basePayload = transformFormDataToPayload(data)
 
       if (isUpdate && currentRow) {
+        if (
+          isResellerUpdate &&
+          data.remain_quota_amount === currentResellerTotalQuota
+        ) {
+          pendingResellerQuotaRequest.current = null
+        }
         const result = await updateApiKey({
           ...basePayload,
           id: currentRow.id,
         })
         if (result.success) {
+          const totalMillions = data.remain_quota_amount ?? 0
+          if (isResellerUpdate && totalMillions !== currentResellerTotalQuota) {
+            const expectedTotalMillions =
+              confirmedPaidIncrease?.expectedTotalMillions ??
+              currentResellerTotalQuota
+            let quotaRequest = pendingResellerQuotaRequest.current
+            if (
+              quotaRequest?.expectedTotalMillions !== expectedTotalMillions ||
+              quotaRequest.targetTotalMillions !== totalMillions
+            ) {
+              quotaRequest = {
+                expectedTotalMillions,
+                targetTotalMillions: totalMillions,
+                requestId: crypto.randomUUID(),
+              }
+              pendingResellerQuotaRequest.current = quotaRequest
+            }
+            quotaUpdateAttempted = true
+            const quotaResult = await setResellerKeyTotalQuota(
+              currentRow.id,
+              quotaRequest.targetTotalMillions,
+              quotaRequest.expectedTotalMillions,
+              quotaRequest.requestId
+            )
+            if (!quotaResult.success) {
+              toast.error(
+                quotaResult.message || t('Failed to update reseller quota')
+              )
+              await refetchApiKey()
+              triggerRefresh()
+              return
+            }
+            if (
+              quotaRequest.targetTotalMillions >
+              quotaRequest.expectedTotalMillions
+            ) {
+              void getSelf()
+                .then((response) => {
+                  if (response.success && response.data) {
+                    setUser(response.data as AuthUser)
+                  }
+                })
+                .catch(() => {
+                  // The paid operation succeeded; a later refresh reconciles the header.
+                })
+            }
+            pendingResellerQuotaRequest.current = null
+          }
           toast.success(t(SUCCESS_MESSAGES.API_KEY_UPDATED))
           onOpenChange(false)
           triggerRefresh()
@@ -331,11 +493,17 @@ export function ApiKeysMutateDrawer({
         }
       }
     } catch {
+      if (quotaUpdateAttempted) {
+        await refetchApiKey()
+        triggerRefresh()
+      }
       toast.error(t(ERROR_MESSAGES.UNEXPECTED))
     } finally {
       setIsSubmitting(false)
     }
   }
+
+  const onSubmit = (data: ApiKeyFormValues) => saveApiKey(data)
 
   const onInvalid: SubmitErrorHandler<ApiKeyFormValues> = () => {
     toast.error(t('Please fix the highlighted fields before saving'))
@@ -362,13 +530,18 @@ export function ApiKeysMutateDrawer({
   const unlimitedQuota = form.watch('unlimited_quota')
   const quotaMode = form.watch('quota_mode')
   const tokenQuotaMode = quotaMode === 'tokens'
-  const rawQuotaIsImmutable =
-    isUpdate &&
-    (currentRow?.quota_mode === 'tokens' ||
-      apiKeyData?.data?.quota_mode === 'tokens')
-  const quotaLabel = t('Quota ({{currency}})', {
-    currency: tokenQuotaMode ? t('Million tokens') : currencyLabel,
-  })
+  const rawTokenUpdate = Boolean(
+    isUpdate && loadedApiKey?.quota_mode === 'tokens'
+  )
+  const rawQuotaIsImmutable = rawTokenUpdate && !isResellerUpdate
+  const tokenQuotaCurrencyLabel = tokenQuotaMode
+    ? t('Million tokens')
+    : currencyLabel
+  const quotaLabel = isResellerUpdate
+    ? t('Total quota (million tokens)')
+    : t('Quota ({{currency}})', {
+        currency: tokenQuotaCurrencyLabel,
+      })
   let quotaPlaceholder = t('Enter quota in {{currency}}', {
     currency: currencyLabel,
   })
@@ -387,422 +560,333 @@ export function ApiKeysMutateDrawer({
     quotaDescription = t('Enter the quota amount in tokens')
     quotaStep = 1
   }
+  if (isResellerUpdate) {
+    quotaPlaceholder = t('Enter the total quota in millions of tokens')
+    quotaDescription = t(
+      'This is the total purchased allocation. Increasing it charges your balance; decreasing it does not refund funds. It cannot be lower than the tokens already used.'
+    )
+    quotaStep = 1
+  }
+  const quotaMin = isResellerUpdate ? minimumResellerTotalMillions : 0
+  let quotaMax: number | undefined
+  if (isResellerUpdate) {
+    quotaMax = MAX_RESELLER_TOTAL_QUOTA_MILLIONS
+  } else if (tokenQuotaMode) {
+    quotaMax = MAX_TOKEN_QUOTA_MILLIONS
+  }
 
   return (
-    <Sheet
-      open={open}
-      onOpenChange={(v) => {
-        onOpenChange(v)
-        if (!v) {
-          form.reset()
-        }
-      }}
-    >
-      <SheetContent
-        className={sideDrawerContentClassName('max-w-none sm:!max-w-[620px]')}
+    <>
+      <Sheet
+        open={open}
+        onOpenChange={(v) => {
+          onOpenChange(v)
+          if (!v) {
+            setPendingPaidQuotaChange(null)
+            pendingResellerQuotaRequest.current = null
+            form.reset()
+          }
+        }}
       >
-        <SheetHeader className={sideDrawerHeaderClassName()}>
-          <SheetTitle>
-            {isUpdate ? t('Update API Key') : t('Create API Key')}
-          </SheetTitle>
-          <SheetDescription>
-            {isUpdate
-              ? t('Update the API key by providing necessary info.')
-              : t('Add a new API key by providing necessary info.')}
-          </SheetDescription>
-        </SheetHeader>
-        <Form {...form}>
-          <form
-            id='api-key-form'
-            onSubmit={form.handleSubmit(onSubmit, onInvalid)}
-            aria-busy={!isFormInitialized}
-            inert={!isFormInitialized || isSubmitting ? true : undefined}
-            className={sideDrawerFormClassName('gap-5')}
-          >
-            <SideDrawerSection>
-              <SideDrawerSectionHeader
-                title={t('Basic Information')}
-                description={t('Set API key basic information')}
-                icon={<KeyRound className='size-4' />}
-                iconTone='info'
-              />
-              <FormField
-                control={form.control}
-                name='name'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Name')}</FormLabel>
-                    <FormControl>
-                      <Input {...field} placeholder={t('Enter a name')} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='group'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Group')}</FormLabel>
-                    <FormControl>
-                      <ApiKeyGroupCombobox
-                        options={groups}
-                        value={field.value}
-                        onValueChange={(group) => {
-                          field.onChange(group)
-                          if (group === 'auto') {
-                            form.setValue('cross_group_retry', true, {
-                              shouldDirty: true,
-                            })
-                            return
-                          }
-                          form.setValue('cross_group_retry', false, {
-                            shouldDirty: true,
-                          })
-                        }}
-                        placeholder={t('Select a group')}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              {selectedGroup === 'auto' && (
+        <SheetContent
+          className={sideDrawerContentClassName('max-w-none sm:!max-w-[620px]')}
+        >
+          <SheetHeader className={sideDrawerHeaderClassName()}>
+            <SheetTitle>
+              {isUpdate ? t('Update API Key') : t('Create API Key')}
+            </SheetTitle>
+            <SheetDescription>
+              {isUpdate
+                ? t('Update the API key by providing necessary info.')
+                : t('Add a new API key by providing necessary info.')}
+            </SheetDescription>
+          </SheetHeader>
+          <Form {...form}>
+            <form
+              id='api-key-form'
+              onSubmit={form.handleSubmit(onSubmit, onInvalid)}
+              aria-busy={!isFormInitialized}
+              inert={!isFormInitialized || isSubmitting ? true : undefined}
+              className={sideDrawerFormClassName('gap-5')}
+            >
+              <SideDrawerSection>
+                <SideDrawerSectionHeader
+                  title={t('Basic Information')}
+                  description={t('Set API key basic information')}
+                  icon={<KeyRound className='size-4' />}
+                  iconTone='info'
+                />
                 <FormField
                   control={form.control}
-                  name='auto_groups'
+                  name='name'
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{t('Auto group order')}</FormLabel>
-                      <FormDescription>
-                        {t(
-                          'Choose and order the groups this API key will try.'
-                        )}
-                      </FormDescription>
+                      <FormLabel>{t('Name')}</FormLabel>
                       <FormControl>
-                        <AutoGroupOrderEditor
+                        <Input {...field} placeholder={t('Enter a name')} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='group'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Group')}</FormLabel>
+                      <FormControl>
+                        <ApiKeyGroupCombobox
+                          options={selectableGroups}
                           value={field.value}
-                          mode={autoGroupsMode}
-                          options={groups}
-                          globalOptions={globalAutoGroupOptions}
-                          maxCount={maxAutoGroups}
-                          onChange={(value) => {
-                            form.setValue('auto_groups_mode', value.mode, {
-                              shouldDirty: true,
-                              shouldValidate: false,
-                            })
-                            form.setValue(
-                              'auto_groups',
-                              value.groups.slice(0, maxAutoGroups),
-                              {
+                          disabled={Boolean(lockedResellerGroup)}
+                          onValueChange={(group) => {
+                            field.onChange(group)
+                            if (group === 'auto') {
+                              form.setValue('cross_group_retry', true, {
                                 shouldDirty: true,
-                                shouldValidate: true,
-                              }
-                            )
+                              })
+                              return
+                            }
+                            form.setValue('cross_group_retry', false, {
+                              shouldDirty: true,
+                            })
                           }}
+                          placeholder={t('Select a group')}
                         />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-              )}
 
-              {selectedGroup === 'auto' && (
-                <FormField
-                  control={form.control}
-                  name='cross_group_retry'
-                  render={({ field }) => (
-                    <FormItem className={sideDrawerSwitchItemClassName()}>
-                      <div className='flex flex-col gap-0.5'>
-                        <FormLabel className='text-sm'>
-                          {t('Cross-group retry')}
-                        </FormLabel>
-                        <FormDescription className='line-clamp-2 text-xs sm:line-clamp-none'>
-                          {t(
-                            'When enabled, if channels in the current group fail, it will try channels in the next group in order.'
-                          )}
-                        </FormDescription>
-                      </div>
-                      <FormControl>
-                        <Switch
-                          checked={!!field.value}
-                          onCheckedChange={field.onChange}
-                        />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
-              )}
-
-              <FormField
-                control={form.control}
-                name='expired_time'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Expiration Time')}</FormLabel>
-                    <div className='grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center'>
-                      <FormControl>
-                        <DateTimePicker
-                          value={field.value}
-                          onChange={field.onChange}
-                          placeholder={t('Never expires')}
-                          className='min-w-0 [&_input[type=time]]:w-24 sm:[&_input[type=time]]:w-32'
-                        />
-                      </FormControl>
-                      <div className='grid grid-cols-4 gap-2 sm:flex'>
-                        <Button
-                          type='button'
-                          variant='outline'
-                          size='sm'
-                          className='px-2 text-xs sm:px-3 sm:text-sm'
-                          onClick={() => handleSetExpiry(0, 0, 0)}
-                        >
-                          {t('Never')}
-                        </Button>
-                        <Button
-                          type='button'
-                          variant='outline'
-                          size='sm'
-                          className='px-2 text-xs sm:px-3 sm:text-sm'
-                          onClick={() => handleSetExpiry(1, 0, 0)}
-                        >
-                          {t('1 Month')}
-                        </Button>
-                        <Button
-                          type='button'
-                          variant='outline'
-                          size='sm'
-                          className='px-2 text-xs sm:px-3 sm:text-sm'
-                          onClick={() => handleSetExpiry(0, 1, 0)}
-                        >
-                          {t('1 Day')}
-                        </Button>
-                        <Button
-                          type='button'
-                          variant='outline'
-                          size='sm'
-                          className='px-2 text-xs sm:px-3 sm:text-sm'
-                          onClick={() => handleSetExpiry(0, 0, 1)}
-                        >
-                          {t('1 Hour')}
-                        </Button>
-                      </div>
-                    </div>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              {!isUpdate && (
-                <FormField
-                  control={form.control}
-                  name='tokenCount'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('Quantity')}</FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          type='number'
-                          min='1'
-                          placeholder={t('Number of keys to create')}
-                          onChange={(e) =>
-                            field.onChange(
-                              Number.parseInt(e.target.value, 10) || 1
-                            )
-                          }
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        {t(
-                          'Create multiple API keys at once (random suffix will be added to names)'
-                        )}
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              )}
-            </SideDrawerSection>
-
-            <SideDrawerSection>
-              <SideDrawerSectionHeader
-                title={t('Quota Settings')}
-                description={t('Set quota amount and limits')}
-                icon={<WalletCards className='size-4' />}
-                iconTone='success'
-              />
-              {!unlimitedQuota && (
-                <div className='grid gap-4 sm:grid-cols-2'>
+                {selectedGroup === 'auto' && (
                   <FormField
                     control={form.control}
-                    name='quota_mode'
+                    name='auto_groups'
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel id='quota-unit-label'>
-                          {t('Quota unit')}
-                        </FormLabel>
+                        <FormLabel>{t('Auto group order')}</FormLabel>
+                        <FormDescription>
+                          {t(
+                            'Choose and order the groups this API key will try.'
+                          )}
+                        </FormDescription>
                         <FormControl>
-                          <ToggleGroup
-                            value={[field.value]}
-                            onValueChange={(values) => {
-                              const nextMode = values.find(
-                                (value) => value !== field.value
-                              ) as ApiKeyQuotaMode | undefined
-                              if (!nextMode) return
-
-                              const amount =
-                                form.getValues('remain_quota_amount') || 0
-                              const quotaUnits =
-                                field.value === 'tokens'
-                                  ? quotaMillionsToUnits(amount)
-                                  : parseQuotaFromDollars(amount)
-                              const nextAmount =
-                                nextMode === 'tokens'
-                                  ? quotaUnitsToMillions(quotaUnits)
-                                  : quotaUnitsToDollars(quotaUnits)
-
-                              field.onChange(nextMode)
-                              form.setValue('remain_quota_amount', nextAmount, {
+                          <AutoGroupOrderEditor
+                            value={field.value}
+                            mode={autoGroupsMode}
+                            options={groups}
+                            globalOptions={globalAutoGroupOptions}
+                            maxCount={maxAutoGroups}
+                            onChange={(value) => {
+                              form.setValue('auto_groups_mode', value.mode, {
                                 shouldDirty: true,
-                                shouldValidate: true,
+                                shouldValidate: false,
                               })
+                              form.setValue(
+                                'auto_groups',
+                                value.groups.slice(0, maxAutoGroups),
+                                {
+                                  shouldDirty: true,
+                                  shouldValidate: true,
+                                }
+                              )
                             }}
-                            aria-labelledby='quota-unit-label'
-                            variant='outline'
-                            className='w-full'
-                          >
-                            <ToggleGroupItem
-                              value='money'
-                              className='flex-1'
-                              disabled={isUpdate}
-                            >
-                              {t('Billing currency')} ({currencyLabel})
-                            </ToggleGroupItem>
-                            <ToggleGroupItem
-                              value='tokens'
-                              className='flex-1'
-                              disabled={isUpdate}
-                            >
-                              {t('Million tokens')}
-                            </ToggleGroupItem>
-                          </ToggleGroup>
+                          />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
+                )}
 
+                {selectedGroup === 'auto' && (
                   <FormField
                     control={form.control}
-                    name='remain_quota_amount'
+                    name='cross_group_retry'
+                    render={({ field }) => (
+                      <FormItem className={sideDrawerSwitchItemClassName()}>
+                        <div className='flex flex-col gap-0.5'>
+                          <FormLabel className='text-sm'>
+                            {t('Cross-group retry')}
+                          </FormLabel>
+                          <FormDescription className='line-clamp-2 text-xs sm:line-clamp-none'>
+                            {t(
+                              'When enabled, if channels in the current group fail, it will try channels in the next group in order.'
+                            )}
+                          </FormDescription>
+                        </div>
+                        <FormControl>
+                          <Switch
+                            checked={!!field.value}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                )}
+
+                <FormField
+                  control={form.control}
+                  name='expired_time'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Expiration Time')}</FormLabel>
+                      <div className='grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center'>
+                        <FormControl>
+                          <DateTimePicker
+                            value={field.value}
+                            onChange={field.onChange}
+                            placeholder={t('Never expires')}
+                            className='min-w-0 [&_input[type=time]]:w-24 sm:[&_input[type=time]]:w-32'
+                          />
+                        </FormControl>
+                        <div className='grid grid-cols-4 gap-2 sm:flex'>
+                          <Button
+                            type='button'
+                            variant='outline'
+                            size='sm'
+                            className='px-2 text-xs sm:px-3 sm:text-sm'
+                            onClick={() => handleSetExpiry(0, 0, 0)}
+                          >
+                            {t('Never')}
+                          </Button>
+                          <Button
+                            type='button'
+                            variant='outline'
+                            size='sm'
+                            className='px-2 text-xs sm:px-3 sm:text-sm'
+                            onClick={() => handleSetExpiry(1, 0, 0)}
+                          >
+                            {t('1 Month')}
+                          </Button>
+                          <Button
+                            type='button'
+                            variant='outline'
+                            size='sm'
+                            className='px-2 text-xs sm:px-3 sm:text-sm'
+                            onClick={() => handleSetExpiry(0, 1, 0)}
+                          >
+                            {t('1 Day')}
+                          </Button>
+                          <Button
+                            type='button'
+                            variant='outline'
+                            size='sm'
+                            className='px-2 text-xs sm:px-3 sm:text-sm'
+                            onClick={() => handleSetExpiry(0, 0, 1)}
+                          >
+                            {t('1 Hour')}
+                          </Button>
+                        </div>
+                      </div>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                {!isUpdate && (
+                  <FormField
+                    control={form.control}
+                    name='tokenCount'
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>{quotaLabel}</FormLabel>
+                        <FormLabel>{t('Quantity')}</FormLabel>
                         <FormControl>
                           <Input
                             {...field}
                             type='number'
-                            min='0'
-                            step={quotaStep}
-                            max={
-                              tokenQuotaMode
-                                ? MAX_TOKEN_QUOTA_MILLIONS
-                                : undefined
-                            }
-                            disabled={rawQuotaIsImmutable}
-                            placeholder={quotaPlaceholder}
+                            min='1'
+                            placeholder={t('Number of keys to create')}
                             onChange={(e) =>
                               field.onChange(
-                                Number.parseFloat(e.target.value) || 0
+                                Number.parseInt(e.target.value, 10) || 1
                               )
                             }
                           />
                         </FormControl>
-                        <FormDescription>{quotaDescription}</FormDescription>
+                        <FormDescription>
+                          {t(
+                            'Create multiple API keys at once (random suffix will be added to names)'
+                          )}
+                        </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                </div>
-              )}
-
-              <FormField
-                control={form.control}
-                name='unlimited_quota'
-                render={({ field }) => (
-                  <FormItem className={sideDrawerSwitchItemClassName()}>
-                    <div className='flex flex-col gap-0.5'>
-                      <FormLabel className='text-sm'>
-                        {t('Unlimited Quota')}
-                      </FormLabel>
-                      <FormDescription className='text-xs'>
-                        {t('Enable unlimited quota for this API key')}
-                      </FormDescription>
-                    </div>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                        disabled={rawQuotaIsImmutable}
-                      />
-                    </FormControl>
-                  </FormItem>
                 )}
-              />
-            </SideDrawerSection>
+              </SideDrawerSection>
 
-            <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
               <SideDrawerSection>
-                <CollapsibleTrigger
-                  render={
-                    <button
-                      type='button'
-                      className='hover:bg-muted/40 flex w-full items-center gap-3 rounded-md py-1.5 text-left transition-colors'
-                    />
-                  }
-                >
-                  <SideDrawerSectionHeader
-                    className='flex-1'
-                    title={t('Advanced Settings')}
-                    description={t('Set API key access restrictions')}
-                    icon={<Settings2 className='size-4' />}
-                  />
-                  <ChevronDown
-                    className={cn(
-                      'text-muted-foreground size-4 shrink-0 transition-transform',
-                      advancedOpen && 'rotate-180'
-                    )}
-                  />
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className='flex flex-col gap-4 pt-2'>
+                <SideDrawerSectionHeader
+                  title={t('Quota Settings')}
+                  description={t('Set quota amount and limits')}
+                  icon={<WalletCards className='size-4' />}
+                  iconTone='success'
+                />
+                {!unlimitedQuota && (
+                  <div className='grid gap-4 sm:grid-cols-2'>
                     <FormField
                       control={form.control}
-                      name='model_limits'
+                      name='quota_mode'
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>{t('Model Limits')}</FormLabel>
+                          <FormLabel id='quota-unit-label'>
+                            {t('Quota unit')}
+                          </FormLabel>
                           <FormControl>
-                            <MultiSelect
-                              options={models.map((m) => ({
-                                label: m,
-                                value: m,
-                              }))}
-                              selected={field.value}
-                              onChange={field.onChange}
-                              placeholder={t(
-                                'Select models (empty for allow all)'
-                              )}
-                            />
+                            <ToggleGroup
+                              value={[field.value]}
+                              onValueChange={(values) => {
+                                const nextMode = values.find(
+                                  (value) => value !== field.value
+                                ) as ApiKeyQuotaMode | undefined
+                                if (!nextMode) return
+
+                                const amount =
+                                  form.getValues('remain_quota_amount') || 0
+                                const quotaUnits =
+                                  field.value === 'tokens'
+                                    ? quotaMillionsToUnits(amount)
+                                    : parseQuotaFromDollars(amount)
+                                const nextAmount =
+                                  nextMode === 'tokens'
+                                    ? quotaUnitsToMillions(quotaUnits)
+                                    : quotaUnitsToDollars(quotaUnits)
+
+                                field.onChange(nextMode)
+                                form.setValue(
+                                  'remain_quota_amount',
+                                  nextAmount,
+                                  {
+                                    shouldDirty: true,
+                                    shouldValidate: true,
+                                  }
+                                )
+                              }}
+                              aria-labelledby='quota-unit-label'
+                              variant='outline'
+                              className='w-full'
+                            >
+                              <ToggleGroupItem
+                                value='money'
+                                className='flex-1'
+                                disabled={isUpdate}
+                              >
+                                {t('Billing currency')} ({currencyLabel})
+                              </ToggleGroupItem>
+                              <ToggleGroupItem
+                                value='tokens'
+                                className='flex-1'
+                                disabled={isUpdate}
+                              >
+                                {t('Million tokens')}
+                              </ToggleGroupItem>
+                            </ToggleGroup>
                           </FormControl>
-                          <FormDescription>
-                            {t('Limit which models can be used with this key')}
-                          </FormDescription>
                           <FormMessage />
                         </FormItem>
                       )}
@@ -810,53 +894,203 @@ export function ApiKeysMutateDrawer({
 
                     <FormField
                       control={form.control}
-                      name='allow_ips'
+                      name='remain_quota_amount'
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>
-                            {t('IP Whitelist (supports CIDR)')}
-                          </FormLabel>
+                          <FormLabel>{quotaLabel}</FormLabel>
                           <FormControl>
-                            <Textarea
+                            <Input
                               {...field}
-                              className='min-h-20 resize-none'
-                              placeholder={t(
-                                'One IP per line (empty for no restriction)'
-                              )}
-                              rows={3}
+                              type='number'
+                              min={quotaMin}
+                              step={quotaStep}
+                              max={quotaMax}
+                              disabled={rawQuotaIsImmutable}
+                              placeholder={quotaPlaceholder}
+                              onChange={(e) =>
+                                field.onChange(
+                                  Number.parseFloat(e.target.value) || 0
+                                )
+                              }
                             />
                           </FormControl>
-                          <FormDescription>
-                            {t(
-                              'Do not over-trust this feature. IP may be spoofed. Please use with nginx, CDN and other gateways.'
-                            )}
-                          </FormDescription>
+                          <FormDescription>{quotaDescription}</FormDescription>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
                   </div>
-                </CollapsibleContent>
+                )}
+
+                <FormField
+                  control={form.control}
+                  name='unlimited_quota'
+                  render={({ field }) => (
+                    <FormItem className={sideDrawerSwitchItemClassName()}>
+                      <div className='flex flex-col gap-0.5'>
+                        <FormLabel className='text-sm'>
+                          {t('Unlimited Quota')}
+                        </FormLabel>
+                        <FormDescription className='text-xs'>
+                          {t('Enable unlimited quota for this API key')}
+                        </FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                          disabled={rawTokenUpdate}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
               </SideDrawerSection>
-            </Collapsible>
-          </form>
-        </Form>
-        <SheetFooter className={sideDrawerFooterClassName()}>
-          <SheetClose
-            render={<Button variant='outline' className='w-full sm:w-auto' />}
-          >
-            {t('Close')}
-          </SheetClose>
-          <Button
-            type='button'
-            onClick={form.handleSubmit(onSubmit, onInvalid)}
-            disabled={!isFormInitialized || isSubmitting}
-            className='w-full sm:w-auto'
-          >
-            {isSubmitting ? t('Saving...') : t('Save changes')}
-          </Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
+
+              <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+                <SideDrawerSection>
+                  <CollapsibleTrigger
+                    render={
+                      <button
+                        type='button'
+                        className='hover:bg-muted/40 flex w-full items-center gap-3 rounded-md py-1.5 text-left transition-colors'
+                      />
+                    }
+                  >
+                    <SideDrawerSectionHeader
+                      className='flex-1'
+                      title={t('Advanced Settings')}
+                      description={t('Set API key access restrictions')}
+                      icon={<Settings2 className='size-4' />}
+                    />
+                    <ChevronDown
+                      className={cn(
+                        'text-muted-foreground size-4 shrink-0 transition-transform',
+                        advancedOpen && 'rotate-180'
+                      )}
+                    />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className='flex flex-col gap-4 pt-2'>
+                      <FormField
+                        control={form.control}
+                        name='model_limits'
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>{t('Model Limits')}</FormLabel>
+                            <FormControl>
+                              <MultiSelect
+                                options={models.map((m) => ({
+                                  label: m,
+                                  value: m,
+                                }))}
+                                selected={field.value}
+                                onChange={field.onChange}
+                                placeholder={t(
+                                  'Select models (empty for allow all)'
+                                )}
+                              />
+                            </FormControl>
+                            <FormDescription>
+                              {t(
+                                'Limit which models can be used with this key'
+                              )}
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name='allow_ips'
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>
+                              {t('IP Whitelist (supports CIDR)')}
+                            </FormLabel>
+                            <FormControl>
+                              <Textarea
+                                {...field}
+                                className='min-h-20 resize-none'
+                                placeholder={t(
+                                  'One IP per line (empty for no restriction)'
+                                )}
+                                rows={3}
+                              />
+                            </FormControl>
+                            <FormDescription>
+                              {t(
+                                'Do not over-trust this feature. IP may be spoofed. Please use with nginx, CDN and other gateways.'
+                              )}
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  </CollapsibleContent>
+                </SideDrawerSection>
+              </Collapsible>
+            </form>
+          </Form>
+          <SheetFooter className={sideDrawerFooterClassName()}>
+            <SheetClose
+              render={<Button variant='outline' className='w-full sm:w-auto' />}
+            >
+              {t('Close')}
+            </SheetClose>
+            <Button
+              type='button'
+              onClick={form.handleSubmit(onSubmit, onInvalid)}
+              disabled={!isFormInitialized || isSubmitting}
+              className='w-full sm:w-auto'
+            >
+              {isSubmitting ? t('Saving...') : t('Save changes')}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
+      <ConfirmDialog
+        open={pendingPaidQuotaChange !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen && !isSubmitting) setPendingPaidQuotaChange(null)
+        }}
+        title={t('Confirm paid quota increase')}
+        desc={
+          <div className='space-y-3'>
+            <p>
+              {t('This amount will be deducted from your balance immediately.')}
+            </p>
+            <div className='grid grid-cols-2 gap-3'>
+              <div>
+                <p className='text-muted-foreground'>{t('Quota to add')}</p>
+                <p className='text-foreground mt-1 font-semibold tabular-nums'>
+                  {pendingPaidQuotaChange?.deltaMillions ?? 0}M
+                </p>
+              </div>
+              <div>
+                <p className='text-muted-foreground'>{t('Amount to charge')}</p>
+                <p className='text-foreground mt-1 font-semibold tabular-nums'>
+                  {resellerChargeFormatter.format(
+                    pendingPaidQuotaChange?.chargeUsd ?? 0
+                  )}
+                </p>
+              </div>
+            </div>
+          </div>
+        }
+        confirmText={t('Confirm purchase')}
+        isLoading={isSubmitting}
+        handleConfirm={() => {
+          const pendingChange = pendingPaidQuotaChange
+          if (!pendingChange) return
+          setPendingPaidQuotaChange(null)
+          void saveApiKey(pendingChange.data, {
+            expectedTotalMillions: pendingChange.expectedTotalMillions,
+          })
+        }}
+      />
+    </>
   )
 }

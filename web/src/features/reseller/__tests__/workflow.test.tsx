@@ -25,6 +25,7 @@ import { Reseller } from '..'
 import type { ResellerKey } from '../types'
 
 const resellerApi = vi.hoisted(() => ({
+  adjustResellerKeyQuota: vi.fn(),
   createResellerKey: vi.fn(),
   deleteResellerKey: vi.fn(),
   getResellerConfig: vi.fn(),
@@ -66,6 +67,7 @@ const existingKey: ResellerKey = {
   status: 1,
   cost: 0.8,
   client_price: 1.44,
+  base_cost_per_million: 0.08,
 }
 
 const createdKey: ResellerKey = {
@@ -84,6 +86,7 @@ const createdKey: ResellerKey = {
   status: 1,
   cost: 2,
   client_price: 3.6,
+  base_cost_per_million: 0.08,
 }
 
 const activeSubscription = {
@@ -117,6 +120,7 @@ function renderReseller() {
 
 describe('reseller workflow', () => {
   beforeEach(() => {
+    resellerApi.adjustResellerKeyQuota.mockReset()
     resellerApi.createResellerKey.mockReset()
     resellerApi.deleteResellerKey.mockReset()
     resellerApi.getResellerConfig.mockReset()
@@ -142,6 +146,25 @@ describe('reseller workflow', () => {
       ...existingKey,
       key: 'sk-reissued-full-key',
     })
+    resellerApi.adjustResellerKeyQuota.mockImplementation(
+      async (
+        _id: number,
+        request: { mode: string; token_millions: number }
+      ) => {
+        const usedMillions = existingKey.used_tokens / 1_000_000
+        let totalMillions = existingKey.token_millions
+        if (request.mode === 'add') totalMillions += request.token_millions
+        if (request.mode === 'subtract') {
+          totalMillions -= request.token_millions
+        }
+        if (request.mode === 'set') totalMillions = request.token_millions
+        return {
+          ...existingKey,
+          token_millions: totalMillions,
+          remaining_tokens: (totalMillions - usedMillions) * 1_000_000,
+        }
+      }
+    )
     appApi.getSelf.mockResolvedValue({
       success: true,
       data: { id: 1, username: 'reseller', role: 1, quota: 1_000_000 },
@@ -168,6 +191,154 @@ describe('reseller workflow', () => {
     expect(fiftyMillionPackage).toBeChecked()
     expect(screen.getByLabelText('Custom amount')).toHaveValue(50)
     expect(screen.getAllByText('$4.00').length).toBeGreaterThan(0)
+  })
+
+  test('sets the total quota of an issued reseller key', async () => {
+    const user = userEvent.setup()
+    renderReseller()
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Adjust quota' })
+    )
+    const quotaDialog = screen.getByRole('dialog')
+    expect(
+      within(quotaDialog).getByRole('heading', {
+        name: 'Adjust quota for "Existing Studio"',
+      })
+    ).toBeVisible()
+    expect(within(quotaDialog).getByText('9M')).toBeVisible()
+    expect(within(quotaDialog).getByText('10M')).toBeVisible()
+
+    await user.click(screen.getByRole('button', { name: 'Set total quota' }))
+    await user.type(screen.getByLabelText('Million tokens'), '5')
+    await user.click(screen.getByRole('button', { name: 'Update quota' }))
+
+    await waitFor(() => {
+      expect(resellerApi.adjustResellerKeyQuota).toHaveBeenCalledWith(
+        existingKey.id,
+        {
+          mode: 'set',
+          token_millions: 5,
+          expected_total_millions: 10,
+          request_id: expect.any(String),
+        }
+      )
+    })
+    expect(await screen.findByText('4M / 5M')).toBeVisible()
+  })
+
+  test('adds paid quota to an issued reseller key', async () => {
+    const user = userEvent.setup()
+    renderReseller()
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Adjust quota' })
+    )
+    expect(
+      screen.getByText(
+        'Adding quota charges your balance. Reducing quota does not refund funds.'
+      )
+    ).toBeVisible()
+    await user.type(screen.getByLabelText('Million tokens'), '2')
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+
+    const paymentConfirmation = screen.getByRole('alert')
+    expect(
+      within(paymentConfirmation).getByText('Confirm paid quota increase')
+    ).toBeVisible()
+    expect(within(paymentConfirmation).getByText('2M')).toBeVisible()
+    expect(within(paymentConfirmation).getByText('$0.16')).toBeVisible()
+    expect(resellerApi.adjustResellerKeyQuota).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Confirm purchase' }))
+
+    await waitFor(() => {
+      expect(resellerApi.adjustResellerKeyQuota).toHaveBeenCalledWith(
+        existingKey.id,
+        {
+          mode: 'add',
+          token_millions: 2,
+          expected_total_millions: 10,
+          request_id: expect.any(String),
+        }
+      )
+    })
+    expect(await screen.findByText('11M / 12M')).toBeVisible()
+    await waitFor(() => expect(appApi.getSelf).toHaveBeenCalledOnce())
+  })
+
+  test('reconciles an ambiguous error and reuses the exact paid request', async () => {
+    const user = userEvent.setup()
+    resellerApi.adjustResellerKeyQuota
+      .mockRejectedValueOnce(new Error('Connection lost'))
+      .mockResolvedValueOnce({
+        ...existingKey,
+        token_millions: 12,
+        remaining_tokens: 11_000_000,
+      })
+    renderReseller()
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Adjust quota' })
+    )
+    await user.type(screen.getByLabelText('Million tokens'), '2')
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm purchase' }))
+
+    await waitFor(() => {
+      expect(resellerApi.adjustResellerKeyQuota).toHaveBeenCalledTimes(1)
+      expect(resellerApi.getResellerKeys.mock.calls.length).toBeGreaterThan(1)
+    })
+    const firstRequest = resellerApi.adjustResellerKeyQuota.mock.calls[0][1]
+
+    await user.click(screen.getByRole('button', { name: 'Confirm purchase' }))
+
+    await waitFor(() => {
+      expect(resellerApi.adjustResellerKeyQuota).toHaveBeenCalledTimes(2)
+    })
+    expect(resellerApi.adjustResellerKeyQuota.mock.calls[1][1]).toEqual(
+      firstRequest
+    )
+  })
+
+  test('subtracts only unused quota from an issued reseller key', async () => {
+    const user = userEvent.setup()
+    renderReseller()
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Adjust quota' })
+    )
+    await user.click(screen.getByRole('button', { name: 'Subtract quota' }))
+    await user.type(screen.getByLabelText('Million tokens'), '2')
+    await user.click(screen.getByRole('button', { name: 'Update quota' }))
+
+    await waitFor(() => {
+      expect(resellerApi.adjustResellerKeyQuota).toHaveBeenCalledWith(
+        existingKey.id,
+        {
+          mode: 'subtract',
+          token_millions: 2,
+          expected_total_millions: 10,
+          request_id: expect.any(String),
+        }
+      )
+    })
+    expect(await screen.findByText('7M / 8M')).toBeVisible()
+  })
+
+  test('prevents quota adjustments beyond the purchased package', async () => {
+    const user = userEvent.setup()
+    renderReseller()
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Adjust quota' })
+    )
+    const amountInput = screen.getByLabelText('Million tokens')
+    await user.type(amountInput, '991')
+
+    expect(amountInput).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('button', { name: 'Update quota' })).toBeDisabled()
+    expect(resellerApi.adjustResellerKeyQuota).not.toHaveBeenCalled()
   })
 
   test('issues a persistent key with the configured address and server price', async () => {

@@ -77,6 +77,7 @@ export type ResellerKey = {
   status: number
   cost: number
   client_price: number
+  base_cost_per_million: number
 }
 
 export type CreateResellerKeyRequest = {
@@ -89,6 +90,15 @@ export type CreateResellerKeyRequest = {
 }
 
 export type PurchaseResellerSubscriptionRequest = {
+  request_id: string
+}
+
+export type ResellerQuotaAdjustmentMode = 'add' | 'subtract' | 'set'
+
+export type ResellerQuotaAdjustmentRequest = {
+  mode: ResellerQuotaAdjustmentMode
+  token_millions: number
+  expected_total_millions: number
   request_id: string
 }
 

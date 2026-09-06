@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import axios from 'axios'
+
 import { api } from '@/lib/api'
 
 import { normalizeResellerEndpoint } from './lib/pricing'
@@ -25,12 +27,34 @@ import type {
   ResellerApiResponse,
   ResellerConfig,
   ResellerKey,
+  ResellerQuotaAdjustmentRequest,
   ResellerSubscription,
 } from './types'
 
 const REQUEST_CONFIG = {
   skipBusinessError: true,
   skipErrorHandler: true,
+}
+
+function getResellerServerErrorMessage(error: unknown): string | null {
+  if (!axios.isAxiosError(error)) return null
+  const payload: unknown = error.response?.data
+  if (!payload || typeof payload !== 'object') return null
+
+  const record = payload as Record<string, unknown>
+  if (typeof record.message === 'string' && record.message.trim()) {
+    return record.message.trim()
+  }
+  if (typeof record.error === 'string' && record.error.trim()) {
+    return record.error.trim()
+  }
+  if (record.error && typeof record.error === 'object') {
+    const nestedMessage = (record.error as Record<string, unknown>).message
+    if (typeof nestedMessage === 'string' && nestedMessage.trim()) {
+      return nestedMessage.trim()
+    }
+  }
+  return null
 }
 
 export async function getResellerConfig(): Promise<ResellerConfig> {
@@ -136,6 +160,31 @@ export async function reissueResellerKey(id: number): Promise<ResellerKey> {
   }
 
   return response.data.data
+}
+
+export async function adjustResellerKeyQuota(
+  id: number,
+  request: ResellerQuotaAdjustmentRequest
+): Promise<ResellerKey> {
+  try {
+    const response = await api.post<ResellerApiResponse<ResellerKey>>(
+      `/api/reseller/keys/${id}/quota`,
+      request,
+      REQUEST_CONFIG
+    )
+
+    if (!response.data.success || !response.data.data) {
+      throw new Error(
+        response.data.message || 'Failed to adjust reseller quota'
+      )
+    }
+
+    return response.data.data
+  } catch (error) {
+    const serverMessage = getResellerServerErrorMessage(error)
+    if (serverMessage) throw new Error(serverMessage)
+    throw error
+  }
 }
 
 export async function purchaseResellerSubscription(

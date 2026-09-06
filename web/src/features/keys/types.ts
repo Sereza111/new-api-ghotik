@@ -34,6 +34,8 @@ export const apiKeySchema = z.object({
       value === undefined || value === null || value === '' ? 'money' : value,
     z.enum(['money', 'tokens'])
   ),
+  is_reseller: z.boolean().optional().default(false),
+  reseller_base_cost_per_million: z.number().positive().optional(),
   unlimited_quota: z.boolean(),
   expired_time: z.number(), // -1 for never expires
   created_time: z.number(),

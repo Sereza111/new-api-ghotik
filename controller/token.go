@@ -70,7 +70,9 @@ func (input *tokenRequest) UnmarshalJSON(data []byte) error {
 
 type tokenResponse struct {
 	*model.Token
-	AutoGroups []string `json:"auto_groups"`
+	AutoGroups                 []string `json:"auto_groups"`
+	IsReseller                 bool     `json:"is_reseller"`
+	ResellerBaseCostPerMillion *float64 `json:"reseller_base_cost_per_million,omitempty"`
 }
 
 func maxTokenQuota() int {
@@ -98,7 +100,11 @@ func buildMaskedTokenResponse(token *model.Token) *tokenResponse {
 	if len(autoGroups) == 0 {
 		autoGroups = nil
 	}
-	return &tokenResponse{Token: &maskedToken, AutoGroups: autoGroups}
+	return &tokenResponse{
+		Token:      &maskedToken,
+		AutoGroups: autoGroups,
+		IsReseller: model.IsResellerTokenKey(token.Key),
+	}
 }
 
 func buildMaskedTokenResponses(tokens []*model.Token) []*tokenResponse {
@@ -202,7 +208,22 @@ func GetToken(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, buildMaskedTokenResponse(token))
+	response := buildMaskedTokenResponse(token)
+	if response.IsReseller {
+		record, lookupErr := model.GetUserResellerKeyByTokenID(userId, id)
+		if lookupErr != nil {
+			common.ApiError(c, lookupErr)
+			return
+		}
+		baseCost, parseErr := decimal.NewFromString(record.Metadata.BaseCostPerMillion)
+		if parseErr != nil || !baseCost.IsPositive() {
+			common.ApiError(c, fmt.Errorf("invalid reseller base cost for token %d", id))
+			return
+		}
+		baseCostPerMillion, _ := baseCost.Float64()
+		response.ResellerBaseCostPerMillion = &baseCostPerMillion
+	}
+	common.ApiSuccess(c, response)
 }
 
 func GetTokenAutoGroups(c *gin.Context) {

@@ -24,13 +24,14 @@ import {
   RotateCw,
   Server,
   ShieldCheck,
+  SlidersHorizontal,
   Trash2,
 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { CopyButton } from '@/components/copy-button'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { CopyButton } from '@/components/copy-button'
 import { GroupBadge } from '@/components/group-badge'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -60,7 +61,12 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
-import type { ResellerKey, ResellerTerm } from '../types'
+import type {
+  ResellerKey,
+  ResellerQuotaAdjustmentRequest,
+  ResellerTerm,
+} from '../types'
+import { ResellerQuotaDialog } from './reseller-quota-dialog'
 
 type ResellerKeyVaultProps = {
   keys: ResellerKey[]
@@ -69,6 +75,7 @@ type ResellerKeyVaultProps = {
   revealingKeyId: number | null
   deletingKeyId: number | null
   reissuingKeyId: number | null
+  adjustingKeyId: number | null
   isLoading: boolean
   isFetching: boolean
   isError: boolean
@@ -77,6 +84,10 @@ type ResellerKeyVaultProps = {
   onReveal: (id: number) => void
   onDelete: (id: number) => Promise<boolean>
   onReissue: (id: number) => Promise<boolean>
+  onAdjustQuota: (
+    id: number,
+    request: ResellerQuotaAdjustmentRequest
+  ) => Promise<boolean>
 }
 
 type PendingKeyAction = {
@@ -117,15 +128,19 @@ export function ResellerKeyVault(props: ResellerKeyVaultProps) {
   const [pendingAction, setPendingAction] = useState<PendingKeyAction | null>(
     null
   )
+  const [quotaKeyId, setQuotaKeyId] = useState<number | null>(null)
+  const quotaKey = props.keys.find((item) => item.id === quotaKeyId) ?? null
   const isDeleteAction = pendingAction?.type === 'delete'
   const isActionLoading = Boolean(
     pendingAction &&
-      (isDeleteAction
-        ? props.deletingKeyId === pendingAction.key.id
-        : props.reissuingKeyId === pendingAction.key.id)
+    (isDeleteAction
+      ? props.deletingKeyId === pendingAction.key.id
+      : props.reissuingKeyId === pendingAction.key.id)
   )
   const keyActionIsPending =
-    props.deletingKeyId !== null || props.reissuingKeyId !== null
+    props.deletingKeyId !== null ||
+    props.reissuingKeyId !== null ||
+    props.adjustingKeyId !== null
   const actionKeyName = pendingAction?.key.client_label ?? ''
   const actionTitle = isDeleteAction
     ? t('Delete reseller key "{{name}}"?', { name: actionKeyName })
@@ -137,9 +152,7 @@ export function ResellerKeyVault(props: ResellerKeyVaultProps) {
     : t(
         'The current secret will stop working immediately. Quota, group, and expiration will remain unchanged.'
       )
-  let actionConfirmText = isDeleteAction
-    ? t('Delete key')
-    : t('Reissue key')
+  let actionConfirmText = isDeleteAction ? t('Delete key') : t('Reissue key')
   if (isActionLoading) {
     actionConfirmText = isDeleteAction
       ? t('Deleting key...')
@@ -322,6 +335,30 @@ export function ResellerKeyVault(props: ResellerKeyVaultProps) {
                             type='button'
                             variant='ghost'
                             size='icon-sm'
+                            disabled={
+                              keyActionIsPending ||
+                              props.revealingKeyId !== null
+                            }
+                            aria-label={t('Adjust quota')}
+                            onClick={() => setQuotaKeyId(item.id)}
+                          />
+                        }
+                      >
+                        {props.adjustingKeyId === item.id ? (
+                          <Spinner aria-hidden='true' />
+                        ) : (
+                          <SlidersHorizontal aria-hidden='true' />
+                        )}
+                      </TooltipTrigger>
+                      <TooltipContent>{t('Adjust quota')}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            type='button'
+                            variant='ghost'
+                            size='icon-sm'
                             className='text-destructive hover:text-destructive'
                             disabled={
                               keyActionIsPending ||
@@ -443,6 +480,22 @@ export function ResellerKeyVault(props: ResellerKeyVaultProps) {
         desc={actionDescription}
         confirmText={actionConfirmText}
       />
+
+      {quotaKey ? (
+        <ResellerQuotaDialog
+          open
+          keyName={quotaKey.client_label}
+          remainingTokens={quotaKey.remaining_tokens}
+          totalTokens={quotaKey.token_millions * 1_000_000}
+          baseCostPerMillion={quotaKey.base_cost_per_million}
+          formatMoney={props.formatMoney}
+          isSubmitting={props.adjustingKeyId === quotaKey.id}
+          onOpenChange={(open) => {
+            if (!open && props.adjustingKeyId === null) setQuotaKeyId(null)
+          }}
+          onAdjust={(request) => props.onAdjustQuota(quotaKey.id, request)}
+        />
+      ) : null}
     </>
   )
 }
