@@ -244,6 +244,11 @@ func ApplyRoutingSourcePreference(c *gin.Context, modelName, explicitGroup strin
 	if c == nil || strings.TrimSpace(explicitGroup) != "" {
 		return false
 	}
+	// A reseller key is sold against one concrete routing group. Account-level
+	// preferences must never widen or replace that purchased route.
+	if model.IsResellerTokenKey(common.GetContextKeyString(c, constant.ContextKeyTokenKey)) {
+		return false
+	}
 	if _, pinned, _ := GetChannelConstraints(c).ResolvedPin(); pinned {
 		return false
 	}

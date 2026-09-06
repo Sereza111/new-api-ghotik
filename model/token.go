@@ -410,26 +410,58 @@ func (token *Token) Update() (err error) {
 // UpdateResellerMetadata only updates fields that do not alter a prepaid
 // reseller key's purchased allocation or expiry.
 func (token *Token) UpdateResellerMetadata() error {
+	return token.UpdateResellerMetadataWithLegacyGroup("")
+}
+
+// UpdateResellerMetadataWithLegacyGroup updates mutable reseller metadata and
+// optionally assigns a concrete group to a legacy key that predates mandatory
+// reseller routing groups. A non-empty persisted group remains immutable.
+func (token *Token) UpdateResellerMetadataWithLegacyGroup(legacyGroup string) error {
 	if !IsResellerTokenKey(token.Key) {
 		return errors.New("token is not a reseller key")
+	}
+	legacyGroup = strings.TrimSpace(legacyGroup)
+	if legacyGroup == "auto" {
+		return errors.New("reseller token requires a concrete group")
 	}
 	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
 		// Redis is an acceleration layer; an outage must not prevent the
 		// owner from disabling or otherwise updating a reseller key in SQL.
 		common.SysLog("failed to invalidate reseller token cache before metadata update: " + cacheErr.Error())
 	}
-	err := DB.Model(&Token{}).Where("id = ? AND user_id = ?", token.Id, token.UserId).Updates(map[string]interface{}{
-		"name":                 token.Name,
-		"status":               token.Status,
-		"model_limits_enabled": token.ModelLimitsEnabled,
-		"model_limits":         token.ModelLimits,
-		"allow_ips":            token.AllowIps,
-		"group":                token.Group,
-		"cross_group_retry":    token.CrossGroupRetry,
-		"auto_groups":          token.AutoGroups,
-	}).Error
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var persisted Token
+		if err := lockForUpdate(tx).Where("id = ? AND user_id = ?", token.Id, token.UserId).First(&persisted).Error; err != nil {
+			return err
+		}
+		if !IsResellerTokenKey(persisted.Key) {
+			return errors.New("token is not a reseller key")
+		}
+		if legacyGroup != "" && persisted.Group != "" && persisted.Group != legacyGroup {
+			return errors.New("reseller token group is immutable")
+		}
+
+		updates := map[string]interface{}{
+			"name":                 token.Name,
+			"status":               token.Status,
+			"model_limits_enabled": token.ModelLimitsEnabled,
+			"model_limits":         token.ModelLimits,
+			"allow_ips":            token.AllowIps,
+		}
+		if legacyGroup != "" && persisted.Group == "" {
+			updates["group"] = legacyGroup
+			updates["cross_group_retry"] = false
+			updates["auto_groups"] = ""
+		}
+		return tx.Model(&Token{}).Where("id = ? AND user_id = ?", token.Id, token.UserId).Updates(updates).Error
+	})
 	if err != nil {
 		return err
+	}
+	if legacyGroup != "" {
+		token.Group = legacyGroup
+		token.CrossGroupRetry = false
+		_ = token.SetAutoGroups(nil)
 	}
 	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
 		common.SysLog("failed to refresh reseller token cache fence after metadata update: " + cacheErr.Error())
@@ -447,7 +479,7 @@ func (token *Token) SelectUpdate() (err error) {
 
 func (token *Token) Delete() (err error) {
 	if IsResellerTokenKey(token.Key) {
-		return ErrResellerTokenDeletionNotAllowed
+		return DeleteResellerToken(token.Id, token.UserId)
 	}
 	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
 		common.SysLog("failed to invalidate token cache before delete: " + cacheErr.Error())
@@ -496,7 +528,7 @@ func DeleteTokenById(id int, userId int) (err error) {
 		return err
 	}
 	if IsResellerTokenKey(token.Key) {
-		return ErrResellerTokenDeletionNotAllowed
+		return DeleteResellerToken(token.Id, userId)
 	}
 	return token.Delete()
 }
@@ -593,10 +625,16 @@ func BatchDeleteTokens(ids []int, userId int) (int, error) {
 		tx.Rollback()
 		return 0, err
 	}
+	resellerTokenIds := make([]int, 0)
 	for _, token := range tokens {
 		if IsResellerTokenKey(token.Key) {
+			resellerTokenIds = append(resellerTokenIds, token.Id)
+		}
+	}
+	if len(resellerTokenIds) > 0 {
+		if err := tx.Where("user_id = ? AND token_id IN (?)", userId, resellerTokenIds).Delete(&ResellerKey{}).Error; err != nil {
 			tx.Rollback()
-			return 0, ErrResellerTokenDeletionNotAllowed
+			return 0, err
 		}
 	}
 	if err := invalidateTokensCache(tokens); err != nil {

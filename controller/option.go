@@ -146,6 +146,16 @@ func UpdateOption(c *gin.Context) {
 		option.Value = fmt.Sprintf("%v", option.Value)
 	}
 	switch option.Key {
+	case operation_setting.ResellerBaseCostPerMillionOption,
+		operation_setting.ResellerEndpointOption,
+		operation_setting.ResellerSubscriptionPriceOption,
+		operation_setting.ResellerSubscriptionDiscountOption,
+		operation_setting.ResellerSubscriptionDurationDaysOption:
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "reseller commercial settings must be updated together through /api/option/reseller",
+		})
+		return
 	case "QuotaForInviter", "QuotaForInvitee":
 		if isPositiveOptionValue(option.Value.(string)) && !operation_setting.IsPaymentComplianceConfirmed() {
 			common.ApiErrorI18n(c, i18n.MsgPaymentComplianceRequired)

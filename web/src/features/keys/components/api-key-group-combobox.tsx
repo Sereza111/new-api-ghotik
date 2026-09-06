@@ -56,6 +56,10 @@ type ApiKeyGroupComboboxProps = {
   onValueChange: (value: string) => void
   placeholder?: string
   disabled?: boolean
+  id?: string
+  ariaLabel?: string
+  ariaDescribedBy?: string
+  ariaInvalid?: boolean
 }
 
 export function ApiKeyGroupCombobox({
@@ -64,6 +68,10 @@ export function ApiKeyGroupCombobox({
   onValueChange,
   placeholder,
   disabled,
+  id,
+  ariaLabel,
+  ariaDescribedBy,
+  ariaInvalid,
 }: ApiKeyGroupComboboxProps) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -101,6 +109,10 @@ export function ApiKeyGroupCombobox({
             type='button'
             variant='outline'
             role='combobox'
+            id={id}
+            aria-label={ariaLabel}
+            aria-describedby={ariaDescribedBy}
+            aria-invalid={ariaInvalid}
             aria-expanded={open}
             data-auto-group-effect={isAutoSelected ? 'trigger' : undefined}
             disabled={disabled}

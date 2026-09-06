@@ -25,6 +25,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -122,6 +123,103 @@ func GetAllUserResellerKeys(userId int) ([]ResellerKeyWithToken, error) {
 	return result, nil
 }
 
+func GetResellerKeyByRequestID(userId int, requestID string) (*ResellerKeyWithToken, error) {
+	return getResellerKeyByRequestID(DB, userId, requestID)
+}
+
+// DeleteResellerToken permanently removes a reseller key and its commercial
+// metadata. Purchased quota is intentionally not refunded.
+func DeleteResellerToken(id int, userId int) error {
+	if id <= 0 || userId <= 0 {
+		return errors.New("invalid reseller token owner")
+	}
+	var token Token
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).Where("id = ? AND user_id = ?", id, userId).First(&token).Error; err != nil {
+			return err
+		}
+		if !IsResellerTokenKey(token.Key) {
+			return errors.New("token is not a reseller key")
+		}
+		if err := tx.Where("token_id = ? AND user_id = ?", id, userId).Delete(&ResellerKey{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&token).Error
+	})
+	if err != nil {
+		return err
+	}
+	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
+		common.SysLog("failed to invalidate reseller token cache after deletion: " + cacheErr.Error())
+	}
+	return nil
+}
+
+// ReissueResellerToken rotates only the secret. The purchased quota, routing
+// group, expiration, status, and commercial snapshot stay unchanged.
+func ReissueResellerToken(id int, userId int) (*ResellerKeyWithToken, error) {
+	if id <= 0 || userId <= 0 {
+		return nil, errors.New("invalid reseller token owner")
+	}
+	newKey, err := NewResellerTokenKey()
+	if err != nil {
+		return nil, err
+	}
+	var result ResellerKeyWithToken
+	oldKey := ""
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).Where("id = ? AND user_id = ?", id, userId).First(&result.Token).Error; err != nil {
+			return err
+		}
+		if !IsResellerTokenKey(result.Token.Key) {
+			return errors.New("token is not a reseller key")
+		}
+		oldKey = result.Token.Key
+		if cacheErr := invalidateTokenCacheForMutation(oldKey); cacheErr != nil {
+			common.SysLog("failed to fence reseller token cache before reissue: " + cacheErr.Error())
+		}
+		if err := tx.Where("token_id = ? AND user_id = ?", id, userId).First(&result.Metadata).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&Token{}).Where("id = ? AND user_id = ?", id, userId).
+			Update("key", newKey).Error; err != nil {
+			return err
+		}
+		result.Token.Key = newKey
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if cacheErr := invalidateTokenCacheForMutation(oldKey); cacheErr != nil {
+		common.SysLog("failed to invalidate previous reseller token cache after reissue: " + cacheErr.Error())
+	}
+	if cacheErr := invalidateTokenCacheForMutation(result.Token.Key); cacheErr != nil {
+		common.SysLog("failed to invalidate reissued reseller token cache: " + cacheErr.Error())
+	}
+	return &result, nil
+}
+
+func getResellerKeyByRequestID(db *gorm.DB, userId int, requestID string) (*ResellerKeyWithToken, error) {
+	var metadata ResellerKey
+	err := db.Where("user_id = ? AND request_id = ?", userId, requestID).First(&metadata).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var token Token
+	if err := db.Where("id = ? AND user_id = ?", metadata.TokenId, userId).First(&token).Error; err != nil {
+		return nil, err
+	}
+	if !IsResellerTokenKey(token.Key) {
+		return nil, fmt.Errorf("reseller key metadata references non-reseller token %d", metadata.TokenId)
+	}
+	return &ResellerKeyWithToken{Metadata: metadata, Token: token}, nil
+}
+
 // CreatePrepaidResellerToken commits the wallet debit, token, and immutable
 // reseller metadata as one database transaction. User wallet writes are
 // synchronous even in batch mode, so SQL is the sole purchase authority.
@@ -144,7 +242,7 @@ func CreatePrepaidResellerTokenWithRequestID(token *Token, metadata *ResellerKey
 	if err := common.ValidateWalletQuota(walletQuota); err != nil {
 		return false, nil, err
 	}
-	if token.UserId <= 0 || metadata.UserId != token.UserId || !IsResellerTokenKey(token.Key) {
+	if token.UserId <= 0 || metadata.UserId != token.UserId || !IsResellerTokenKey(token.Key) || token.Group == "" || token.Group == "auto" {
 		return false, nil, errors.New("invalid reseller token ownership")
 	}
 	if token.Id != 0 {
@@ -172,21 +270,32 @@ func CreatePrepaidResellerTokenWithRequestID(token *Token, metadata *ResellerKey
 			return err
 		}
 		if requestID != "" {
-			var existingMetadata ResellerKey
-			lookupErr := tx.Where("user_id = ? AND request_id = ?", token.UserId, requestID).First(&existingMetadata).Error
-			if lookupErr == nil {
-				var existingToken Token
-				if err := tx.Where("id = ? AND user_id = ?", existingMetadata.TokenId, token.UserId).First(&existingToken).Error; err != nil {
-					return err
-				}
-				createdRecord = &ResellerKeyWithToken{Metadata: existingMetadata, Token: existingToken}
-				return nil
-			}
-			if !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+			existingRecord, lookupErr := getResellerKeyByRequestID(tx, token.UserId, requestID)
+			if lookupErr != nil {
 				return lookupErr
+			}
+			if existingRecord != nil {
+				createdRecord = existingRecord
+				return nil
 			}
 			requestIDCopy := requestID
 			metadata.RequestId = &requestIDCopy
+		}
+
+		activeSubscription, err := getActiveResellerSubscriptionAt(tx, token.UserId, common.GetTimestamp())
+		if err != nil {
+			return err
+		}
+		if activeSubscription == nil {
+			return ErrResellerSubscriptionRequired
+		}
+
+		var tokenCount int64
+		if err := tx.Model(&Token{}).Where("user_id = ?", token.UserId).Count(&tokenCount).Error; err != nil {
+			return err
+		}
+		if tokenCount >= int64(operation_setting.GetMaxUserTokens()) {
+			return ErrResellerTokenLimitReached
 		}
 
 		result := tx.Model(&User{}).
@@ -402,9 +511,27 @@ func ApplyResellerTokenQuotaAdjustment(id int, key string, adjustment int, opera
 	if !IsResellerTokenKey(key) {
 		return errors.New("token is not a reseller key")
 	}
-	err := ApplyTokenQuotaAdjustmentOnce(id, key, adjustment, operationID)
-	if errors.Is(err, ErrTokenQuotaInsufficient) {
-		return ErrResellerTokenQuotaInsufficient
+	currentKey := key
+	for range 2 {
+		err := ApplyTokenQuotaAdjustmentOnce(id, currentKey, adjustment, operationID)
+		if errors.Is(err, ErrTokenQuotaInsufficient) {
+			return ErrResellerTokenQuotaInsufficient
+		}
+		if !errors.Is(err, ErrTokenQuotaTargetNotFound) {
+			return err
+		}
+
+		// A secret may be rotated while a request is in flight. The immutable ID
+		// remains the billing identity, so retry against the current reseller
+		// secret without changing the operation marker.
+		var token Token
+		if lookupErr := DB.Select("id", "key").Where("id = ?", id).First(&token).Error; lookupErr != nil {
+			return lookupErr
+		}
+		if !IsResellerTokenKey(token.Key) {
+			return ErrTokenQuotaTargetNotFound
+		}
+		currentKey = token.Key
 	}
-	return err
+	return ErrTokenQuotaTargetNotFound
 }

@@ -332,6 +332,7 @@ func migrateDB() error {
 		&Channel{},
 		&Token{},
 		&ResellerKey{},
+		&ResellerSubscription{},
 		&ResellerQuotaOperation{},
 		&User{},
 		&UserSession{},

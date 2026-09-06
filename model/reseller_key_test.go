@@ -19,13 +19,24 @@ import (
 
 func newResellerPurchase(t *testing.T, userId int, millions int) (Token, ResellerKey) {
 	t.Helper()
+	var subscriptionCount int64
+	require.NoError(t, DB.Model(&ResellerSubscription{}).Where("user_id = ?", userId).Count(&subscriptionCount).Error)
+	if subscriptionCount == 0 {
+		now := common.GetTimestamp()
+		require.NoError(t, DB.Create(&ResellerSubscription{
+			UserId: userId, Status: ResellerSubscriptionStatusActive,
+			StartTime: now - 1, EndTime: now + 30*24*60*60,
+			ListPrice: "10.00", DiscountPercent: 0, PaidPrice: "10.00",
+			ChargedQuota: 10, DurationDays: 30, RequestId: "test-entitlement", CreatedTime: now - 1,
+		}).Error)
+	}
 	key, err := NewResellerTokenKey()
 	require.NoError(t, err)
 	now := common.GetTimestamp()
 	return Token{
 			UserId: userId, Key: key, Name: "client", Status: common.TokenStatusEnabled,
 			CreatedTime: now, AccessedTime: now, ExpiredTime: -1,
-			RemainQuota: millions * 1_000_000, UnlimitedQuota: false,
+			RemainQuota: millions * 1_000_000, UnlimitedQuota: false, Group: "default",
 		}, ResellerKey{
 			UserId: userId, TokenMillions: millions, MarkupPercent: 80,
 			BaseCostPerMillion: "0.12", Endpoint: "https://pugshop.ru/v1", CreatedTime: now,
@@ -61,6 +72,9 @@ func TestCreatePrepaidResellerTokenWithRequestIDIsIdempotent(t *testing.T) {
 	require.NotNil(t, first)
 	require.NotNil(t, first.Metadata.RequestId)
 	assert.Equal(t, "issue-123", *first.Metadata.RequestId)
+	require.NoError(t, DB.Model(&ResellerSubscription{}).
+		Where("user_id = ?", user.Id).
+		Update("end_time", common.GetTimestamp()-1).Error)
 
 	secondToken, secondMetadata := newResellerPurchase(t, user.Id, 50)
 	created, replay, err := CreatePrepaidResellerTokenWithRequestID(&secondToken, &secondMetadata, 999, "issue-123")
@@ -74,6 +88,21 @@ func TestCreatePrepaidResellerTokenWithRequestIDIsIdempotent(t *testing.T) {
 	var tokenCount int64
 	require.NoError(t, DB.Model(&Token{}).Where("user_id = ?", user.Id).Count(&tokenCount).Error)
 	assert.EqualValues(t, 1, tokenCount)
+}
+
+func TestCreatePrepaidResellerTokenRequiresActiveSubscription(t *testing.T) {
+	truncateTables(t)
+	resetBatchUpdateTestState(t)
+	user := createReserveTestUser(t, 1_000)
+	token, metadata := newResellerPurchase(t, user.Id, 1)
+	require.NoError(t, DB.Where("user_id = ?", user.Id).Delete(&ResellerSubscription{}).Error)
+
+	created, record, err := CreatePrepaidResellerTokenWithRequestID(&token, &metadata, 100, "issue-without-access")
+
+	assert.False(t, created)
+	assert.Nil(t, record)
+	assert.ErrorIs(t, err, ErrResellerSubscriptionRequired)
+	assert.Equal(t, 1_000, getUserQuotaFromDB(t, user.Id))
 }
 
 func TestCreatePrepaidResellerTokenLeavesNoPartialState(t *testing.T) {
@@ -255,6 +284,7 @@ func TestUpdateResellerMetadataCannotRestoreStaleQuota(t *testing.T) {
 	require.True(t, reserved)
 	stale.Name = "renamed"
 	stale.Status = common.TokenStatusDisabled
+	stale.Group = "vip"
 	require.NoError(t, stale.UpdateResellerMetadata())
 
 	stored := getTokenFromDB(t, token.Id)
@@ -263,6 +293,7 @@ func TestUpdateResellerMetadataCannotRestoreStaleQuota(t *testing.T) {
 	assert.Equal(t, 700_000, stored.RemainQuota)
 	assert.Equal(t, 300_000, stored.UsedQuota)
 	assert.False(t, stored.UnlimitedQuota)
+	assert.Equal(t, "default", stored.Group)
 }
 
 func TestUpdateResellerMetadataPersistsWhenRedisIsUnavailable(t *testing.T) {
@@ -283,6 +314,35 @@ func TestUpdateResellerMetadataPersistsWhenRedisIsUnavailable(t *testing.T) {
 	stored := getTokenFromDB(t, token.Id)
 	assert.Equal(t, "disabled while redis is down", stored.Name)
 	assert.Equal(t, common.TokenStatusDisabled, stored.Status)
+}
+
+func TestUpdateResellerMetadataAssignsLegacyGroupOnlyOnce(t *testing.T) {
+	truncateTables(t)
+	resetBatchUpdateTestState(t)
+	user := createReserveTestUser(t, 1_000)
+	token, metadata := newResellerPurchase(t, user.Id, 1)
+	created, err := CreatePrepaidResellerToken(&token, &metadata, 100)
+	require.NoError(t, err)
+	require.True(t, created)
+	require.NoError(t, DB.Model(&Token{}).Where("id = ?", token.Id).Updates(map[string]interface{}{
+		"group":             "",
+		"cross_group_retry": true,
+		"auto_groups":       `["default"]`,
+	}).Error)
+
+	token.Name = "legacy key"
+	require.NoError(t, token.UpdateResellerMetadataWithLegacyGroup("vip"))
+
+	stored := getTokenFromDB(t, token.Id)
+	assert.Equal(t, "vip", stored.Group)
+	assert.False(t, stored.CrossGroupRetry)
+	assert.Empty(t, stored.AutoGroups)
+	assert.Equal(t, 1_000_000, stored.RemainQuota)
+
+	err = token.UpdateResellerMetadataWithLegacyGroup("default")
+	require.ErrorContains(t, err, "group is immutable")
+	stored = getTokenFromDB(t, token.Id)
+	assert.Equal(t, "vip", stored.Group)
 }
 
 func TestResellerQuotaCreditPersistsWhenRedisIsUnavailable(t *testing.T) {
@@ -347,7 +407,7 @@ func TestResellerQuotaAdjustmentIsIdempotent(t *testing.T) {
 	assert.Equal(t, 100_000, stored.UsedQuota)
 }
 
-func TestResellerTokenDeleteMethodIsBlocked(t *testing.T) {
+func TestResellerTokenDeleteMethodRemovesKeyWithoutRefund(t *testing.T) {
 	truncateTables(t)
 	resetBatchUpdateTestState(t)
 	user := createReserveTestUser(t, 1_000)
@@ -356,8 +416,10 @@ func TestResellerTokenDeleteMethodIsBlocked(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, created)
 
-	assert.ErrorIs(t, token.Delete(), ErrResellerTokenDeletionNotAllowed)
-	require.NoError(t, DB.First(&Token{}, token.Id).Error)
+	require.NoError(t, token.Delete())
+	assert.ErrorIs(t, DB.First(&Token{}, token.Id).Error, gorm.ErrRecordNotFound)
+	assert.ErrorIs(t, DB.Where("token_id = ?", token.Id).First(&ResellerKey{}).Error, gorm.ErrRecordNotFound)
+	assert.Equal(t, 1_000, getUserQuotaFromDB(t, user.Id), "deleting a purchased key must not refund its quota")
 }
 
 func testResellerKeyMigration(t *testing.T, db *gorm.DB) {
@@ -401,6 +463,28 @@ func testResellerKeyMigration(t *testing.T, db *gorm.DB) {
 	assert.Equal(t, operation.Adjustment, storedOperation.Adjustment)
 	operationIndex := db.NamingStrategy.IndexName(operationTableName, "operation_id")
 	assert.True(t, operationDB.Migrator().HasIndex(&ResellerQuotaOperation{}, operationIndex))
+
+	subscriptionTableName := fmt.Sprintf("reseller_subscription_migration_%d", time.Now().UnixNano())
+	t.Cleanup(func() { _ = db.Migrator().DropTable(subscriptionTableName) })
+	subscriptionDB := db.Table(subscriptionTableName)
+	for range 2 {
+		require.NoError(t, subscriptionDB.AutoMigrate(&ResellerSubscription{}))
+	}
+	subscription := ResellerSubscription{
+		UserId: 7, Status: ResellerSubscriptionStatusActive,
+		StartTime: 100, EndTime: 200, ListPrice: "10.00", DiscountPercent: 20,
+		PaidPrice: "8.00", ChargedQuota: 4_000_000, DurationDays: 30,
+		RequestId: "migration-subscription", CreatedTime: 100,
+	}
+	require.NoError(t, subscriptionDB.Create(&subscription).Error)
+	require.NoError(t, subscriptionDB.AutoMigrate(&ResellerSubscription{}))
+	var storedSubscription ResellerSubscription
+	require.NoError(t, subscriptionDB.First(&storedSubscription, subscription.Id).Error)
+	assert.Equal(t, subscription.ListPrice, storedSubscription.ListPrice)
+	assert.Equal(t, subscription.PaidPrice, storedSubscription.PaidPrice)
+	// The composite request index must survive repeat migrations and preserve
+	// existing subscription snapshots.
+	assert.True(t, subscriptionDB.Migrator().HasIndex(&ResellerSubscription{}, "idx_reseller_subscription_request"))
 }
 
 func TestResellerKeyMigrationSQLite(t *testing.T) {

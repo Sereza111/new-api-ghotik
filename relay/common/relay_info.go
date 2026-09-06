@@ -123,6 +123,10 @@ type RelayInfo struct {
 	// FinalPreConsumedQuota when a raw-token key is backed by priced wallet or
 	// subscription billing.
 	TokenQuotaPreConsumed int
+	// TokenQuotaReservationInitialized distinguishes a zero-token reservation
+	// from legacy callers that let BillingSession derive a fallback amount.
+	// It is request-scoped state and is not persisted.
+	TokenQuotaReservationInitialized bool
 	// TokenQuotaActual is populated by token-metered response handlers before
 	// settlement. Nil distinguishes a measured zero from missing accounting.
 	TokenQuotaActual *int

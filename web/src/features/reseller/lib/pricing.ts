@@ -60,6 +60,7 @@ export const RESELLER_MARKUP_OPTIONS = [20, 50, 80, 100] as const
 
 export const resellerDraftSchema = z.object({
   clientLabel: z.string().trim().max(50),
+  group: z.string().trim().min(1),
   tokenMillions: z
     .number()
     .int()

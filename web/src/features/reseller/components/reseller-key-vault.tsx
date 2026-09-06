@@ -21,13 +21,17 @@ import {
   Eye,
   KeyRound,
   RefreshCw,
+  RotateCw,
   Server,
   ShieldCheck,
+  Trash2,
 } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { CopyButton } from '@/components/copy-button'
+import { ConfirmDialog } from '@/components/confirm-dialog'
+import { GroupBadge } from '@/components/group-badge'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -50,6 +54,11 @@ import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 import type { ResellerKey, ResellerTerm } from '../types'
 
@@ -58,12 +67,21 @@ type ResellerKeyVaultProps = {
   formatMoney: (value: number) => string
   revealedKeys: Record<number, string>
   revealingKeyId: number | null
+  deletingKeyId: number | null
+  reissuingKeyId: number | null
   isLoading: boolean
   isFetching: boolean
   isError: boolean
   errorMessage?: string
   onRetry: () => void
   onReveal: (id: number) => void
+  onDelete: (id: number) => Promise<boolean>
+  onReissue: (id: number) => Promise<boolean>
+}
+
+type PendingKeyAction = {
+  type: 'delete' | 'reissue'
+  key: ResellerKey
 }
 
 const TERM_KEYS: Record<ResellerTerm, string> = {
@@ -88,14 +106,58 @@ function formatTokenMillions(tokens: number): string {
   return `${Number(millions.toFixed(2))}M`
 }
 
-function getUsedPercent(item: ResellerKey): number {
+function getRemainingPercent(item: ResellerKey): number {
   const total = item.used_tokens + item.remaining_tokens
   if (total <= 0) return 0
-  return Math.min(100, Math.max(0, (item.used_tokens / total) * 100))
+  return Math.min(100, Math.max(0, (item.remaining_tokens / total) * 100))
 }
 
 export function ResellerKeyVault(props: ResellerKeyVaultProps) {
   const { t } = useTranslation()
+  const [pendingAction, setPendingAction] = useState<PendingKeyAction | null>(
+    null
+  )
+  const isDeleteAction = pendingAction?.type === 'delete'
+  const isActionLoading = Boolean(
+    pendingAction &&
+      (isDeleteAction
+        ? props.deletingKeyId === pendingAction.key.id
+        : props.reissuingKeyId === pendingAction.key.id)
+  )
+  const keyActionIsPending =
+    props.deletingKeyId !== null || props.reissuingKeyId !== null
+  const actionKeyName = pendingAction?.key.client_label ?? ''
+  const actionTitle = isDeleteAction
+    ? t('Delete reseller key "{{name}}"?', { name: actionKeyName })
+    : t('Reissue reseller key "{{name}}"?', { name: actionKeyName })
+  const actionDescription = isDeleteAction
+    ? t(
+        'The key will stop working immediately. Its remaining token quota will be permanently discarded and will not be refunded.'
+      )
+    : t(
+        'The current secret will stop working immediately. Quota, group, and expiration will remain unchanged.'
+      )
+  let actionConfirmText = isDeleteAction
+    ? t('Delete key')
+    : t('Reissue key')
+  if (isActionLoading) {
+    actionConfirmText = isDeleteAction
+      ? t('Deleting key...')
+      : t('Reissuing key...')
+  }
+
+  const handleActionConfirm = async () => {
+    if (!pendingAction) return
+
+    const completed = isDeleteAction
+      ? await props.onDelete(pendingAction.key.id)
+      : await props.onReissue(pendingAction.key.id)
+    if (completed) setPendingAction(null)
+  }
+
+  const handleActionDialogOpenChange = (open: boolean) => {
+    if (!open && !isActionLoading) setPendingAction(null)
+  }
 
   let content: ReactNode
   if (props.isLoading) {
@@ -163,6 +225,8 @@ export function ResellerKeyVault(props: ResellerKeyVaultProps) {
         {props.keys.map((item, index) => {
           const revealedKey = props.revealedKeys[item.id]
           const isRevealing = props.revealingKeyId === item.id
+          const isDeleting = props.deletingKeyId === item.id
+          const isReissuing = props.reissuingKeyId === item.id
           let keyAction: ReactNode
 
           if (revealedKey) {
@@ -179,7 +243,7 @@ export function ResellerKeyVault(props: ResellerKeyVaultProps) {
                 type='button'
                 variant='ghost'
                 size='sm'
-                disabled={props.revealingKeyId !== null}
+                disabled={props.revealingKeyId !== null || keyActionIsPending}
                 onClick={() => props.onReveal(item.id)}
               >
                 {isRevealing ? (
@@ -205,19 +269,83 @@ export function ResellerKeyVault(props: ResellerKeyVaultProps) {
                       <Badge variant='secondary'>
                         {t(STATUS_KEYS[item.status] || 'Unknown')}
                       </Badge>
+                      <GroupBadge group={item.group} size='sm' />
                     </div>
                     <p className='text-muted-foreground mt-1 text-xs'>
                       {item.token_millions}M {t('Tokens')} ·{' '}
                       {t(TERM_KEYS[item.term])}
                     </p>
                   </div>
-                  <div className='text-right'>
-                    <p className='text-sm font-semibold tabular-nums'>
-                      {props.formatMoney(item.client_price)}
-                    </p>
-                    <p className='text-muted-foreground text-xs'>
-                      {t('Client price')}
-                    </p>
+                  <div className='flex shrink-0 items-start gap-1'>
+                    <div className='mr-1 text-right'>
+                      <p className='text-sm font-semibold tabular-nums'>
+                        {props.formatMoney(item.client_price)}
+                      </p>
+                      <p className='text-muted-foreground text-xs'>
+                        {t('Client price')}
+                      </p>
+                    </div>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            type='button'
+                            variant='ghost'
+                            size='icon-sm'
+                            disabled={
+                              keyActionIsPending ||
+                              props.revealingKeyId !== null
+                            }
+                            aria-label={
+                              isReissuing
+                                ? t('Reissuing key...')
+                                : t('Reissue key')
+                            }
+                            onClick={() =>
+                              setPendingAction({ type: 'reissue', key: item })
+                            }
+                          />
+                        }
+                      >
+                        {isReissuing ? (
+                          <Spinner aria-hidden='true' />
+                        ) : (
+                          <RotateCw aria-hidden='true' />
+                        )}
+                      </TooltipTrigger>
+                      <TooltipContent>{t('Reissue key')}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            type='button'
+                            variant='ghost'
+                            size='icon-sm'
+                            className='text-destructive hover:text-destructive'
+                            disabled={
+                              keyActionIsPending ||
+                              props.revealingKeyId !== null
+                            }
+                            aria-label={
+                              isDeleting
+                                ? t('Deleting key...')
+                                : t('Delete key')
+                            }
+                            onClick={() =>
+                              setPendingAction({ type: 'delete', key: item })
+                            }
+                          />
+                        }
+                      >
+                        {isDeleting ? (
+                          <Spinner aria-hidden='true' />
+                        ) : (
+                          <Trash2 aria-hidden='true' />
+                        )}
+                      </TooltipTrigger>
+                      <TooltipContent>{t('Delete key')}</TooltipContent>
+                    </Tooltip>
                   </div>
                 </header>
 
@@ -232,8 +360,8 @@ export function ResellerKeyVault(props: ResellerKeyVaultProps) {
                     </span>
                   </div>
                   <Progress
-                    value={getUsedPercent(item)}
-                    aria-label={t('Used quota')}
+                    value={getRemainingPercent(item)}
+                    aria-label={t('Remaining quota')}
                   />
                 </div>
 
@@ -272,34 +400,49 @@ export function ResellerKeyVault(props: ResellerKeyVaultProps) {
   }
 
   return (
-    <Card data-card-hover='false' className='reseller-tool-card h-full'>
-      <CardHeader>
-        <CardTitle className='flex items-center gap-2'>
-          <ShieldCheck className='text-primary size-5' aria-hidden='true' />
-          {t('Reseller keys')}
-        </CardTitle>
-        <CardDescription aria-live='polite'>
-          {t('Issued keys: {{count}}', { count: props.keys.length })}
-        </CardDescription>
-        <CardAction>
-          <Button
-            type='button'
-            variant='ghost'
-            size='sm'
-            disabled={props.isFetching}
-            onClick={props.onRetry}
-          >
-            <RefreshCw
-              data-icon='inline-start'
-              className={props.isFetching ? 'animate-spin' : undefined}
-              aria-hidden='true'
-            />
-            {props.isFetching ? t('Refreshing...') : t('Refresh')}
-          </Button>
-        </CardAction>
-      </CardHeader>
+    <>
+      <Card data-card-hover='false' className='reseller-tool-card h-full'>
+        <CardHeader>
+          <CardTitle className='flex items-center gap-2'>
+            <ShieldCheck className='text-primary size-5' aria-hidden='true' />
+            {t('Reseller keys')}
+          </CardTitle>
+          <CardDescription aria-live='polite'>
+            {t('Issued keys: {{count}}', { count: props.keys.length })}
+          </CardDescription>
+          <CardAction>
+            <Button
+              type='button'
+              variant='ghost'
+              size='sm'
+              disabled={props.isFetching}
+              onClick={props.onRetry}
+            >
+              <RefreshCw
+                data-icon='inline-start'
+                className={props.isFetching ? 'animate-spin' : undefined}
+                aria-hidden='true'
+              />
+              {props.isFetching ? t('Refreshing...') : t('Refresh')}
+            </Button>
+          </CardAction>
+        </CardHeader>
 
-      {content}
-    </Card>
+        {content}
+      </Card>
+
+      <ConfirmDialog
+        destructive={isDeleteAction}
+        open={pendingAction !== null}
+        onOpenChange={handleActionDialogOpenChange}
+        handleConfirm={() => void handleActionConfirm()}
+        isLoading={isActionLoading}
+        disabled={!pendingAction}
+        className='max-w-md'
+        title={actionTitle}
+        desc={actionDescription}
+        confirmText={actionConfirmText}
+      />
+    </>
   )
 }

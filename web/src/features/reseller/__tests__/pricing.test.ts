@@ -53,6 +53,7 @@ describe('reseller pricing', () => {
       tokenMillions: 10,
       markupPercent: 80,
       term: 'unlimited',
+      group: 'default',
     })
 
     expect(result.success).toBe(false)
@@ -64,6 +65,7 @@ describe('reseller pricing', () => {
       tokenMillions: 0,
       markupPercent: 80,
       term: 'unlimited',
+      group: 'default',
     })
 
     expect(result.success).toBe(false)

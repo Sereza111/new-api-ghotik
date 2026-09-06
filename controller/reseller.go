@@ -19,8 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 package controller
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -28,6 +32,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
@@ -45,6 +50,7 @@ type resellerKeyRequest struct {
 	Term          string `json:"term"`
 	Endpoint      string `json:"endpoint"`
 	RequestId     string `json:"request_id"`
+	Group         string `json:"group"`
 }
 
 type resellerKeyResponse struct {
@@ -60,16 +66,191 @@ type resellerKeyResponse struct {
 	CreatedTime     int64   `json:"created_time"`
 	ExpiredTime     int64   `json:"expired_time"`
 	Status          int     `json:"status"`
+	Group           string  `json:"group"`
 	Cost            float64 `json:"cost"`
 	ClientPrice     float64 `json:"client_price"`
 }
 
+type resellerAvailableGroup struct {
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Ratio       float64 `json:"ratio"`
+}
+
+type resellerSubscriptionResponse struct {
+	Active          bool    `json:"active"`
+	ExpiresAt       int64   `json:"expires_at"`
+	ListPrice       float64 `json:"list_price"`
+	DiscountPercent int     `json:"discount_percent"`
+	Price           float64 `json:"price"`
+	DurationDays    int     `json:"duration_days"`
+}
+
+type resellerSubscriptionRequest struct {
+	RequestId string `json:"request_id"`
+}
+
 func GetResellerConfig(c *gin.Context) {
 	settings := operation_setting.GetResellerSetting()
+	listPrice, paidPrice, err := resellerSubscriptionPrices(settings)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	userGroup, err := getTokenRequestUserGroup(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	availableGroups := getResellerAvailableGroups(userGroup)
+	activeSubscription, err := model.GetActiveResellerSubscription(c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	common.ApiSuccess(c, gin.H{
 		"base_cost_per_million": settings.BaseCostPerMillion,
 		"default_endpoint":      strings.TrimRight(settings.Endpoint, "/"),
+		"available_groups":      availableGroups,
+		"subscription": buildResellerSubscriptionResponse(
+			activeSubscription,
+			listPrice,
+			paidPrice,
+			settings.SubscriptionDiscountPercent,
+			settings.SubscriptionDurationDays,
+		),
 	})
+}
+
+func PurchaseResellerSubscription(c *gin.Context) {
+	request := resellerSubscriptionRequest{}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		resellerBadRequest(c, "invalid reseller subscription request")
+		return
+	}
+	requestID, ok := normalizeResellerRequestID(c, request.RequestId)
+	if !ok {
+		resellerBadRequest(c, "request_id is required and must be a printable value of at most 128 characters")
+		return
+	}
+	userID := c.GetInt("id")
+	existingSubscription, err := model.GetResellerSubscriptionByRequestID(userID, requestID)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if existingSubscription != nil {
+		purchasedListPrice, parseErr := decimal.NewFromString(existingSubscription.ListPrice)
+		if parseErr != nil {
+			common.ApiError(c, parseErr)
+			return
+		}
+		purchasedPrice, parseErr := decimal.NewFromString(existingSubscription.PaidPrice)
+		if parseErr != nil {
+			common.ApiError(c, parseErr)
+			return
+		}
+		common.ApiSuccess(c, buildResellerSubscriptionResponse(
+			existingSubscription,
+			purchasedListPrice,
+			purchasedPrice,
+			existingSubscription.DiscountPercent,
+			existingSubscription.DurationDays,
+		))
+		return
+	}
+	if !requirePaymentCompliance(c) {
+		return
+	}
+	userGroup, err := getTokenRequestUserGroup(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if len(getResellerAvailableGroups(userGroup)) == 0 {
+		resellerStatusError(c, http.StatusForbidden, "no routing groups are available for reseller keys")
+		return
+	}
+
+	settings := operation_setting.GetResellerSetting()
+	listPrice, paidPrice, err := resellerSubscriptionPrices(settings)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	walletQuota, err := common.WalletQuotaFromDecimalStrict(paidPrice.Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
+	if err != nil || walletQuota <= 0 {
+		if err == nil {
+			err = fmt.Errorf("reseller subscription price is too small")
+		}
+		common.ApiError(c, err)
+		return
+	}
+	created, subscription, err := model.PurchaseResellerSubscription(model.ResellerSubscriptionPurchase{
+		UserId:          userID,
+		ListPrice:       listPrice.StringFixed(2),
+		DiscountPercent: settings.SubscriptionDiscountPercent,
+		PaidPrice:       paidPrice.StringFixed(2),
+		ChargedQuota:    walletQuota,
+		DurationDays:    settings.SubscriptionDurationDays,
+		RequestId:       requestID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, model.ErrResellerSubscriptionWalletInsufficient):
+			resellerStatusError(c, http.StatusForbidden, err.Error())
+		case errors.Is(err, model.ErrResellerSubscriptionAlreadyActive):
+			resellerStatusError(c, http.StatusConflict, err.Error())
+		default:
+			common.ApiError(c, err)
+		}
+		return
+	}
+	if created {
+		model.RecordLog(c.GetInt("id"), model.LogTypeManage, fmt.Sprintf("Purchased reseller subscription for %s USD", subscription.PaidPrice))
+	}
+	purchasedListPrice, parseErr := decimal.NewFromString(subscription.ListPrice)
+	if parseErr != nil {
+		common.ApiError(c, parseErr)
+		return
+	}
+	purchasedPrice, parseErr := decimal.NewFromString(subscription.PaidPrice)
+	if parseErr != nil {
+		common.ApiError(c, parseErr)
+		return
+	}
+	common.ApiSuccess(c, buildResellerSubscriptionResponse(
+		subscription,
+		purchasedListPrice,
+		purchasedPrice,
+		subscription.DiscountPercent,
+		subscription.DurationDays,
+	))
+}
+
+func getResellerAvailableGroups(userGroup string) []resellerAvailableGroup {
+	usableGroups := service.GetUserUsableGroups(userGroup)
+	groupNames := make([]string, 0, len(usableGroups))
+	for name := range usableGroups {
+		if isResellerGroupAvailable(userGroup, name) {
+			groupNames = append(groupNames, name)
+		}
+	}
+	sort.Strings(groupNames)
+	availableGroups := make([]resellerAvailableGroup, 0, len(groupNames))
+	for _, name := range groupNames {
+		availableGroups = append(availableGroups, resellerAvailableGroup{
+			Name:        name,
+			Description: usableGroups[name],
+			Ratio:       service.GetUserGroupRatio(userGroup, name),
+		})
+	}
+	return availableGroups
+}
+
+func isResellerGroupAvailable(userGroup string, group string) bool {
+	return service.IsUserSelectableGroup(userGroup, group) &&
+		len(model.GetGroupEnabledModels(group)) > 0
 }
 
 func GetResellerKeys(c *gin.Context) {
@@ -86,6 +267,35 @@ func GetResellerKeys(c *gin.Context) {
 	common.ApiSuccess(c, items)
 }
 
+func DeleteResellerKey(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		resellerBadRequest(c, "invalid reseller key id")
+		return
+	}
+	if err := model.DeleteResellerToken(id, c.GetInt("id")); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	model.RecordLog(c.GetInt("id"), model.LogTypeManage, fmt.Sprintf("Deleted reseller key %d without quota refund", id))
+	common.ApiSuccess(c, nil)
+}
+
+func ReissueResellerKey(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		resellerBadRequest(c, "invalid reseller key id")
+		return
+	}
+	record, err := model.ReissueResellerToken(id, c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	model.RecordLog(c.GetInt("id"), model.LogTypeManage, fmt.Sprintf("Reissued reseller key %d", id))
+	common.ApiSuccess(c, buildResellerKeyResponse(&record.Token, &record.Metadata, true))
+}
+
 func AddResellerKey(c *gin.Context) {
 	request := resellerKeyRequest{}
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -95,6 +305,16 @@ func AddResellerKey(c *gin.Context) {
 	requestID, ok := normalizeResellerRequestID(c, request.RequestId)
 	if !ok {
 		resellerBadRequest(c, "request_id is required and must be a printable value of at most 128 characters")
+		return
+	}
+	userID := c.GetInt("id")
+	existingRecord, err := model.GetResellerKeyByRequestID(userID, requestID)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if existingRecord != nil {
+		common.ApiSuccess(c, buildResellerKeyResponse(&existingRecord.Token, &existingRecord.Metadata, true))
 		return
 	}
 
@@ -109,6 +329,16 @@ func AddResellerKey(c *gin.Context) {
 	}
 	if !isResellerMarkupAllowed(request.MarkupPercent) {
 		resellerBadRequest(c, "invalid reseller markup")
+		return
+	}
+	request.Group = strings.TrimSpace(request.Group)
+	userGroup, err := getTokenRequestUserGroup(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if !isResellerGroupAvailable(userGroup, request.Group) {
+		resellerBadRequest(c, "a concrete available routing group is required")
 		return
 	}
 
@@ -135,13 +365,9 @@ func AddResellerKey(c *gin.Context) {
 		return
 	}
 
-	count, err := model.CountUserTokens(c.GetInt("id"))
+	count, err := model.CountUserTokens(userID)
 	if err != nil {
 		common.ApiError(c, err)
-		return
-	}
-	if int(count) >= operation_setting.GetMaxUserTokens() {
-		resellerBadRequest(c, fmt.Sprintf("maximum API key limit reached (%d)", operation_setting.GetMaxUserTokens()))
 		return
 	}
 
@@ -155,7 +381,7 @@ func AddResellerKey(c *gin.Context) {
 		clientLabel = fmt.Sprintf("Reseller key %d", count+1)
 	}
 	token := model.Token{
-		UserId:         c.GetInt("id"),
+		UserId:         userID,
 		Key:            key,
 		Status:         common.TokenStatusEnabled,
 		Name:           clientLabel,
@@ -166,6 +392,7 @@ func AddResellerKey(c *gin.Context) {
 		UnlimitedQuota: false,
 		QuotaMode:      model.TokenQuotaModeTokens,
 		AllowIps:       common.GetPointer(""),
+		Group:          request.Group,
 	}
 	metadata := model.ResellerKey{
 		UserId:             token.UserId,
@@ -177,7 +404,14 @@ func AddResellerKey(c *gin.Context) {
 	}
 	_, record, err := model.CreatePrepaidResellerTokenWithRequestID(&token, &metadata, walletQuota, requestID)
 	if err != nil {
-		common.ApiError(c, err)
+		switch {
+		case errors.Is(err, model.ErrResellerSubscriptionRequired):
+			resellerStatusError(c, http.StatusForbidden, err.Error())
+		case errors.Is(err, model.ErrResellerTokenLimitReached):
+			resellerBadRequest(c, "Maximum API key limit reached")
+		default:
+			common.ApiError(c, err)
+		}
 		return
 	}
 	if record == nil {
@@ -233,6 +467,7 @@ func buildResellerKeyResponse(token *model.Token, metadata *model.ResellerKey, r
 		CreatedTime:     metadata.CreatedTime,
 		ExpiredTime:     token.ExpiredTime,
 		Status:          token.Status,
+		Group:           token.Group,
 		Cost:            cost,
 		ClientPrice:     clientPrice,
 	}
@@ -243,6 +478,57 @@ func resellerBadRequest(c *gin.Context, message string) {
 		"success": false,
 		"message": message,
 	})
+}
+
+func resellerStatusError(c *gin.Context, status int, message string) {
+	c.JSON(status, gin.H{
+		"success": false,
+		"message": message,
+	})
+}
+
+func resellerSubscriptionPrices(settings operation_setting.ResellerSetting) (decimal.Decimal, decimal.Decimal, error) {
+	if math.IsNaN(settings.SubscriptionPrice) || math.IsInf(settings.SubscriptionPrice, 0) ||
+		settings.SubscriptionPrice < operation_setting.ResellerSubscriptionMinPrice ||
+		settings.SubscriptionPrice > operation_setting.ResellerSubscriptionMaxPrice ||
+		settings.SubscriptionDiscountPercent < 0 ||
+		settings.SubscriptionDiscountPercent > operation_setting.ResellerSubscriptionMaxDiscountPercent ||
+		settings.SubscriptionDurationDays < operation_setting.ResellerSubscriptionMinDurationDays ||
+		settings.SubscriptionDurationDays > operation_setting.ResellerSubscriptionMaxDurationDays {
+		return decimal.Zero, decimal.Zero, errors.New("invalid reseller subscription settings")
+	}
+	listPrice := decimal.NewFromFloat(settings.SubscriptionPrice).Round(2)
+	paidPrice := listPrice.
+		Mul(decimal.NewFromInt(int64(100 - settings.SubscriptionDiscountPercent))).
+		Div(decimal.NewFromInt(100)).
+		Round(2)
+	minimumPrice := decimal.NewFromFloat(operation_setting.ResellerSubscriptionMinPrice)
+	if paidPrice.LessThan(minimumPrice) {
+		paidPrice = minimumPrice
+	}
+	return listPrice, paidPrice, nil
+}
+
+func buildResellerSubscriptionResponse(
+	subscription *model.ResellerSubscription,
+	listPrice decimal.Decimal,
+	paidPrice decimal.Decimal,
+	discountPercent int,
+	durationDays int,
+) resellerSubscriptionResponse {
+	listPriceFloat, _ := listPrice.Float64()
+	paidPriceFloat, _ := paidPrice.Float64()
+	response := resellerSubscriptionResponse{
+		ListPrice:       listPriceFloat,
+		DiscountPercent: discountPercent,
+		Price:           paidPriceFloat,
+		DurationDays:    durationDays,
+	}
+	if subscription != nil {
+		response.Active = subscription.IsActiveAt(common.GetTimestamp())
+		response.ExpiresAt = subscription.EndTime
+	}
+	return response
 }
 
 func isResellerMarkupAllowed(value int) bool {

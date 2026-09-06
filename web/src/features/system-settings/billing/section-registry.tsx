@@ -113,6 +113,11 @@ const BILLING_SECTIONS = [
             base_cost_per_million:
               settings['reseller_setting.base_cost_per_million'],
             endpoint: settings['reseller_setting.endpoint'],
+            subscription_price: settings['reseller_setting.subscription_price'],
+            subscription_discount_percent:
+              settings['reseller_setting.subscription_discount_percent'],
+            subscription_duration_days:
+              settings['reseller_setting.subscription_duration_days'],
           },
         }}
       />

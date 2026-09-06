@@ -44,6 +44,7 @@ func TestMain(m *testing.M) {
 		&ExternalIdentityClaim{},
 		&Token{},
 		&ResellerKey{},
+		&ResellerSubscription{},
 		&ResellerQuotaOperation{},
 		&Option{},
 		&PasskeyCredential{},
@@ -81,6 +82,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM two_fa_backup_codes")
 		DB.Exec("DELETE FROM two_fas")
 		DB.Exec("DELETE FROM reseller_keys")
+		DB.Exec("DELETE FROM reseller_subscriptions")
 		DB.Exec("DELETE FROM reseller_quota_operations")
 		DB.Exec("DELETE FROM tokens")
 		DB.Exec("DELETE FROM options")

@@ -20,6 +20,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -175,18 +176,141 @@ func TestPreConsumeBillingUsesRawResellerEstimate(t *testing.T) {
 	apiErr := PreConsumeBilling(ctx, 9_000, relayInfo)
 	require.Nil(t, apiErr)
 	require.NotNil(t, relayInfo.Billing)
-	assert.Equal(t, 10_000, relayInfo.Billing.GetPreConsumedQuota(), "generation reservations hold the full prepaid balance")
-	require.NoError(t, relayInfo.Billing.Settle(580))
+	assert.Equal(t, 200, relayInfo.Billing.GetPreConsumedQuota(), "reseller generation reserves only prompt plus explicit output cap")
+	require.NoError(t, relayInfo.Billing.Settle(180))
 
 	var token model.Token
 	require.NoError(t, model.DB.First(&token, 52).Error)
-	assert.Equal(t, 9_420, token.RemainQuota)
+	assert.Equal(t, 9_820, token.RemainQuota)
 	var user model.User
 	require.NoError(t, model.DB.First(&user, 51).Error)
 	assert.Equal(t, 100_000, user.Quota)
 }
 
-func TestPreConsumeBillingReservesFullResellerBalanceWithoutOutputLimit(t *testing.T) {
+func TestResellerInitialReservationIsIdempotent(t *testing.T) {
+	truncate(t)
+	seedUser(t, 57, 100_000)
+	seedToken(t, 58, 57, "rsl_idempotent-reserve", 10_000)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	maxTokens := uint(100)
+	relayInfo := &relaycommon.RelayInfo{
+		TokenId: 58, TokenKey: "rsl_idempotent-reserve", UserId: 57,
+		RelayFormat: relaytypes.RelayFormatOpenAI,
+		RelayMode:   relayconstant.RelayModeChatCompletions,
+		Request:     &dto.GeneralOpenAIRequest{MaxTokens: &maxTokens},
+	}
+	relayInfo.SetEstimatePromptTokens(100)
+
+	require.Nil(t, PreConsumeBilling(ctx, 1, relayInfo))
+	session, ok := relayInfo.Billing.(*BillingSession)
+	require.True(t, ok)
+	require.NoError(t, session.reserveToken(200, 200, "reserve_initial", false), "an ambiguous reserve retry must reuse its operation marker")
+
+	var token model.Token
+	require.NoError(t, model.DB.First(&token, 58).Error)
+	assert.Equal(t, 9_800, token.RemainQuota)
+	assert.Equal(t, 200, token.UsedQuota)
+	var operations []model.ResellerQuotaOperation
+	require.NoError(t, model.DB.Where("token_id = ?", 58).Find(&operations).Error)
+	require.Len(t, operations, 1)
+	assert.Equal(t, -200, operations[0].Adjustment)
+}
+
+func TestResellerReservationExtensionsWithEqualDeltasAreDistinct(t *testing.T) {
+	truncate(t)
+	seedUser(t, 59, 100_000)
+	seedToken(t, 60, 59, "rsl_equal-extensions", 10_000)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	maxTokens := uint(100)
+	relayInfo := &relaycommon.RelayInfo{
+		TokenId: 60, TokenKey: "rsl_equal-extensions", UserId: 59,
+		RelayFormat: relaytypes.RelayFormatOpenAI,
+		RelayMode:   relayconstant.RelayModeChatCompletions,
+		Request:     &dto.GeneralOpenAIRequest{MaxTokens: &maxTokens},
+	}
+	relayInfo.SetEstimatePromptTokens(100)
+
+	require.Nil(t, PreConsumeBilling(ctx, 1, relayInfo))
+	require.NoError(t, relayInfo.Billing.Reserve(300))
+	require.NoError(t, relayInfo.Billing.Reserve(400))
+	require.NoError(t, relayInfo.Billing.Reserve(400), "retrying the same target must be a no-op")
+
+	var token model.Token
+	require.NoError(t, model.DB.First(&token, 60).Error)
+	assert.Equal(t, 9_600, token.RemainQuota)
+	assert.Equal(t, 400, token.UsedQuota)
+	var operations []model.ResellerQuotaOperation
+	require.NoError(t, model.DB.Where("token_id = ?", 60).Find(&operations).Error)
+	require.Len(t, operations, 3)
+}
+
+func TestResellerReserveRejectsRefundInProgress(t *testing.T) {
+	truncate(t)
+	seedUser(t, 65, 100_000)
+	seedToken(t, 66, 65, "rsl_refund-race", 10_000)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	maxTokens := uint(100)
+	relayInfo := &relaycommon.RelayInfo{
+		TokenId: 66, TokenKey: "rsl_refund-race", UserId: 65,
+		RelayFormat: relaytypes.RelayFormatOpenAI,
+		RelayMode:   relayconstant.RelayModeChatCompletions,
+		Request:     &dto.GeneralOpenAIRequest{MaxTokens: &maxTokens},
+	}
+	relayInfo.SetEstimatePromptTokens(100)
+	require.Nil(t, PreConsumeBilling(ctx, 1, relayInfo))
+	session := relayInfo.Billing.(*BillingSession)
+	session.refundInFlight = true
+
+	require.ErrorContains(t, session.Reserve(300), "refund has started")
+	var token model.Token
+	require.NoError(t, model.DB.First(&token, 66).Error)
+	assert.Equal(t, 9_800, token.RemainQuota)
+}
+
+func TestResellerRefundReconcilesAmbiguousReservationCommit(t *testing.T) {
+	truncate(t)
+	seedUser(t, 67, 100_000)
+	seedToken(t, 68, 67, "rsl_ambiguous-extension", 10_000)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	maxTokens := uint(100)
+	relayInfo := &relaycommon.RelayInfo{
+		TokenId: 68, TokenKey: "rsl_ambiguous-extension", UserId: 67,
+		RelayFormat: relaytypes.RelayFormatOpenAI,
+		RelayMode:   relayconstant.RelayModeChatCompletions,
+		Request:     &dto.GeneralOpenAIRequest{MaxTokens: &maxTokens},
+	}
+	relayInfo.SetEstimatePromptTokens(100)
+	require.Nil(t, PreConsumeBilling(ctx, 1, relayInfo))
+	session := relayInfo.Billing.(*BillingSession)
+	phase := "reserve_target_300"
+	require.NoError(t, model.ApplyResellerTokenQuotaAdjustment(
+		68,
+		"rsl_ambiguous-extension",
+		-100,
+		session.tokenOperationID(phase),
+	))
+	session.pendingToken = &pendingTokenReservation{
+		delta:       100,
+		targetQuota: 300,
+		phase:       phase,
+		isExtension: true,
+	}
+
+	session.Refund(ctx)
+
+	var token model.Token
+	require.NoError(t, model.DB.First(&token, 68).Error)
+	assert.Equal(t, 10_000, token.RemainQuota)
+	assert.Zero(t, token.UsedQuota)
+	assert.True(t, session.refunded)
+	assert.Nil(t, session.pendingToken)
+	require.ErrorContains(t, session.Settle(100), "refund has started")
+	require.ErrorContains(t, session.Reserve(400), "refund has started")
+	require.NoError(t, model.DB.First(&token, 68).Error)
+	assert.Equal(t, 10_000, token.RemainQuota)
+}
+
+func TestPreConsumeBillingRejectsResellerWithoutOutputLimit(t *testing.T) {
 	truncate(t)
 	seedUser(t, 91, 100_000)
 	seedToken(t, 92, 91, "rsl_unbounded-generation", 10_000)
@@ -201,17 +325,15 @@ func TestPreConsumeBillingReservesFullResellerBalanceWithoutOutputLimit(t *testi
 	relayInfo.SetEstimatePromptTokens(120)
 
 	apiErr := PreConsumeBilling(ctx, 9_000, relayInfo)
-	require.Nil(t, apiErr)
-	require.NotNil(t, relayInfo.Billing)
-	assert.Equal(t, 10_000, relayInfo.Billing.GetPreConsumedQuota())
+	require.NotNil(t, apiErr)
+	assert.Equal(t, 400, apiErr.StatusCode)
+	assert.ErrorIs(t, apiErr, errResellerOutputTokenLimitRequired)
+	assert.Nil(t, relayInfo.Billing)
 
 	var token model.Token
 	require.NoError(t, model.DB.First(&token, 92).Error)
-	assert.Zero(t, token.RemainQuota)
-	require.NoError(t, relayInfo.Billing.Settle(150))
-	require.NoError(t, model.DB.First(&token, 92).Error)
-	assert.Equal(t, 9_850, token.RemainQuota)
-	assert.Equal(t, 150, token.UsedQuota)
+	assert.Equal(t, 10_000, token.RemainQuota)
+	assert.Zero(t, token.UsedQuota)
 }
 
 func TestPreConsumeBillingRejectsExhaustedResellerBeforeRelay(t *testing.T) {
@@ -234,7 +356,7 @@ func TestPreConsumeBillingRejectsExhaustedResellerBeforeRelay(t *testing.T) {
 	assert.Nil(t, relayInfo.Billing)
 }
 
-func TestFullBalanceSettlementCannotOverdrawResellerAllocation(t *testing.T) {
+func TestResellerSettlementClampsUsageToReservedHardCap(t *testing.T) {
 	truncate(t)
 	seedUser(t, 99, 100_000)
 	seedToken(t, 100, 99, "rsl_full-balance-cap", 10_000)
@@ -242,19 +364,46 @@ func TestFullBalanceSettlementCannotOverdrawResellerAllocation(t *testing.T) {
 	relayInfo := &relaycommon.RelayInfo{
 		TokenId: 100, TokenKey: "rsl_full-balance-cap", UserId: 99,
 		RelayFormat: relaytypes.RelayFormatOpenAIResponses,
-		Request:     &dto.OpenAIResponsesRequest{},
+		Request:     &dto.OpenAIResponsesRequest{MaxOutputTokens: common.GetPointer(uint(100))},
 	}
 	relayInfo.SetEstimatePromptTokens(1)
 	require.Nil(t, PreConsumeBilling(ctx, 1, relayInfo))
 
-	require.NoError(t, relayInfo.Billing.Settle(15_000))
+	assert.Equal(t, 101, relayInfo.Billing.GetPreConsumedQuota())
+	require.NoError(t, relayInfo.Billing.Settle(15_000), "usage above the reserved hard cap consumes the reservation without an extra debit")
 	var token model.Token
 	require.NoError(t, model.DB.First(&token, 100).Error)
-	assert.Zero(t, token.RemainQuota)
-	assert.Equal(t, 10_000, token.UsedQuota)
+	assert.Equal(t, 9_899, token.RemainQuota)
+	assert.Equal(t, 101, token.UsedQuota)
+	relayInfo.Billing.Refund(ctx)
+	require.NoError(t, model.DB.First(&token, 100).Error)
+	assert.Equal(t, 9_899, token.RemainQuota, "a delivered response must keep the reserved quota consumed")
+	assert.Equal(t, 101, token.UsedQuota)
 }
 
-func TestPreConsumeBillingTreatsZeroOutputLimitAsUnbounded(t *testing.T) {
+type failingResellerBillingSettler struct {
+	refunded bool
+}
+
+func (s *failingResellerBillingSettler) Settle(int) error         { return errors.New("settlement failed") }
+func (s *failingResellerBillingSettler) Refund(*gin.Context)      { s.refunded = true }
+func (s *failingResellerBillingSettler) NeedsRefund() bool        { return true }
+func (s *failingResellerBillingSettler) GetPreConsumedQuota() int { return 100 }
+func (s *failingResellerBillingSettler) Reserve(int) error        { return nil }
+
+func TestSettleBillingDoesNotRefundDeliveredResellerResponse(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	settler := &failingResellerBillingSettler{}
+	relayInfo := &relaycommon.RelayInfo{
+		TokenKey: "rsl_delivered-response",
+		Billing:  settler,
+	}
+
+	require.Error(t, SettleBilling(ctx, relayInfo, 50))
+	assert.False(t, settler.refunded)
+}
+
+func TestPreConsumeBillingRejectsZeroOutputLimit(t *testing.T) {
 	truncate(t)
 	seedUser(t, 97, 100_000)
 	seedToken(t, 98, 97, "rsl_zero-output-limit", 10_000)
@@ -270,11 +419,13 @@ func TestPreConsumeBillingTreatsZeroOutputLimitAsUnbounded(t *testing.T) {
 	relayInfo.SetEstimatePromptTokens(100)
 
 	apiErr := PreConsumeBilling(ctx, 9_000, relayInfo)
-	require.Nil(t, apiErr)
-	assert.Equal(t, 10_000, relayInfo.Billing.GetPreConsumedQuota())
+	require.NotNil(t, apiErr)
+	assert.Equal(t, 400, apiErr.StatusCode)
+	assert.ErrorIs(t, apiErr, errResellerOutputTokenLimitRequired)
+	assert.Nil(t, relayInfo.Billing)
 }
 
-func TestPreConsumeBillingReservesFullBalanceForInputOnlyUsage(t *testing.T) {
+func TestPreConsumeBillingReservesEstimatedInputOnlyUsage(t *testing.T) {
 	tests := []struct {
 		name      string
 		relayInfo *relaycommon.RelayInfo
@@ -283,18 +434,18 @@ func TestPreConsumeBillingReservesFullBalanceForInputOnlyUsage(t *testing.T) {
 		userID    int
 	}{
 		{
-			name: "embeddings remain capped when token estimation is unavailable",
+			name: "embeddings reserve the estimated input",
 			relayInfo: &relaycommon.RelayInfo{
 				RelayFormat: relaytypes.RelayFormatEmbedding,
-				Request:     &dto.GeneralOpenAIRequest{},
+				Request:     &dto.EmbeddingRequest{Input: "embedding input"},
 			},
 			tokenKey: "rsl_embedding-floor", tokenID: 96, userID: 95,
 		},
 		{
-			name: "reranking remains capped when token estimation is unavailable",
+			name: "reranking reserves the estimated input",
 			relayInfo: &relaycommon.RelayInfo{
 				RelayFormat: relaytypes.RelayFormatRerank,
-				Request:     &dto.GeneralOpenAIRequest{},
+				Request:     &dto.RerankRequest{Documents: []any{"document"}, Query: "query"},
 			},
 			tokenKey: "rsl_rerank-floor", tokenID: 98, userID: 97,
 		},
@@ -310,20 +461,21 @@ func TestPreConsumeBillingReservesFullBalanceForInputOnlyUsage(t *testing.T) {
 			testCase.relayInfo.TokenId = testCase.tokenID
 			testCase.relayInfo.TokenKey = testCase.tokenKey
 			testCase.relayInfo.UserId = testCase.userID
+			testCase.relayInfo.SetEstimatePromptTokens(100)
 
 			apiErr := PreConsumeBilling(ctx, 9_000, testCase.relayInfo)
 			require.Nil(t, apiErr)
 			require.NotNil(t, testCase.relayInfo.Billing)
-			assert.Equal(t, 10_000, testCase.relayInfo.Billing.GetPreConsumedQuota())
+			assert.Equal(t, 100, testCase.relayInfo.Billing.GetPreConsumedQuota())
 
 			var stored model.Token
 			require.NoError(t, model.DB.First(&stored, testCase.tokenID).Error)
-			assert.Zero(t, stored.RemainQuota)
+			assert.Equal(t, 9_900, stored.RemainQuota)
 		})
 	}
 }
 
-func TestPostTextConsumeQuotaSettlesRawResellerTokens(t *testing.T) {
+func TestPostTextConsumeQuotaClampsRawResellerTokensToReservation(t *testing.T) {
 	truncate(t)
 	seedUser(t, 53, 100_000)
 	seedToken(t, 54, 53, "rsl_raw-text", 10_000)
@@ -350,8 +502,8 @@ func TestPostTextConsumeQuotaSettlesRawResellerTokens(t *testing.T) {
 
 	var token model.Token
 	require.NoError(t, model.DB.First(&token, 54).Error)
-	assert.Equal(t, 9_885, token.RemainQuota)
-	assert.Equal(t, 115, token.UsedQuota)
+	assert.Equal(t, 9_980, token.RemainQuota)
+	assert.Equal(t, 20, token.UsedQuota)
 	var user model.User
 	require.NoError(t, model.DB.First(&user, 53).Error)
 	assert.Equal(t, 100_000, user.Quota)
@@ -416,6 +568,8 @@ func TestPostTextConsumeQuotaRequiresAuthoritativeRawTokenUsage(t *testing.T) {
 			}
 			relayInfo := &relaycommon.RelayInfo{
 				TokenId: 154, TokenKey: "rsl_raw-authority", UserId: 153, OriginModelName: "priced-model",
+				RelayFormat: relaytypes.RelayFormatEmbedding,
+				Request:     &dto.EmbeddingRequest{Input: "input"},
 				StartTime:   time.Now(),
 				ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 159},
 				PriceData: types.PriceData{
@@ -423,7 +577,7 @@ func TestPostTextConsumeQuotaRequiresAuthoritativeRawTokenUsage(t *testing.T) {
 					GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
 				},
 			}
-			relayInfo.SetEstimatePromptTokens(77)
+			relayInfo.SetEstimatePromptTokens(1_000)
 			require.Nil(t, PreConsumeBilling(ctx, 20, relayInfo))
 
 			PostTextConsumeQuota(ctx, relayInfo, testCase.usage, nil)
@@ -436,7 +590,7 @@ func TestPostTextConsumeQuotaRequiresAuthoritativeRawTokenUsage(t *testing.T) {
 	}
 }
 
-func TestRealtimeResellerReserveAndSettlementAreRawAndWalletFree(t *testing.T) {
+func TestRealtimeResellerRequestsAreRejectedWithoutAggregateOutputCap(t *testing.T) {
 	truncate(t)
 	seedUser(t, 55, 100_000)
 	seedToken(t, 56, 55, "rsl_raw-realtime", 10_000)
@@ -447,21 +601,15 @@ func TestRealtimeResellerReserveAndSettlementAreRawAndWalletFree(t *testing.T) {
 		RelayFormat: relaytypes.RelayFormatOpenAIRealtime,
 	}
 	apiErr := PreConsumeBilling(ctx, 10, relayInfo)
-	require.Nil(t, apiErr)
-	assert.Equal(t, 10_000, relayInfo.Billing.GetPreConsumedQuota())
-	usage := &dto.RealtimeUsage{
-		TotalTokens: 150, InputTokens: 100, OutputTokens: 50,
-		InputTokenDetails: dto.InputTokenDetails{CachedTokens: 70},
-	}
-
-	require.NoError(t, PreWssConsumeQuota(ctx, relayInfo, usage))
-	assert.Equal(t, 10_000, relayInfo.Billing.GetPreConsumedQuota(), "usage consumes the balance already held at handshake")
-	require.NoError(t, relayInfo.Billing.Settle(80))
+	require.NotNil(t, apiErr)
+	assert.Equal(t, 400, apiErr.StatusCode)
+	assert.ErrorIs(t, apiErr, errResellerRequestHardCapUnsupported)
+	assert.Nil(t, relayInfo.Billing)
 
 	var token model.Token
 	require.NoError(t, model.DB.First(&token, 56).Error)
-	assert.Equal(t, 9_920, token.RemainQuota)
-	assert.Equal(t, 80, token.UsedQuota)
+	assert.Equal(t, 10_000, token.RemainQuota)
+	assert.Zero(t, token.UsedQuota)
 	var user model.User
 	require.NoError(t, model.DB.First(&user, 55).Error)
 	assert.Equal(t, 100_000, user.Quota)
@@ -486,7 +634,7 @@ func TestLegacyResellerTaskSettlesRawReportedTokens(t *testing.T) {
 	assert.Equal(t, 100_000, user.Quota)
 }
 
-func TestResellerBillingConsumesOnlyPrepaidTokenQuota(t *testing.T) {
+func TestResellerBillingConsumesOnlyReservedPrepaidTokenQuota(t *testing.T) {
 	truncate(t)
 	seedUser(t, 61, 1_000)
 	seedToken(t, 62, 61, "rsl_prepaid-test-key", 100)
@@ -508,8 +656,8 @@ func TestResellerBillingConsumesOnlyPrepaidTokenQuota(t *testing.T) {
 	assert.Equal(t, 1_000, user.Quota)
 	var token model.Token
 	require.NoError(t, model.DB.First(&token, 62).Error)
-	assert.Equal(t, 70, token.RemainQuota)
-	assert.Equal(t, 30, token.UsedQuota)
+	assert.Equal(t, 80, token.RemainQuota)
+	assert.Equal(t, 20, token.UsedQuota)
 }
 
 func TestResellerSettlementCanRetryTokenAdjustmentFailure(t *testing.T) {

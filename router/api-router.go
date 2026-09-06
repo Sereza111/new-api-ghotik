@@ -208,6 +208,7 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			optionRoute.GET("/", controller.GetOptions)
 			optionRoute.PUT("/", controller.UpdateOption)
+			optionRoute.PUT("/reseller", controller.UpdateResellerCommercialSettings)
 			optionRoute.POST("/payment_compliance", controller.ConfirmPaymentCompliance)
 			optionRoute.POST("/telegram_channel_bonus/webhook", controller.ConfigureTelegramChannelBonusWebhook)
 			optionRoute.GET("/channel_affinity_cache", controller.GetChannelAffinityCacheStats)
@@ -285,7 +286,10 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			resellerRoute.GET("/config", controller.GetResellerConfig)
 			resellerRoute.GET("/keys", controller.GetResellerKeys)
+			resellerRoute.POST("/subscription", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.PurchaseResellerSubscription)
 			resellerRoute.POST("/keys", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.AddResellerKey)
+			resellerRoute.DELETE("/keys/:id", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.DeleteResellerKey)
+			resellerRoute.POST("/keys/:id/reissue", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.ReissueResellerKey)
 		}
 
 		usageRoute := apiRouter.Group("/usage")

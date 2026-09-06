@@ -39,6 +39,7 @@ type tokenRequest struct {
 	remainQuotaSet    bool                 `json:"-"`
 	unlimitedQuotaSet bool                 `json:"-"`
 	expiredTimeSet    bool                 `json:"-"`
+	groupSet          bool                 `json:"-"`
 }
 
 // UnmarshalJSON keeps track of whether allocation fields were sent. Raw-token
@@ -52,9 +53,10 @@ func (input *tokenRequest) UnmarshalJSON(data []byte) error {
 	}
 	*input = tokenRequest(decoded)
 	var presence struct {
-		RemainQuota    *int   `json:"remain_quota"`
-		UnlimitedQuota *bool  `json:"unlimited_quota"`
-		ExpiredTime    *int64 `json:"expired_time"`
+		RemainQuota    *int    `json:"remain_quota"`
+		UnlimitedQuota *bool   `json:"unlimited_quota"`
+		ExpiredTime    *int64  `json:"expired_time"`
+		Group          *string `json:"group"`
 	}
 	if err := common.Unmarshal(data, &presence); err != nil {
 		return err
@@ -62,6 +64,7 @@ func (input *tokenRequest) UnmarshalJSON(data []byte) error {
 	input.remainQuotaSet = presence.RemainQuota != nil
 	input.unlimitedQuotaSet = presence.UnlimitedQuota != nil
 	input.expiredTimeSet = presence.ExpiredTime != nil
+	input.groupSet = presence.Group != nil
 	return nil
 }
 
@@ -436,7 +439,26 @@ func UpdateToken(c *gin.Context) {
 			return
 		}
 	}
+	legacyResellerGroup := ""
 	if statusOnly == "" {
+		if model.IsResellerTokenKey(cleanToken.Key) && request.groupSet {
+			token.Group = strings.TrimSpace(token.Group)
+			if cleanToken.Group == "" {
+				userGroup, groupErr := getTokenRequestUserGroup(c)
+				if groupErr != nil {
+					common.ApiError(c, groupErr)
+					return
+				}
+				if !isResellerGroupAvailable(userGroup, token.Group) {
+					common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+					return
+				}
+				legacyResellerGroup = token.Group
+			} else if token.Group != cleanToken.Group {
+				common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+				return
+			}
+		}
 		// Raw-token allocations are immutable. The dashboard may submit a stale
 		// snapshot of these fields while editing metadata; the merge below keeps
 		// the durable values instead of treating that payload as an allocation
@@ -478,19 +500,21 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.ModelLimitsEnabled = token.ModelLimitsEnabled
 		cleanToken.ModelLimits = token.ModelLimits
 		cleanToken.AllowIps = token.AllowIps
-		cleanToken.Group = token.Group
-		cleanToken.CrossGroupRetry = token.CrossGroupRetry
-		if token.Group != "auto" {
-			cleanToken.CrossGroupRetry = false
-			_ = cleanToken.SetAutoGroups(nil)
-		} else if request.AutoGroups.Set {
-			if !setTokenAutoGroups(c, cleanToken, request.AutoGroups.Groups) {
-				return
+		if !model.IsResellerTokenKey(cleanToken.Key) {
+			cleanToken.Group = token.Group
+			cleanToken.CrossGroupRetry = token.CrossGroupRetry
+			if token.Group != "auto" {
+				cleanToken.CrossGroupRetry = false
+				_ = cleanToken.SetAutoGroups(nil)
+			} else if request.AutoGroups.Set {
+				if !setTokenAutoGroups(c, cleanToken, request.AutoGroups.Groups) {
+					return
+				}
 			}
 		}
 	}
 	if model.IsResellerTokenKey(cleanToken.Key) {
-		err = cleanToken.UpdateResellerMetadata()
+		err = cleanToken.UpdateResellerMetadataWithLegacyGroup(legacyResellerGroup)
 	} else {
 		err = cleanToken.Update()
 	}

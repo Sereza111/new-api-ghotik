@@ -82,6 +82,9 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
 		}
+		if hardCapErr := validateResellerPassThroughHardCap(c, info, storage); hardCapErr != nil {
+			return hardCapErr
+		}
 		requestBody = common.NewReplayableBodyReader(storage)
 	} else {
 		convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *request)
@@ -106,6 +109,9 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			if err != nil {
 				return newAPIErrorFromParamOverride(err)
 			}
+		}
+		if hardCapErr := validateResellerOutboundHardCap(c, info, jsonData); hardCapErr != nil {
+			return hardCapErr
 		}
 
 		logger.LogDebug(c, "requestBody: %s", jsonData)

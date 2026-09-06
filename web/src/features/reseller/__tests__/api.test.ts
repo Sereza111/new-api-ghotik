@@ -20,13 +20,17 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import {
   createResellerKey,
+  deleteResellerKey,
   getResellerConfig,
   getResellerKeys,
+  purchaseResellerSubscription,
+  reissueResellerKey,
   revealResellerKey,
 } from '../api'
 import type { CreateResellerKeyRequest, ResellerKey } from '../types'
 
 const apiMock = vi.hoisted(() => ({
+  delete: vi.fn(),
   get: vi.fn(),
   post: vi.fn(),
 }))
@@ -41,6 +45,7 @@ const requestConfig = {
 const resellerKey: ResellerKey = {
   id: 42,
   client_label: 'North Studio',
+  group: 'GPT',
   token_millions: 25,
   remaining_tokens: 25_000_000,
   used_tokens: 0,
@@ -55,8 +60,18 @@ const resellerKey: ResellerKey = {
   client_price: 3.6,
 }
 
+const subscription = {
+  active: true,
+  expires_at: 1_790_592_100,
+  list_price: 10,
+  discount_percent: 20,
+  price: 8,
+  duration_days: 30,
+}
+
 describe('reseller API', () => {
   beforeEach(() => {
+    apiMock.delete.mockReset()
     apiMock.get.mockReset()
     apiMock.post.mockReset()
   })
@@ -69,6 +84,14 @@ describe('reseller API', () => {
           data: {
             base_cost_per_million: 0.08,
             default_endpoint: 'https://pugshop.ru/v1',
+            available_groups: [
+              {
+                name: 'GPT',
+                description: 'OpenAI models',
+                ratio: 1,
+              },
+            ],
+            subscription,
           },
         },
       })
@@ -79,6 +102,14 @@ describe('reseller API', () => {
     await expect(getResellerConfig()).resolves.toEqual({
       base_cost_per_million: 0.08,
       default_endpoint: 'https://pugshop.ru/v1',
+      available_groups: [
+        {
+          name: 'GPT',
+          description: 'OpenAI models',
+          ratio: 1,
+        },
+      ],
+      subscription,
     })
     await expect(getResellerKeys()).resolves.toEqual([resellerKey])
     expect(apiMock.get).toHaveBeenNthCalledWith(
@@ -96,6 +127,7 @@ describe('reseller API', () => {
   test('creates a key with the server contract', async () => {
     const request: CreateResellerKeyRequest = {
       client_label: 'North Studio',
+      group: 'GPT',
       token_millions: 25,
       markup_percent: 80,
       term: '30-days',
@@ -109,6 +141,46 @@ describe('reseller API', () => {
     expect(apiMock.post).toHaveBeenCalledWith(
       '/api/reseller/keys',
       request,
+      requestConfig
+    )
+  })
+
+  test('purchases reseller access from the wallet', async () => {
+    const request = { request_id: 'subscription-request-1' }
+    apiMock.post.mockResolvedValue({
+      data: { success: true, data: subscription },
+    })
+
+    await expect(purchaseResellerSubscription(request)).resolves.toEqual(
+      subscription
+    )
+    expect(apiMock.post).toHaveBeenCalledWith(
+      '/api/reseller/subscription',
+      request,
+      requestConfig
+    )
+  })
+
+  test('deletes a reseller key without requesting a quota refund', async () => {
+    apiMock.delete.mockResolvedValue({ data: { success: true } })
+
+    await expect(deleteResellerKey(42)).resolves.toBeUndefined()
+    expect(apiMock.delete).toHaveBeenCalledWith(
+      '/api/reseller/keys/42',
+      requestConfig
+    )
+  })
+
+  test('reissues a reseller secret through the dedicated endpoint', async () => {
+    const reissuedKey = { ...resellerKey, key: 'sk-reissued-full-key' }
+    apiMock.post.mockResolvedValue({
+      data: { success: true, data: reissuedKey },
+    })
+
+    await expect(reissueResellerKey(42)).resolves.toEqual(reissuedKey)
+    expect(apiMock.post).toHaveBeenCalledWith(
+      '/api/reseller/keys/42/reissue',
+      undefined,
       requestConfig
     )
   })

@@ -85,6 +85,26 @@ func TestApplyRoutingSourcePreferencePreservesRouteWithoutPreference(t *testing.
 	assert.False(t, exists)
 }
 
+func TestApplyRoutingSourcePreferencePreservesResellerTokenGroup(t *testing.T) {
+	configureRoutingSourceTest(t, "5")
+	ctx, _ := gin.CreateTestContext(nil)
+	common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "default")
+	common.SetContextKey(ctx, constant.ContextKeyTokenGroup, "default")
+	common.SetContextKey(ctx, constant.ContextKeyTokenKey, "rsl_customer-key")
+	common.SetContextKey(ctx, constant.ContextKeyTokenCrossGroupRetry, false)
+	common.SetContextKey(ctx, constant.ContextKeyUserSetting, dto.UserSetting{
+		RoutingSources: map[string]string{"gpt": "premium"},
+	})
+
+	assert.False(t, ApplyRoutingSourcePreference(ctx, "gpt-5.6-sol", ""))
+	assert.Equal(t, "default", common.GetContextKeyString(ctx, constant.ContextKeyUsingGroup))
+	assert.Equal(t, "default", common.GetContextKeyString(ctx, constant.ContextKeyTokenGroup))
+	assert.False(t, common.GetContextKeyBool(ctx, constant.ContextKeyTokenCrossGroupRetry))
+	_, exists := common.GetContextKey(ctx, constant.ContextKeyTokenAutoGroups)
+	assert.False(t, exists)
+}
+
 func TestApplyRoutingSourcePreferenceFailsSafe(t *testing.T) {
 	configureRoutingSourceTest(t, "5")
 	tests := []struct {

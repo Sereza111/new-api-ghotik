@@ -18,7 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { CircleAlert, Globe2, RefreshCw, Server } from 'lucide-react'
-import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -30,12 +37,19 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { FortuneAtmosphere } from '@/features/home/components/fortune-atmosphere'
+import type { ApiKeyGroupOption } from '@/features/keys/components/api-key-group-combobox'
+import { getSelf } from '@/lib/api'
+import { useAuthStore, type AuthUser } from '@/stores/auth-store'
 
 import { GothicResellerCards } from './components/gothic-reseller-cards'
 import { ResellerConfigurator } from './components/reseller-configurator'
 import { ResellerKeyVault } from './components/reseller-key-vault'
+import { ResellerSubscriptionBand } from './components/reseller-subscription-band'
 import {
   useCreateResellerKey,
+  useDeleteResellerKey,
+  usePurchaseResellerSubscription,
+  useReissueResellerKey,
   useResellerConfig,
   useResellerKeys,
   useRevealResellerKey,
@@ -50,6 +64,7 @@ import type { ResellerDraftValues } from './types'
 
 const DEFAULT_DRAFT: ResellerDraftValues = {
   clientLabel: '',
+  group: '',
   tokenMillions: 10,
   markupPercent: 80,
   term: 'unlimited',
@@ -65,15 +80,22 @@ const FORM_SKELETON_IDS = ['field-1', 'field-2', 'field-3', 'field-4']
 
 export function Reseller() {
   const { i18n, t } = useTranslation()
+  const setUser = useAuthStore((state) => state.auth.setUser)
   const configQuery = useResellerConfig()
   const keysQuery = useResellerKeys()
   const createKeyMutation = useCreateResellerKey()
+  const purchaseSubscriptionMutation = usePurchaseResellerSubscription()
+  const deleteKeyMutation = useDeleteResellerKey()
+  const reissueKeyMutation = useReissueResellerKey()
   const revealKeyMutation = useRevealResellerKey()
+  const refetchResellerConfig = configQuery.refetch
   const pendingIssueRequest = useRef<{
     id: string
     fingerprint: string
   } | null>(null)
+  const pendingSubscriptionRequest = useRef<string | null>(null)
   const [revealedKeys, setRevealedKeys] = useState<Record<number, string>>({})
+  const [subscriptionClock, setSubscriptionClock] = useState(() => Date.now())
   const form = useForm<ResellerDraftValues>({
     resolver: zodResolver(resellerDraftSchema),
     defaultValues: DEFAULT_DRAFT,
@@ -100,12 +122,43 @@ export function Reseller() {
     (value: number) => moneyFormatter.format(value),
     [moneyFormatter]
   )
+  const expiryFormatter = useMemo(
+    () => new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }),
+    [locale]
+  )
+  const formatExpiry = useCallback(
+    (value: number) => expiryFormatter.format(new Date(value * 1000)),
+    [expiryFormatter]
+  )
   const baseCostPerMillion =
     configQuery.data?.base_cost_per_million ?? RESELLER_BASE_COST_PER_MILLION
   const configuredEndpoint =
     configQuery.data?.default_endpoint || DEFAULT_RESELLER_ENDPOINT
+  const groupOptions = useMemo<ApiKeyGroupOption[]>(
+    () =>
+      (configQuery.data?.available_groups ?? []).map((group) => ({
+        value: group.name,
+        label: group.name,
+        desc: group.description,
+        ratio: group.ratio,
+      })),
+    [configQuery.data?.available_groups]
+  )
+  const subscription = configQuery.data?.subscription
+  const subscriptionExpiresAt = subscription?.expires_at ?? 0
+  const subscriptionIsActive = Boolean(
+    subscription?.active && subscriptionExpiresAt * 1000 > subscriptionClock
+  )
+  const hasAvailableGroups = groupOptions.length > 0
+  const canIssue = subscriptionIsActive && hasAvailableGroups
   const revealingKeyId = revealKeyMutation.isPending
     ? revealKeyMutation.variables
+    : null
+  const deletingKeyId = deleteKeyMutation.isPending
+    ? deleteKeyMutation.variables
+    : null
+  const reissuingKeyId = reissueKeyMutation.isPending
+    ? reissueKeyMutation.variables
     : null
   const quote = calculateResellerQuote(
     tokenMillions,
@@ -113,7 +166,45 @@ export function Reseller() {
     baseCostPerMillion
   )
 
+  useEffect(() => {
+    if (!subscription?.active || subscriptionExpiresAt <= 0) return
+
+    const remainingMilliseconds =
+      subscriptionExpiresAt * 1000 - subscriptionClock
+    if (remainingMilliseconds <= 0) {
+      void refetchResellerConfig()
+      return
+    }
+
+    const timeout = window.setTimeout(
+      () => setSubscriptionClock(Date.now()),
+      Math.min(remainingMilliseconds + 100, 2_147_483_647)
+    )
+    return () => window.clearTimeout(timeout)
+  }, [
+    refetchResellerConfig,
+    subscription?.active,
+    subscriptionClock,
+    subscriptionExpiresAt,
+  ])
+
+  const refreshAuthenticatedUser = useCallback(async () => {
+    try {
+      const response = await getSelf()
+      if (response.success && response.data) {
+        setUser(response.data as AuthUser)
+      }
+    } catch {
+      // The paid operation succeeded; a later app refresh can reconcile the header.
+    }
+  }, [setUser])
+
   const handleIssueKey = async (values: ResellerDraftValues) => {
+    if (!canIssue) {
+      toast.error(t('Purchase reseller access before issuing a key.'))
+      return
+    }
+
     const keyNumber = (keysQuery.data?.length ?? 0) + 1
     const clientLabel =
       values.clientLabel.trim() ||
@@ -121,6 +212,7 @@ export function Reseller() {
 
     const requestPayload = {
       client_label: clientLabel,
+      group: values.group,
       token_millions: values.tokenMillions,
       markup_percent: values.markupPercent,
       term: values.term,
@@ -147,12 +239,32 @@ export function Reseller() {
         [createdKey.id]: createdKey.key,
       }))
       form.reset({ ...values, clientLabel: '' })
+      void refreshAuthenticatedUser()
       toast.success(t('Reseller key issued'))
     } catch (error) {
       toast.error(
         error instanceof Error
           ? t(error.message)
           : t('Failed to issue reseller key')
+      )
+    }
+  }
+
+  const handlePurchaseSubscription = async () => {
+    const requestId = pendingSubscriptionRequest.current ?? crypto.randomUUID()
+    pendingSubscriptionRequest.current = requestId
+
+    try {
+      await purchaseSubscriptionMutation.mutateAsync({ request_id: requestId })
+      pendingSubscriptionRequest.current = null
+      setSubscriptionClock(Date.now())
+      void refreshAuthenticatedUser()
+      toast.success(t('Reseller subscription purchased'))
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? t(error.message)
+          : t('Failed to purchase reseller subscription')
       )
     }
   }
@@ -165,6 +277,45 @@ export function Reseller() {
       toast.error(
         error instanceof Error ? t(error.message) : t('Failed to reveal key')
       )
+    }
+  }
+
+  const handleDeleteKey = async (id: number): Promise<boolean> => {
+    try {
+      await deleteKeyMutation.mutateAsync(id)
+      setRevealedKeys((current) => {
+        const next = { ...current }
+        delete next[id]
+        return next
+      })
+      toast.success(t('Reseller key deleted'))
+      return true
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? t(error.message)
+          : t('Failed to delete reseller key')
+      )
+      return false
+    }
+  }
+
+  const handleReissueKey = async (id: number): Promise<boolean> => {
+    try {
+      const reissuedKey = await reissueKeyMutation.mutateAsync(id)
+      setRevealedKeys((current) => ({
+        ...current,
+        [id]: reissuedKey.key,
+      }))
+      toast.success(t('Reseller key reissued'))
+      return true
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? t(error.message)
+          : t('Failed to reissue reseller key')
+      )
+      return false
     }
   }
 
@@ -255,6 +406,32 @@ export function Reseller() {
         formatMoney={formatMoney}
         onSubmit={handleIssueKey}
         isSubmitting={createKeyMutation.isPending}
+        groupOptions={groupOptions}
+        canIssue={canIssue}
+      />
+    )
+  }
+
+  let subscriptionContent: ReactNode = null
+  if (configQuery.data) {
+    subscriptionContent = (
+      <ResellerSubscriptionBand
+        subscription={{
+          ...configQuery.data.subscription,
+          active: subscriptionIsActive,
+        }}
+        formatMoney={formatMoney}
+        formatExpiry={formatExpiry}
+        isPurchasing={purchaseSubscriptionMutation.isPending}
+        hasAvailableGroups={hasAvailableGroups}
+        onPurchase={() => void handlePurchaseSubscription()}
+      />
+    )
+  } else if (configQuery.isPending) {
+    subscriptionContent = (
+      <Skeleton
+        className='h-24 w-full rounded-none'
+        aria-label={t('Loading reseller subscription')}
       />
     )
   }
@@ -310,6 +487,8 @@ export function Reseller() {
               </div>
             </section>
 
+            {subscriptionContent}
+
             <section aria-labelledby='reseller-packages-title'>
               <div className='mb-4 flex flex-wrap items-end justify-between gap-3'>
                 <div>
@@ -340,6 +519,8 @@ export function Reseller() {
                 formatMoney={formatMoney}
                 revealedKeys={revealedKeys}
                 revealingKeyId={revealingKeyId}
+                deletingKeyId={deletingKeyId}
+                reissuingKeyId={reissuingKeyId}
                 isLoading={keysQuery.isPending}
                 isFetching={keysQuery.isFetching}
                 isError={keysQuery.isError}
@@ -350,6 +531,8 @@ export function Reseller() {
                 }
                 onRetry={() => void keysQuery.refetch()}
                 onReveal={(id) => void handleRevealKey(id)}
+                onDelete={handleDeleteKey}
+                onReissue={handleReissueKey}
               />
             </div>
           </div>

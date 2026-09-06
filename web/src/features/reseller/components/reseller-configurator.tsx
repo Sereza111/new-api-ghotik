@@ -1,5 +1,23 @@
-import { KeyRound, ShieldCheck } from 'lucide-react'
-import type { UseFormReturn } from 'react-hook-form'
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import { KeyRound, LockKeyhole, ShieldCheck } from 'lucide-react'
+import { Controller, type UseFormReturn } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
@@ -15,6 +33,10 @@ import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Spinner } from '@/components/ui/spinner'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import {
+  ApiKeyGroupCombobox,
+  type ApiKeyGroupOption,
+} from '@/features/keys/components/api-key-group-combobox'
 
 import {
   RESELLER_MARKUP_OPTIONS,
@@ -29,6 +51,8 @@ type ResellerConfiguratorProps = {
   formatMoney: (value: number) => string
   onSubmit: (values: ResellerDraftValues) => void
   isSubmitting: boolean
+  groupOptions: ApiKeyGroupOption[]
+  canIssue: boolean
 }
 
 const TERM_KEYS: Record<ResellerDraftValues['term'], string> = {
@@ -42,6 +66,15 @@ export function ResellerConfigurator(props: ResellerConfiguratorProps) {
   const { t } = useTranslation()
   const errors = props.form.formState.errors
   const markupPercent = props.form.watch('markupPercent')
+  let issueIcon = <KeyRound data-icon='inline-start' aria-hidden='true' />
+  let issueLabel = t('Issue reseller key')
+  if (props.isSubmitting) {
+    issueIcon = <Spinner data-icon='inline-start' aria-hidden='true' />
+    issueLabel = t('Issuing key...')
+  } else if (!props.canIssue) {
+    issueIcon = <LockKeyhole data-icon='inline-start' aria-hidden='true' />
+    issueLabel = t('Subscription required')
+  }
 
   return (
     <Card data-card-hover='false' className='reseller-tool-card h-full'>
@@ -115,6 +148,46 @@ export function ResellerConfigurator(props: ResellerConfiguratorProps) {
               </div>
             </div>
 
+            <div className='flex flex-col gap-2'>
+              <label htmlFor='reseller-group' className='text-sm font-medium'>
+                {t('Group')}
+              </label>
+              <Controller
+                control={props.form.control}
+                name='group'
+                render={({ field }) => (
+                  <ApiKeyGroupCombobox
+                    id='reseller-group'
+                    ariaLabel={t('Group')}
+                    ariaDescribedBy={
+                      errors.group ? 'reseller-group-error' : undefined
+                    }
+                    ariaInvalid={Boolean(errors.group)}
+                    options={props.groupOptions}
+                    value={field.value}
+                    onValueChange={(value) => {
+                      field.onChange(value)
+                      field.onBlur()
+                    }}
+                    placeholder={t('Select a group')}
+                    disabled={props.isSubmitting}
+                  />
+                )}
+              />
+              {errors.group ? (
+                <p
+                  id='reseller-group-error'
+                  className='text-destructive text-xs'
+                >
+                  {t('Select a group for the reseller key.')}
+                </p>
+              ) : (
+                <p className='text-muted-foreground text-xs leading-5'>
+                  {t('The group determines which models the client can use.')}
+                </p>
+              )}
+            </div>
+
             <div className='grid gap-4 sm:grid-cols-2'>
               <div className='flex flex-col gap-2'>
                 <span className='text-sm font-medium'>
@@ -184,20 +257,22 @@ export function ResellerConfigurator(props: ResellerConfiguratorProps) {
         <CardFooter className='border-border/40 mt-5 flex flex-col items-stretch justify-between gap-3 bg-transparent sm:flex-row sm:items-center'>
           <p className='text-muted-foreground flex items-center gap-2 text-xs leading-5'>
             <ShieldCheck className='size-4 shrink-0' aria-hidden='true' />
-            {t('The key cost is charged from your balance when it is issued.')}
+            {props.canIssue
+              ? t(
+                  'The key cost is charged from your balance when it is issued.'
+                )
+              : t(
+                  'Purchase reseller access to issue keys. You can configure everything first.'
+                )}
           </p>
           <Button
             type='submit'
             size='lg'
             className='sm:shrink-0'
-            disabled={props.isSubmitting}
+            disabled={props.isSubmitting || !props.canIssue}
           >
-            {props.isSubmitting ? (
-              <Spinner data-icon='inline-start' aria-hidden='true' />
-            ) : (
-              <KeyRound data-icon='inline-start' />
-            )}
-            {props.isSubmitting ? t('Issuing key...') : t('Issue reseller key')}
+            {issueIcon}
+            {issueLabel}
           </Button>
         </CardFooter>
       </form>

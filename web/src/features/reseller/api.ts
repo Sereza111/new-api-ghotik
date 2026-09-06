@@ -21,9 +21,11 @@ import { api } from '@/lib/api'
 import { normalizeResellerEndpoint } from './lib/pricing'
 import type {
   CreateResellerKeyRequest,
+  PurchaseResellerSubscriptionRequest,
   ResellerApiResponse,
   ResellerConfig,
   ResellerKey,
+  ResellerSubscription,
 } from './types'
 
 const REQUEST_CONFIG = {
@@ -43,12 +45,43 @@ export async function getResellerConfig(): Promise<ResellerConfig> {
     !config ||
     !Number.isFinite(config.base_cost_per_million) ||
     config.base_cost_per_million <= 0 ||
-    !normalizeResellerEndpoint(config.default_endpoint)
+    !normalizeResellerEndpoint(config.default_endpoint) ||
+    !Array.isArray(config.available_groups) ||
+    config.available_groups.some(
+      (group) =>
+        !group ||
+        typeof group.name !== 'string' ||
+        !group.name.trim() ||
+        typeof group.description !== 'string' ||
+        (typeof group.ratio !== 'number' && typeof group.ratio !== 'string')
+    ) ||
+    !isValidResellerSubscription(config.subscription)
   ) {
     throw new Error(response.data.message || 'Failed to load reseller pricing')
   }
 
   return config
+}
+
+function isValidResellerSubscription(
+  subscription: ResellerSubscription | undefined
+): subscription is ResellerSubscription {
+  return Boolean(
+    subscription &&
+    typeof subscription.active === 'boolean' &&
+    Number.isFinite(subscription.expires_at) &&
+    subscription.expires_at >= 0 &&
+    Number.isFinite(subscription.list_price) &&
+    subscription.list_price >= 0.01 &&
+    Number.isInteger(subscription.discount_percent) &&
+    subscription.discount_percent >= 0 &&
+    subscription.discount_percent <= 90 &&
+    Number.isFinite(subscription.price) &&
+    subscription.price >= 0.01 &&
+    Number.isInteger(subscription.duration_days) &&
+    subscription.duration_days >= 1 &&
+    subscription.duration_days <= 3650
+  )
 }
 
 export async function getResellerKeys(): Promise<ResellerKey[]> {
@@ -78,6 +111,54 @@ export async function createResellerKey(
   }
 
   return response.data.data
+}
+
+export async function deleteResellerKey(id: number): Promise<void> {
+  const response = await api.delete<ResellerApiResponse<null>>(
+    `/api/reseller/keys/${id}`,
+    REQUEST_CONFIG
+  )
+
+  if (!response.data.success) {
+    throw new Error(response.data.message || 'Failed to delete reseller key')
+  }
+}
+
+export async function reissueResellerKey(id: number): Promise<ResellerKey> {
+  const response = await api.post<ResellerApiResponse<ResellerKey>>(
+    `/api/reseller/keys/${id}/reissue`,
+    undefined,
+    REQUEST_CONFIG
+  )
+
+  if (!response.data.success || !response.data.data?.key) {
+    throw new Error(response.data.message || 'Failed to reissue reseller key')
+  }
+
+  return response.data.data
+}
+
+export async function purchaseResellerSubscription(
+  request: PurchaseResellerSubscriptionRequest
+): Promise<ResellerSubscription> {
+  const response = await api.post<ResellerApiResponse<ResellerSubscription>>(
+    '/api/reseller/subscription',
+    request,
+    REQUEST_CONFIG
+  )
+  const subscription = response.data.data
+
+  if (
+    !response.data.success ||
+    !isValidResellerSubscription(subscription) ||
+    !subscription.active
+  ) {
+    throw new Error(
+      response.data.message || 'Failed to purchase reseller subscription'
+    )
+  }
+
+  return subscription
 }
 
 export async function revealResellerKey(id: number): Promise<string> {

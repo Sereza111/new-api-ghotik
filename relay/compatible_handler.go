@@ -99,6 +99,9 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
+		if hardCapErr := validateResellerPassThroughHardCap(c, info, storage); hardCapErr != nil {
+			return hardCapErr
+		}
 		if common.DebugEnabled {
 			if debugBytes, bErr := storage.Bytes(); bErr == nil {
 				logger.LogDebug(c, "requestBody: %s", debugBytes)
@@ -171,6 +174,9 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 			if err != nil {
 				return newAPIErrorFromParamOverride(err)
 			}
+		}
+		if hardCapErr := validateResellerOutboundHardCap(c, info, jsonData); hardCapErr != nil {
+			return hardCapErr
 		}
 
 		logger.LogDebug(c, "text request body: %s", jsonData)

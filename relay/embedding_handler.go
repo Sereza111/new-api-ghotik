@@ -56,6 +56,9 @@ func EmbeddingHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			return newAPIErrorFromParamOverride(err)
 		}
 	}
+	if hardCapErr := validateResellerOutboundHardCap(c, info, jsonData); hardCapErr != nil {
+		return hardCapErr
+	}
 
 	logger.LogDebug(c, "converted embedding request body: %s", jsonData)
 	body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)

@@ -101,7 +101,7 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 		}
 		if relayInfo.Billing != nil {
 			if !prepaidReseller {
-				// Finite raw-token keys already hold their complete SQL balance;
+				// Legacy finite raw-token keys may hold their complete SQL balance;
 				// unlimited keys settle their measured total when the socket closes.
 				return nil
 			}

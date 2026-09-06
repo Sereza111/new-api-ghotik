@@ -20,8 +20,11 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18next from 'i18next'
 import { toast } from 'sonner'
 
-import { updateSystemOption } from '../api'
-import type { UpdateOptionRequest } from '../types'
+import { updateResellerCommercialSettings, updateSystemOption } from '../api'
+import type {
+  UpdateOptionRequest,
+  UpdateResellerCommercialSettingsRequest,
+} from '../types'
 
 // Configuration keys that require status refresh
 const STATUS_RELATED_KEYS = new Set([
@@ -66,6 +69,30 @@ export function useUpdateOption() {
         }
       }
 
+      toast.success(i18next.t('Setting updated successfully'))
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || i18next.t('Failed to update setting'))
+    },
+  })
+}
+
+export function useUpdateResellerCommercialSettings() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (request: UpdateResellerCommercialSettingsRequest) => {
+      const response = await updateResellerCommercialSettings(request)
+      if (!response.success) {
+        throw new Error(
+          response.message || i18next.t('Failed to update setting')
+        )
+      }
+      return response
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['system-options'] })
+      queryClient.invalidateQueries({ queryKey: ['reseller', 'config'] })
       toast.success(i18next.t('Setting updated successfully'))
     },
     onError: (error: Error) => {

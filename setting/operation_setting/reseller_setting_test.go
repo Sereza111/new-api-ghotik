@@ -22,7 +22,31 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestParseResellerSettingOptionsBuildsCompleteValidatedSnapshot(t *testing.T) {
+	defaults := DefaultResellerSetting()
+	settings, err := ParseResellerSettingOptions(map[string]string{
+		ResellerEndpointOption:                 "https://reseller.example/v1",
+		ResellerSubscriptionDiscountOption:     "25",
+		ResellerSubscriptionDurationDaysOption: "90",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, ResellerSetting{
+		BaseCostPerMillion:          defaults.BaseCostPerMillion,
+		Endpoint:                    "https://reseller.example/v1",
+		SubscriptionPrice:           defaults.SubscriptionPrice,
+		SubscriptionDiscountPercent: 25,
+		SubscriptionDurationDays:    90,
+	}, settings)
+
+	_, err = ParseResellerSettingOptions(map[string]string{
+		ResellerBaseCostPerMillionOption:       "0.75",
+		ResellerSubscriptionDurationDaysOption: "0",
+	})
+	require.Error(t, err)
+}
 
 func TestValidateResellerBaseCost(t *testing.T) {
 	for _, value := range []string{"0.01", "0.12", "1", "999999.99", "1000000"} {
@@ -50,5 +74,26 @@ func TestValidateResellerEndpoint(t *testing.T) {
 		"https://pugshop.ru ",
 	} {
 		assert.Error(t, ValidateResellerEndpoint(value), value)
+	}
+}
+
+func TestValidateResellerSubscriptionSettings(t *testing.T) {
+	for _, value := range []string{"0.01", "10", "999999.99", "1000000"} {
+		assert.NoError(t, ValidateResellerSubscriptionPrice(value), value)
+	}
+	for _, value := range []string{"", "0", "0.001", "0.011", "1000000.01", "NaN", "+Inf", " 10"} {
+		assert.Error(t, ValidateResellerSubscriptionPrice(value), value)
+	}
+	for _, value := range []string{"0", "20", "90"} {
+		assert.NoError(t, ValidateResellerSubscriptionDiscountPercent(value), value)
+	}
+	for _, value := range []string{"-1", "91", "1.5", "+1", " 20"} {
+		assert.Error(t, ValidateResellerSubscriptionDiscountPercent(value), value)
+	}
+	for _, value := range []string{"1", "30", "3650"} {
+		assert.NoError(t, ValidateResellerSubscriptionDurationDays(value), value)
+	}
+	for _, value := range []string{"0", "3651", "30.5", "+30", " 30"} {
+		assert.Error(t, ValidateResellerSubscriptionDurationDays(value), value)
 	}
 }

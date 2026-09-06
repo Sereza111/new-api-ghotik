@@ -20,11 +20,19 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
   createResellerKey,
+  deleteResellerKey,
   getResellerConfig,
   getResellerKeys,
+  purchaseResellerSubscription,
+  reissueResellerKey,
   revealResellerKey,
 } from '../api'
-import type { CreateResellerKeyRequest, ResellerKey } from '../types'
+import type {
+  CreateResellerKeyRequest,
+  PurchaseResellerSubscriptionRequest,
+  ResellerConfig,
+  ResellerKey,
+} from '../types'
 
 export const resellerQueryKeys = {
   config: ['reseller', 'config'] as const,
@@ -60,6 +68,54 @@ export function useCreateResellerKey() {
           createdKey,
           ...(currentKeys ?? []).filter((item) => item.id !== createdKey.id),
         ]
+      )
+    },
+  })
+}
+
+export function usePurchaseResellerSubscription() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (request: PurchaseResellerSubscriptionRequest) =>
+      purchaseResellerSubscription(request),
+    onSuccess: (subscription) => {
+      queryClient.setQueryData<ResellerConfig>(
+        resellerQueryKeys.config,
+        (currentConfig) =>
+          currentConfig ? { ...currentConfig, subscription } : currentConfig
+      )
+    },
+  })
+}
+
+export function useDeleteResellerKey() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: number) => deleteResellerKey(id),
+    onSuccess: (_result, deletedId) => {
+      queryClient.setQueryData<ResellerKey[]>(
+        resellerQueryKeys.keys,
+        (currentKeys) =>
+          currentKeys?.filter((item) => item.id !== deletedId) ?? []
+      )
+    },
+  })
+}
+
+export function useReissueResellerKey() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: number) => reissueResellerKey(id),
+    onSuccess: (reissuedKey) => {
+      queryClient.setQueryData<ResellerKey[]>(
+        resellerQueryKeys.keys,
+        (currentKeys) =>
+          currentKeys?.map((item) =>
+            item.id === reissuedKey.id ? reissuedKey : item
+          ) ?? [reissuedKey]
       )
     },
   })

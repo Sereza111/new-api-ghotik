@@ -27,6 +27,7 @@ export type ResellerTerm = (typeof RESELLER_TERMS)[number]
 
 export type ResellerDraftValues = {
   clientLabel: string
+  group: string
   tokenMillions: number
   markupPercent: number
   term: ResellerTerm
@@ -41,11 +42,29 @@ export type ResellerQuote = {
 export type ResellerConfig = {
   base_cost_per_million: number
   default_endpoint: string
+  available_groups: ResellerAvailableGroup[]
+  subscription: ResellerSubscription
+}
+
+export type ResellerAvailableGroup = {
+  name: string
+  description: string
+  ratio: number | string
+}
+
+export type ResellerSubscription = {
+  active: boolean
+  expires_at: number
+  list_price: number
+  discount_percent: number
+  price: number
+  duration_days: number
 }
 
 export type ResellerKey = {
   id: number
   client_label: string
+  group: string
   token_millions: number
   remaining_tokens: number
   used_tokens: number
@@ -62,9 +81,14 @@ export type ResellerKey = {
 
 export type CreateResellerKeyRequest = {
   client_label: string
+  group: string
   token_millions: number
   markup_percent: number
   term: ResellerTerm
+  request_id: string
+}
+
+export type PurchaseResellerSubscriptionRequest = {
   request_id: string
 }
 

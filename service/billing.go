@@ -101,7 +101,7 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 			// counters. Their monetary usage is still settled normally below.
 			rawPreConsumedQuota = 0
 		} else {
-			if currentToken.RemainQuota <= 0 || rawPreConsumedQuota > currentToken.RemainQuota {
+			if currentToken.RemainQuota <= 0 {
 				return types.NewErrorWithStatusCode(
 					quotaErr,
 					types.ErrorCodePreConsumeTokenQuotaFailed,
@@ -110,10 +110,43 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 					types.ErrOptionWithNoRecordErrorLog(),
 				)
 			}
-			rawPreConsumedQuota = currentToken.RemainQuota
-			fullBalanceHeld = true
+			if isResellerBilling(relayInfo) {
+				var requestErr error
+				rawPreConsumedQuota, clamp, requestErr = resellerRequestMaximumTokenQuota(relayInfo)
+				noteQuotaClamp(relayInfo, clamp)
+				if clamp != nil {
+					return types.NewErrorWithStatusCode(
+						clamp,
+						types.ErrorCodeModelPriceError,
+						http.StatusBadRequest,
+						types.ErrOptionWithSkipRetry(),
+					)
+				}
+				if requestErr != nil {
+					return types.NewErrorWithStatusCode(
+						requestErr,
+						types.ErrorCodeInvalidRequest,
+						http.StatusBadRequest,
+						types.ErrOptionWithSkipRetry(),
+					)
+				}
+			}
+			if rawPreConsumedQuota > currentToken.RemainQuota {
+				return types.NewErrorWithStatusCode(
+					quotaErr,
+					types.ErrorCodePreConsumeTokenQuotaFailed,
+					http.StatusForbidden,
+					types.ErrOptionWithSkipRetry(),
+					types.ErrOptionWithNoRecordErrorLog(),
+				)
+			}
+			if !isResellerBilling(relayInfo) {
+				rawPreConsumedQuota = currentToken.RemainQuota
+				fullBalanceHeld = true
+			}
 		}
 		relayInfo.TokenQuotaPreConsumed = rawPreConsumedQuota
+		relayInfo.TokenQuotaReservationInitialized = true
 		if isResellerBilling(relayInfo) {
 			preConsumedQuota = rawPreConsumedQuota
 		}
@@ -157,11 +190,11 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 		}
 
 		if err := relayInfo.Billing.Settle(actualQuota); err != nil {
-			// Raw-token reservations are hard caps and must not be left held when
-			// settlement fails. Refund is synchronous/idempotent for this mode; the
-			// session remains retryable if the compensating write also encounters a
-			// transient database error.
-			if usesRawTokenQuota(relayInfo) {
+			// A reseller response may already have been delivered by the time usage
+			// settlement runs. Do not refund its reservation after a late database
+			// failure, otherwise the client receives the upstream response for free.
+			// Ordinary raw-token requests retain their compensating refund path.
+			if usesRawTokenQuota(relayInfo) && !isResellerBilling(relayInfo) {
 				relayInfo.Billing.Refund(ctx)
 			}
 			return err

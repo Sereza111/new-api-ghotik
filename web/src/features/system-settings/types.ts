@@ -39,6 +39,14 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type UpdateResellerCommercialSettingsRequest = {
+  base_cost_per_million: number
+  endpoint: string
+  subscription_price: number
+  subscription_discount_percent: number
+  subscription_duration_days: number
+}
+
 export type ConfirmPaymentComplianceResponse = {
   success: boolean
   message: string
@@ -271,6 +279,9 @@ export type BillingSettings = {
   DisplayTokenStatEnabled: boolean
   'reseller_setting.base_cost_per_million': number
   'reseller_setting.endpoint': string
+  'reseller_setting.subscription_price': number
+  'reseller_setting.subscription_discount_percent': number
+  'reseller_setting.subscription_duration_days': number
   ModelPrice: string
   ModelRatio: string
   CacheRatio: string
