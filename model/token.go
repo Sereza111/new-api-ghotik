@@ -268,8 +268,10 @@ func ValidateUserToken(key string) (token *Token, err error) {
 	}
 	token, err = GetTokenByKey(key, false)
 	if err == nil {
-		if token.Status == common.TokenStatusExhausted ||
-			token.Status == common.TokenStatusExpired ||
+		if token.Status == common.TokenStatusExhausted && IsResellerTokenKey(token.Key) {
+			return token, ErrResellerTokenQuotaInsufficient
+		}
+		if token.Status == common.TokenStatusExhausted || token.Status == common.TokenStatusExpired ||
 			token.Status != common.TokenStatusEnabled {
 			return token, ErrTokenInvalid
 		}
@@ -293,6 +295,9 @@ func ValidateUserToken(key string) (token *Token, err error) {
 				if err != nil {
 					common.SysLog("failed to update token status" + err.Error())
 				}
+			}
+			if IsResellerTokenKey(token.Key) {
+				return token, ErrResellerTokenQuotaInsufficient
 			}
 			return token, ErrTokenInvalid
 		}

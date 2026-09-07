@@ -378,6 +378,11 @@ func updateOptionMap(key string, value string) (err error) {
 		common.OptionMapRWMutex.Unlock()
 		return nil
 	}
+	switch key {
+	case "ModelPrice", "ModelRatio", "CompletionRatio", "CacheRatio",
+		"CreateCacheRatio", "ImageRatio", "AudioRatio", "AudioCompletionRatio":
+		defer InvalidatePricingCache()
+	}
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
 	common.OptionMap[key] = value

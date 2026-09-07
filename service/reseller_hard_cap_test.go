@@ -60,6 +60,12 @@ func TestResellerRequestMaximumTokenQuotaByRelayFormat(t *testing.T) {
 			want:    200, wantOutput: true,
 		},
 		{
+			name:    "responses missing limit defers until channel selection",
+			format:  relaytypes.RelayFormatOpenAIResponses,
+			request: &dto.OpenAIResponsesRequest{},
+			want:    0, wantOutput: true,
+		},
+		{
 			name:    "claude",
 			format:  relaytypes.RelayFormatClaude,
 			request: &dto.ClaudeRequest{MaxTokens: &maxOutput},
@@ -250,6 +256,107 @@ func TestResellerOutboundHardCapRejectsMissingOrChangedLimit(t *testing.T) {
 	require.ErrorIs(t, ValidateResellerOutboundHardCap(info, []byte(`{"max_output_tokens":0}`)), errResellerOutputTokenLimitRequired)
 	require.ErrorIs(t, ValidateResellerOutboundHardCap(info, []byte(`{}`)), errResellerOutputTokenLimitRequired)
 	assert.ErrorIs(t, ValidateResellerOutboundHardCap(info, []byte(`{"max_output_tokens":200}`)), model.ErrResellerTokenQuotaInsufficient)
+}
+
+func TestResellerCodexResponsesUsesTrustedOutputCeiling(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		TokenKey:                         "rsl_codex-ceiling",
+		RelayFormat:                      relaytypes.RelayFormatOpenAIResponses,
+		Request:                          &dto.OpenAIResponsesRequest{},
+		ChannelMeta:                      &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeCodex, UpstreamModelName: "gpt-5.6-sol"},
+		TokenQuotaPreConsumed:            20 + relayconstant.CodexMaxOutputTokens,
+		TokenQuotaReservationInitialized: true,
+	}
+	info.SetEstimatePromptTokens(20)
+
+	require.NoError(t, ValidateResellerOutboundHardCap(info, []byte(`{}`)))
+	info.TokenQuotaPreConsumed--
+	assert.ErrorIs(t, ValidateResellerOutboundHardCap(info, []byte(`{}`)), model.ErrResellerTokenQuotaInsufficient)
+}
+
+func TestResellerCodexResponsesMissingLimitAllowsConcurrentReservations(t *testing.T) {
+	truncate(t)
+	seedUser(t, 303, 100_000)
+	seedToken(t, 304, 303, "rsl_codex-concurrent", 300_000)
+
+	newRequest := func() *relaycommon.RelayInfo {
+		info := &relaycommon.RelayInfo{
+			TokenId:     304,
+			TokenKey:    "rsl_codex-concurrent",
+			UserId:      303,
+			RelayFormat: relaytypes.RelayFormatOpenAIResponses,
+			Request:     &dto.OpenAIResponsesRequest{},
+		}
+		info.SetEstimatePromptTokens(10)
+		return info
+	}
+
+	first := newRequest()
+	second := newRequest()
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	require.Nil(t, PreConsumeBilling(ctx, 1, first))
+	require.Nil(t, PreConsumeBilling(ctx, 1, second))
+	assert.Equal(t, 10, first.Billing.GetPreConsumedQuota())
+	assert.Equal(t, 10, second.Billing.GetPreConsumedQuota())
+
+	first.ChannelMeta = &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeCodex, UpstreamModelName: "gpt-5.6-sol"}
+	second.ChannelMeta = &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeCodex, UpstreamModelName: "gpt-5.6-sol"}
+	require.NoError(t, ValidateResellerOutboundHardCap(first, []byte(`{}`)))
+	require.NoError(t, ValidateResellerOutboundHardCap(second, []byte(`{}`)))
+	assert.Equal(t, 10+relayconstant.CodexMaxOutputTokens, first.Billing.GetPreConsumedQuota())
+	assert.Equal(t, 10+relayconstant.CodexMaxOutputTokens, second.Billing.GetPreConsumedQuota())
+
+	var token model.Token
+	require.NoError(t, model.DB.First(&token, 304).Error)
+	assert.Equal(t, 300_000-2*(10+relayconstant.CodexMaxOutputTokens), token.RemainQuota)
+}
+
+func TestResellerCodexResponsesChecksFinalUpstreamModel(t *testing.T) {
+	tests := []struct {
+		name          string
+		mappedModel   string
+		body          string
+		wantErr       error
+		wantOutputCap int
+	}{
+		{
+			name:          "mapped upstream model fallback",
+			mappedModel:   "gpt-5.6-sol",
+			body:          `{"max_output_tokens":1}`,
+			wantOutputCap: relayconstant.CodexMaxOutputTokens,
+		},
+		{
+			name:          "final parameter override model",
+			mappedModel:   "provider-alias-without-a-trusted-limit",
+			body:          `{"model":"gpt-6-astra"}`,
+			wantOutputCap: relayconstant.CodexMaxOutputTokens,
+		},
+		{
+			name:        "unknown final model fails closed",
+			mappedModel: "gpt-5.6-sol",
+			body:        `{"model":"unknown-codex-model"}`,
+			wantErr:     errResellerRequestHardCapUnsupported,
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			info := &relaycommon.RelayInfo{
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelType:       constant.ChannelTypeCodex,
+					UpstreamModelName: testCase.mappedModel,
+				},
+			}
+			quota, err := resellerOutboundOutputTokenQuota(info, relaytypes.RelayFormatOpenAIResponses, []byte(testCase.body))
+			if testCase.wantErr != nil {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, testCase.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, testCase.wantOutputCap, quota)
+		})
+	}
 }
 
 func TestEstimateRequestTokenCountsResellerWhenGlobalCountingDisabled(t *testing.T) {

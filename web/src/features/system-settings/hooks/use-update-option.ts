@@ -42,6 +42,23 @@ const STATUS_RELATED_KEYS = new Set([
   'oidc.display_name',
 ])
 
+const PRICING_RELATED_KEYS = new Set([
+  'ModelPrice',
+  'ModelRatio',
+  'CompletionRatio',
+  'CacheRatio',
+  'CreateCacheRatio',
+  'ImageRatio',
+  'AudioRatio',
+  'AudioCompletionRatio',
+  'GroupRatio',
+  'GroupGroupRatio',
+  'UserUsableGroups',
+  'AutoGroups',
+  'billing_setting.billing_mode',
+  'billing_setting.billing_expr',
+])
+
 export function useUpdateOption() {
   const queryClient = useQueryClient()
 
@@ -58,6 +75,10 @@ export function useUpdateOption() {
     onSuccess: (_data, variables) => {
       // Always refresh system-options
       queryClient.invalidateQueries({ queryKey: ['system-options'] })
+
+      if (PRICING_RELATED_KEYS.has(variables.key)) {
+        queryClient.invalidateQueries({ queryKey: ['pricing'] })
+      }
 
       // If updating frontend-display-related config, also refresh status
       if (STATUS_RELATED_KEYS.has(variables.key)) {

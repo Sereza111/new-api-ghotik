@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -135,11 +136,13 @@ func resellerRequestOutputTokenQuota(relayInfo *relaycommon.RelayInfo) (quota in
 		if !ok {
 			return 0, false, fmt.Errorf("%w: expected Responses request, got %T", errResellerRequestHardCapUnsupported, relayInfo.Request)
 		}
-		maxTokens := uint(0)
-		if request.MaxOutputTokens != nil {
-			maxTokens = *request.MaxOutputTokens
+		if request.MaxOutputTokens == nil {
+			// The selected channel is not available during pre-consume. Defer a
+			// missing Responses cap until the final outbound body is validated;
+			// only Codex channels may substitute their trusted upstream ceiling.
+			return 0, true, nil
 		}
-		quota, err = resellerOutputTokenQuota(maxTokens, nil)
+		quota, err = resellerOutputTokenQuota(*request.MaxOutputTokens, nil)
 		return quota, true, err
 	case relaytypes.RelayFormatClaude:
 		request, ok := relayInfo.Request.(*dto.ClaudeRequest)
@@ -436,7 +439,7 @@ func resellerOutboundPromptTokenQuota(c *gin.Context, relayInfo *relaycommon.Rel
 	return tokens, nil
 }
 
-func resellerOutboundOutputTokenQuota(format relaytypes.RelayFormat, jsonData []byte) (int, error) {
+func resellerOutboundOutputTokenQuota(relayInfo *relaycommon.RelayInfo, format relaytypes.RelayFormat, jsonData []byte) (int, error) {
 	switch format {
 	case relaytypes.RelayFormatOpenAI:
 		var request dto.GeneralOpenAIRequest
@@ -449,11 +452,21 @@ func resellerOutboundOutputTokenQuota(format relaytypes.RelayFormat, jsonData []
 		if err := common.Unmarshal(jsonData, &request); err != nil {
 			return 0, err
 		}
-		maxTokens := uint(0)
-		if request.MaxOutputTokens != nil {
-			maxTokens = *request.MaxOutputTokens
+		if relayInfo.GetChannelType() == constant.ChannelTypeCodex {
+			modelName := strings.TrimSpace(request.Model)
+			if modelName == "" {
+				modelName = strings.TrimSpace(relayInfo.GetUpstreamModelName())
+			}
+			limit, ok := relayconstant.CodexModelOutputTokenLimit(modelName)
+			if !ok {
+				return 0, fmt.Errorf("%w: Codex upstream model %q has no trusted output token limit", errResellerRequestHardCapUnsupported, modelName)
+			}
+			return limit, nil
 		}
-		return resellerOutputTokenQuota(maxTokens, nil)
+		if request.MaxOutputTokens == nil {
+			return 0, errResellerOutputTokenLimitRequired
+		}
+		return resellerOutputTokenQuota(*request.MaxOutputTokens, nil)
 	case relaytypes.RelayFormatClaude:
 		var request dto.ClaudeRequest
 		if err := common.Unmarshal(jsonData, &request); err != nil {
@@ -502,7 +515,7 @@ func ValidateResellerOutboundHardCapForFormat(c *gin.Context, relayInfo *relayco
 	}
 	outputQuota := 0
 	if requiresOutput {
-		outputQuota, err = resellerOutboundOutputTokenQuota(finalFormat, jsonData)
+		outputQuota, err = resellerOutboundOutputTokenQuota(relayInfo, finalFormat, jsonData)
 	}
 	if err != nil {
 		return err

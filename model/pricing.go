@@ -50,6 +50,7 @@ type PricingReferencePrice struct {
 }
 
 var pricingReferencePrices = map[string]PricingReferencePrice{
+	"gpt-6-astra":   {InputUSD: 10, OutputUSD: 50},
 	"gpt-5.4":       {InputUSD: 2.5, OutputUSD: 15},
 	"gpt-5.4-mini":  {InputUSD: 0.75, OutputUSD: 4.5},
 	"gpt-5.5":       {InputUSD: 5, OutputUSD: 30},

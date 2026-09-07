@@ -29,6 +29,15 @@ func TestGetPricingReferencePriceReturnsCatalogPrices(t *testing.T) {
 	assert.Zero(t, referencePrice.RequestUSD)
 }
 
+func TestGetPricingReferencePriceReturnsAstraStandardPrices(t *testing.T) {
+	referencePrice := getPricingReferencePrice("gpt-6-astra")
+
+	require.NotNil(t, referencePrice)
+	assert.Equal(t, 10.0, referencePrice.InputUSD)
+	assert.Equal(t, 50.0, referencePrice.OutputUSD)
+	assert.Zero(t, referencePrice.RequestUSD)
+}
+
 func TestGetPricingReferencePriceReturnsIndependentCopy(t *testing.T) {
 	first := getPricingReferencePrice("gpt-5.6-sol")
 	require.NotNil(t, first)

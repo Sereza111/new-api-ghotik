@@ -100,6 +100,7 @@ var defaultModelRatio = map[string]float64{
 	"gpt-5.6-sol":                               2.5,
 	"gpt-5.6-terra":                             1.25,
 	"gpt-5.6-luna":                              0.5,
+	"gpt-6-astra":                               5, // $10 / 1M tokens
 	"gpt-3.5-turbo":                             0.25,
 	"gpt-3.5-turbo-0613":                        0.75,
 	"gpt-3.5-turbo-16k":                         1.5, // $0.003 / 1K tokens
@@ -330,6 +331,7 @@ var defaultCompletionRatio = map[string]float64{
 	"gpt-4o-gizmo-*": 3,
 	"gpt-4-all":      2,
 	"gpt-image-1":    8,
+	"gpt-6-astra":    5,
 }
 
 // InitRatioSettings initializes all model related settings maps
