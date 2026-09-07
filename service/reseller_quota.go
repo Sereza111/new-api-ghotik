@@ -452,21 +452,21 @@ func resellerOutboundOutputTokenQuota(relayInfo *relaycommon.RelayInfo, format r
 		if err := common.Unmarshal(jsonData, &request); err != nil {
 			return 0, err
 		}
-		if relayInfo.GetChannelType() == constant.ChannelTypeCodex {
-			modelName := strings.TrimSpace(request.Model)
-			if modelName == "" {
-				modelName = strings.TrimSpace(relayInfo.GetUpstreamModelName())
-			}
-			limit, ok := relayconstant.CodexModelOutputTokenLimit(modelName)
-			if !ok {
-				return 0, fmt.Errorf("%w: Codex upstream model %q has no trusted output token limit", errResellerRequestHardCapUnsupported, modelName)
-			}
-			return limit, nil
+		if relayInfo.GetChannelType() != constant.ChannelTypeCodex && request.MaxOutputTokens != nil {
+			return resellerOutputTokenQuota(*request.MaxOutputTokens, nil)
 		}
-		if request.MaxOutputTokens == nil {
+		modelName := strings.TrimSpace(request.Model)
+		if modelName == "" {
+			modelName = strings.TrimSpace(relayInfo.GetUpstreamModelName())
+		}
+		if modelName == "" {
 			return 0, errResellerOutputTokenLimitRequired
 		}
-		return resellerOutputTokenQuota(*request.MaxOutputTokens, nil)
+		limit, ok := relayconstant.CodexModelOutputTokenLimit(modelName)
+		if !ok {
+			return 0, fmt.Errorf("%w: upstream model %q has no trusted output token limit", errResellerRequestHardCapUnsupported, modelName)
+		}
+		return limit, nil
 	case relaytypes.RelayFormatClaude:
 		var request dto.ClaudeRequest
 		if err := common.Unmarshal(jsonData, &request); err != nil {

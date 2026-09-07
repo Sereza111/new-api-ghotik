@@ -359,6 +359,42 @@ func TestResellerCodexResponsesChecksFinalUpstreamModel(t *testing.T) {
 	}
 }
 
+func TestResellerOpenAIResponsesUsesKnownModelCeilingWhenLimitIsMissing(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:       constant.ChannelTypeOpenAI,
+			UpstreamModelName: "gpt-5.6-sol",
+		},
+	}
+
+	quota, err := resellerOutboundOutputTokenQuota(
+		info,
+		relaytypes.RelayFormatOpenAIResponses,
+		[]byte(`{"model":"gpt-5.6-sol"}`),
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, relayconstant.CodexMaxOutputTokens, quota)
+}
+
+func TestResellerOpenAIResponsesKeepsExplicitOutputLimit(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:       constant.ChannelTypeOpenAI,
+			UpstreamModelName: "gpt-5.6-sol",
+		},
+	}
+
+	quota, err := resellerOutboundOutputTokenQuota(
+		info,
+		relaytypes.RelayFormatOpenAIResponses,
+		[]byte(`{"model":"gpt-5.6-sol","max_output_tokens":512}`),
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, 512, quota)
+}
+
 func TestEstimateRequestTokenCountsResellerWhenGlobalCountingDisabled(t *testing.T) {
 	previous := constant.CountToken
 	constant.CountToken = false
