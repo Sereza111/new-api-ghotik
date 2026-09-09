@@ -222,7 +222,8 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.PUT("/reseller", controller.UpdateResellerCommercialSettings)
 			optionRoute.GET("/model_pricing", controller.GetModelPricingConfig)
 			optionRoute.PATCH("/model_pricing", controller.UpdateModelPricingConfig)
-
+			optionRoute.POST("/model_pricing/convert", controller.PreviewModelPricingConversion)
+			optionRoute.POST("/model_pricing/preview", controller.PreviewModelPricing)
 			optionRoute.POST("/payment_compliance", controller.ConfirmPaymentCompliance)
 			optionRoute.POST("/telegram_channel_bonus/webhook", controller.ConfigureTelegramChannelBonusWebhook)
 			optionRoute.GET("/channel_affinity_cache", controller.GetChannelAffinityCacheStats)
