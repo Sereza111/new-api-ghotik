@@ -17,6 +17,33 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// appendResellerSettlementInfo reports the durable debit, not the requested
+// settlement target. An unreconciled hold is explicitly separate from usage.
+func appendResellerSettlementInfo(other map[string]interface{}, info *relaycommon.RelayInfo) {
+	charged := info.TokenQuotaPreConsumed
+	if info.TokenQuotaCharged != nil {
+		charged = *info.TokenQuotaCharged
+	} else {
+		other["reseller_settlement_pending"] = true
+	}
+	other["reseller_token_quota"] = charged
+	other["reseller_reserved_tokens"] = info.FinalPreConsumedQuota
+	if info.TokenQuotaActual != nil {
+		other["reseller_measured_tokens"] = *info.TokenQuotaActual
+	} else {
+		other["reseller_usage_missing"] = true
+	}
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	if !ok || adminInfo == nil {
+		adminInfo = map[string]interface{}{}
+		other["admin_info"] = adminInfo
+	}
+	adminInfo["reseller_accounting"] = map[string]interface{}{
+		"operation_id":    info.TokenQuotaOperationID,
+		"unfunded_tokens": info.TokenQuotaUnfunded,
+	}
+}
+
 // attachQuotaSaturationToOther nests a quota saturation marker under
 // other.admin_info.quota_saturation. Nesting under admin_info makes it
 // admin-only for free, since model.formatUserLogs strips the whole admin_info

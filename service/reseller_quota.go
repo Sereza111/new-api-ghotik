@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 package service
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"strings"
@@ -398,6 +399,12 @@ func resellerGenericInputMeta(jsonData []byte) (*relaytypes.TokenCountMeta, erro
 }
 
 func resellerOutboundPromptTokenQuota(c *gin.Context, relayInfo *relaycommon.RelayInfo, format relaytypes.RelayFormat, jsonData []byte, requiresOutput bool) (int, error) {
+	if format == relaytypes.RelayFormatOpenAIResponses && isResellerBilling(relayInfo) && !relayInfo.TokenUnlimited {
+		// A heuristic text estimate is not a hard reservation, even when every
+		// tool result was extracted. Validate hidden-context features and use
+		// the final UTF-8 payload as a conservative input bound instead.
+		return resellerResponsesInputTokenQuota(jsonData, relayInfo.GetEstimatePromptTokens(), relayInfo.GetUpstreamModelName())
+	}
 	request, err := resellerOutboundRequest(format, jsonData, requiresOutput)
 	var meta *relaytypes.TokenCountMeta
 	if err == nil {
@@ -437,6 +444,124 @@ func resellerOutboundPromptTokenQuota(c *gin.Context, relayInfo *relaycommon.Rel
 		return 0, err
 	}
 	return tokens, nil
+}
+
+// resellerResponsesInputIsBounded only walks actual input items/content. Tool
+// arguments and results remain literal text; property names in a function's
+// JSON schema must not be mistaken for provider-side history references.
+func resellerResponsesInputIsBounded(value any, allowHidden bool) bool {
+	switch input := value.(type) {
+	case nil, string:
+		return true
+	case []any:
+		for _, item := range input {
+			if !resellerResponsesInputIsBounded(item, allowHidden) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		if encrypted, exists := input["encrypted_content"]; exists && encrypted != nil && encrypted != "" {
+			if !allowHidden {
+				return false
+			}
+		}
+		inputType, _ := input["type"].(string)
+		switch inputType {
+		case "", "message":
+			content, exists := input["content"]
+			return exists && content != nil && resellerResponsesInputIsBounded(content, allowHidden)
+		case "input_text", "output_text", "summary_text", "reasoning_text":
+			_, ok := input["text"].(string)
+			return ok
+		case "refusal":
+			_, ok := input["refusal"].(string)
+			return ok
+		case "function_call", "custom_tool_call":
+			field := "arguments"
+			if inputType == "custom_tool_call" {
+				field = "input"
+			}
+			_, nameOK := input["name"].(string)
+			_, textOK := input[field].(string)
+			return nameOK && textOK
+		case "function_call_output", "custom_tool_call_output":
+			output, exists := input["output"]
+			return exists && output != nil && resellerResponsesInputIsBounded(output, allowHidden)
+		case "reasoning":
+			if input["id"] != nil && input["id"] != "" && !allowHidden {
+				return false
+			}
+			return resellerResponsesInputIsBounded(input["summary"], allowHidden) && resellerResponsesInputIsBounded(input["content"], allowHidden)
+		case "compaction", "item_reference":
+			return allowHidden
+		}
+	}
+	return false
+}
+
+func resellerResponsesInputTokenQuota(jsonData []byte, estimatedTokens int, upstreamModel string) (int, error) {
+	var request map[string]any
+	if err := common.Unmarshal(jsonData, &request); err != nil {
+		return 0, err
+	}
+	if request == nil {
+		return 0, fmt.Errorf("%w: Responses request must be an object", errResellerRequestHardCapUnsupported)
+	}
+	hasHiddenInput := false
+	for _, field := range []string{"previous_response_id", "conversation"} {
+		if value, exists := request[field]; exists && value != nil && value != "" {
+			hasHiddenInput = true
+		}
+	}
+	if prompt, ok := request["prompt"].(map[string]any); ok && prompt["id"] != nil && prompt["id"] != "" {
+		hasHiddenInput = true
+	}
+	if !resellerResponsesInputIsBounded(request["input"], false) {
+		if !resellerResponsesInputIsBounded(request["input"], true) {
+			return 0, fmt.Errorf("%w: use explicit text history and tool results; media and unknown input types have no verified token bound", errResellerRequestHardCapUnsupported)
+		}
+		hasHiddenInput = true
+	}
+	if tools, exists := request["tools"]; exists && tools != nil {
+		declarations, ok := tools.([]any)
+		if !ok {
+			return 0, fmt.Errorf("%w: Responses tools must be an array", errResellerRequestHardCapUnsupported)
+		}
+		for _, declaration := range declarations {
+			tool, ok := declaration.(map[string]any)
+			if !ok || (tool["type"] != "function" && tool["type"] != "custom") {
+				return 0, fmt.Errorf("%w: hosted tools can add unbounded input; only client-executed function and custom tools are supported", errResellerRequestHardCapUnsupported)
+			}
+		}
+	}
+	if hasHiddenInput {
+		if name, ok := request["model"].(string); ok && strings.TrimSpace(name) != "" {
+			upstreamModel = strings.TrimSpace(name)
+		}
+		limit, known := relayconstant.CodexModelContextTokenLimit(upstreamModel)
+		if !known {
+			return 0, fmt.Errorf("%w: hidden Responses history requires a verified model context limit", errResellerRequestHardCapUnsupported)
+		}
+		return limit, nil
+	}
+
+	// Byte-level tokenizers cannot produce more text tokens than UTF-8 input
+	// bytes. Reserve the entire serialized body, not only selected DTO fields,
+	// plus framing for each structural item and the request envelope. Counting
+	// delimiters inside literal tool output only makes this more conservative.
+	structures := bytes.Count(jsonData, []byte{'{'}) + bytes.Count(jsonData, []byte{'['})
+	if len(jsonData) > common.MaxQuota || structures > (common.MaxQuota-256)/32 {
+		return 0, fmt.Errorf("%w: Responses input exceeds the reservation limit", errResellerRequestHardCapUnsupported)
+	}
+	quota, clamp := resellerTokenQuota(len(jsonData), 256+32*structures)
+	if clamp != nil {
+		return 0, clamp
+	}
+	if estimatedTokens > quota {
+		quota = estimatedTokens
+	}
+	return quota, nil
 }
 
 func resellerOutboundOutputTokenQuota(relayInfo *relaycommon.RelayInfo, format relaytypes.RelayFormat, jsonData []byte) (int, error) {
@@ -575,6 +700,29 @@ func authoritativeTextTokenQuota(usage *dto.Usage, locallyCounted bool, fallback
 		effectiveUsage = normalizedUsage
 	} else if !hasReportedTextTokenUsage(usage) && strings.TrimSpace(usage.UsageSource) == "" {
 		return 0, nil, false
+	}
+	// Provider usage is still untrusted input. Invalid counters must not turn
+	// a consumed request into a zero charge or release its reservation.
+	for _, count := range []int{effectiveUsage.PromptTokens, effectiveUsage.CompletionTokens,
+		effectiveUsage.TotalTokens, effectiveUsage.InputTokens, effectiveUsage.OutputTokens,
+		effectiveUsage.PromptCacheHitTokens, effectiveUsage.PromptTokensDetails.CachedTokens,
+		effectiveUsage.PromptTokensDetails.CacheCreationTokensTotal()} {
+		if count < 0 || count > common.MaxQuota {
+			return 0, nil, false
+		}
+	}
+	cache := max(effectiveUsage.PromptCacheHitTokens, effectiveUsage.PromptTokensDetails.CachedTokens)
+	if details := effectiveUsage.InputTokensDetails; details != nil {
+		if details.CachedTokens < 0 || details.CachedTokens > common.MaxQuota || details.CacheCreationTokensTotal() < 0 {
+			return 0, nil, false
+		}
+		cache = max(cache, details.CachedTokens)
+	}
+	if effectiveUsage.UsageSemantic != dto.BillingUsageSemanticAnthropic {
+		input := max(effectiveUsage.PromptTokens, effectiveUsage.InputTokens)
+		if cache > input {
+			return 0, nil, false
+		}
 	}
 
 	if !hasReportedTextTokenUsage(effectiveUsage) {

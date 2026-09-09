@@ -15,6 +15,20 @@ package constant
 
 const CodexMaxOutputTokens = 128_000
 
+// CodexModelContextTokenLimit is the published total context ceiling for these
+// models. Hidden Responses history must reserve this ceiling rather than its
+// small reference/ciphertext size. Unknown aliases have no verified bound.
+// Sources: https://developers.openai.com/api/docs/models/gpt-5.6-sol
+// and the corresponding gpt-5.6-terra, gpt-5.6-luna, gpt-6-astra model pages.
+func CodexModelContextTokenLimit(model string) (int, bool) {
+	switch model {
+	case "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra":
+		return 1_050_000, true
+	default:
+		return 0, false
+	}
+}
+
 var codexModelNames = [...]string{
 	"gpt-6-astra",
 	"gpt-5.6-sol",

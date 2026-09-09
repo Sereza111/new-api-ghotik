@@ -356,7 +356,7 @@ func TestPreConsumeBillingRejectsExhaustedResellerBeforeRelay(t *testing.T) {
 	assert.Nil(t, relayInfo.Billing)
 }
 
-func TestResellerSettlementClampsUsageToReservedHardCap(t *testing.T) {
+func TestResellerSettlementDisablesKeyWhenMeasuredUsageExceedsAllocation(t *testing.T) {
 	truncate(t)
 	seedUser(t, 99, 100_000)
 	seedToken(t, 100, 99, "rsl_full-balance-cap", 10_000)
@@ -370,15 +370,20 @@ func TestResellerSettlementClampsUsageToReservedHardCap(t *testing.T) {
 	require.Nil(t, PreConsumeBilling(ctx, 1, relayInfo))
 
 	assert.Equal(t, 101, relayInfo.Billing.GetPreConsumedQuota())
-	require.NoError(t, relayInfo.Billing.Settle(15_000), "usage above the reserved hard cap consumes the reservation without an extra debit")
+	require.NoError(t, relayInfo.Billing.Settle(15_000))
+	require.NoError(t, relayInfo.Billing.Settle(15_000), "retry must not charge twice")
 	var token model.Token
 	require.NoError(t, model.DB.First(&token, 100).Error)
-	assert.Equal(t, 9_899, token.RemainQuota)
-	assert.Equal(t, 101, token.UsedQuota)
+	assert.Zero(t, token.RemainQuota)
+	assert.Equal(t, 10_000, token.UsedQuota)
+	assert.Equal(t, common.TokenStatusDisabled, token.Status)
+	require.NotNil(t, relayInfo.TokenQuotaCharged)
+	assert.Equal(t, 10_000, *relayInfo.TokenQuotaCharged)
+	assert.Equal(t, 5_000, relayInfo.TokenQuotaUnfunded)
 	relayInfo.Billing.Refund(ctx)
 	require.NoError(t, model.DB.First(&token, 100).Error)
-	assert.Equal(t, 9_899, token.RemainQuota, "a delivered response must keep the reserved quota consumed")
-	assert.Equal(t, 101, token.UsedQuota)
+	assert.Zero(t, token.RemainQuota, "a delivered response must keep its charge")
+	assert.Equal(t, 10_000, token.UsedQuota)
 }
 
 type failingResellerBillingSettler struct {
@@ -475,7 +480,7 @@ func TestPreConsumeBillingReservesEstimatedInputOnlyUsage(t *testing.T) {
 	}
 }
 
-func TestPostTextConsumeQuotaClampsRawResellerTokensToReservation(t *testing.T) {
+func TestPostTextConsumeQuotaSettlesMeasuredResellerTokensAndLogsDurableDebit(t *testing.T) {
 	truncate(t)
 	seedUser(t, 53, 100_000)
 	seedToken(t, 54, 53, "rsl_raw-text", 10_000)
@@ -502,8 +507,15 @@ func TestPostTextConsumeQuotaClampsRawResellerTokensToReservation(t *testing.T) 
 
 	var token model.Token
 	require.NoError(t, model.DB.First(&token, 54).Error)
-	assert.Equal(t, 9_980, token.RemainQuota)
-	assert.Equal(t, 20, token.UsedQuota)
+	assert.Equal(t, 9_885, token.RemainQuota)
+	assert.Equal(t, 115, token.UsedQuota)
+	var log model.Log
+	require.NoError(t, model.LOG_DB.Where("token_id = ?", 54).Last(&log).Error)
+	var other map[string]interface{}
+	require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+	assert.Equal(t, float64(token.UsedQuota), other["reseller_token_quota"])
+	assert.Equal(t, float64(115), other["reseller_measured_tokens"])
+	assert.NotContains(t, other, "reseller_usage_missing")
 	var user model.User
 	require.NoError(t, model.DB.First(&user, 53).Error)
 	assert.Equal(t, 100_000, user.Quota)
@@ -586,6 +598,17 @@ func TestPostTextConsumeQuotaRequiresAuthoritativeRawTokenUsage(t *testing.T) {
 			require.NoError(t, model.DB.First(&token, 154).Error)
 			assert.Equal(t, testCase.wantRemaining, token.RemainQuota)
 			assert.Equal(t, testCase.wantUsed, token.UsedQuota)
+			var log model.Log
+			require.NoError(t, model.LOG_DB.Where("token_id = ?", 154).Last(&log).Error)
+			var other map[string]interface{}
+			require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+			assert.Equal(t, float64(token.UsedQuota), other["reseller_token_quota"])
+			if testCase.wantUsed == 1_000 {
+				assert.Equal(t, true, other["reseller_usage_missing"])
+				assert.NotContains(t, other, "reseller_measured_tokens")
+			} else {
+				assert.Equal(t, float64(0), other["reseller_measured_tokens"])
+			}
 		})
 	}
 }
@@ -634,7 +657,7 @@ func TestLegacyResellerTaskSettlesRawReportedTokens(t *testing.T) {
 	assert.Equal(t, 100_000, user.Quota)
 }
 
-func TestResellerBillingConsumesOnlyReservedPrepaidTokenQuota(t *testing.T) {
+func TestResellerBillingConsumesMeasuredPrepaidTokenQuota(t *testing.T) {
 	truncate(t)
 	seedUser(t, 61, 1_000)
 	seedToken(t, 62, 61, "rsl_prepaid-test-key", 100)
@@ -656,8 +679,8 @@ func TestResellerBillingConsumesOnlyReservedPrepaidTokenQuota(t *testing.T) {
 	assert.Equal(t, 1_000, user.Quota)
 	var token model.Token
 	require.NoError(t, model.DB.First(&token, 62).Error)
-	assert.Equal(t, 80, token.RemainQuota)
-	assert.Equal(t, 20, token.UsedQuota)
+	assert.Equal(t, 70, token.RemainQuota)
+	assert.Equal(t, 30, token.UsedQuota)
 }
 
 func TestResellerSettlementCanRetryTokenAdjustmentFailure(t *testing.T) {
@@ -673,7 +696,7 @@ func TestResellerSettlementCanRetryTokenAdjustmentFailure(t *testing.T) {
 
 	require.Error(t, session.Settle(50))
 	assert.False(t, session.settled)
-	assert.False(t, session.fundingSettled, "reseller token failure must remain refundable")
+	assert.False(t, session.fundingSettled, "reseller token failure must remain retryable")
 	seedToken(t, 64, 63, "rsl_retry-settlement", 0)
 	require.NoError(t, model.DB.Model(&model.Token{}).Where("id = ?", 64).Update("used_quota", 100).Error)
 
@@ -685,7 +708,7 @@ func TestResellerSettlementCanRetryTokenAdjustmentFailure(t *testing.T) {
 	assert.Equal(t, 50, token.UsedQuota)
 }
 
-func TestResellerRefundRemainsRetryableAfterSettlementFailure(t *testing.T) {
+func TestResellerSettlementFailureCannotRefundDeliveredUsage(t *testing.T) {
 	truncate(t)
 	seedUser(t, 64, 1_000)
 	relayInfo := &relaycommon.RelayInfo{
@@ -696,11 +719,10 @@ func TestResellerRefundRemainsRetryableAfterSettlementFailure(t *testing.T) {
 		preConsumedQuota: 100, tokenConsumed: 100,
 	}
 
-	// The first settlement cannot find its token.  It must not mark the
-	// session settled/funding-settled, otherwise a failed request would lose
-	// the entire prepaid reservation.
+	// A database failure after upstream delivery must not turn the response
+	// into a free request. Preserve its hold and retry the same settlement.
 	require.Error(t, session.Settle(50))
-	assert.True(t, session.NeedsRefund())
+	assert.False(t, session.NeedsRefund())
 
 	seedToken(t, 65, 64, "rsl_retry-refund", 0)
 	require.NoError(t, model.DB.Model(&model.Token{}).Where("id = ?", 65).Update("used_quota", 100).Error)
@@ -709,8 +731,15 @@ func TestResellerRefundRemainsRetryableAfterSettlementFailure(t *testing.T) {
 	assert.False(t, session.NeedsRefund())
 	var token model.Token
 	require.NoError(t, model.DB.First(&token, 65).Error)
-	assert.Equal(t, 100, token.RemainQuota)
-	assert.Zero(t, token.UsedQuota)
+	assert.Zero(t, token.RemainQuota)
+	assert.Equal(t, 100, token.UsedQuota)
+	require.ErrorContains(t, session.Settle(40), "settlement target changed")
+	require.Error(t, session.Reserve(120))
+	require.NoError(t, session.Settle(50))
+	require.NoError(t, session.Settle(50))
+	require.NoError(t, model.DB.First(&token, 65).Error)
+	assert.Equal(t, 50, token.RemainQuota)
+	assert.Equal(t, 50, token.UsedQuota)
 }
 
 func TestLegacyResellerBillingDoesNotMutateWallet(t *testing.T) {

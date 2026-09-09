@@ -130,6 +130,11 @@ type RelayInfo struct {
 	// TokenQuotaActual is populated by token-metered response handlers before
 	// settlement. Nil distinguishes a measured zero from missing accounting.
 	TokenQuotaActual *int
+	// Reseller settlement records measured usage separately from the durable
+	// debit. Nil charged means the reservation has not been reconciled yet.
+	TokenQuotaCharged     *int
+	TokenQuotaOperationID string
+	TokenQuotaUnfunded    int
 	// ForcePreConsume 为 true 时禁用 BillingSession 的信任额度旁路，
 	// 强制预扣全额。用于异步任务（视频/音乐生成等），因为请求返回后任务仍在运行，
 	// 必须在提交前锁定全额。

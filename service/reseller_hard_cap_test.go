@@ -20,6 +20,7 @@ package service
 
 import (
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -247,7 +248,7 @@ func TestResellerOutboundHardCapRejectsMissingOrChangedLimit(t *testing.T) {
 		RelayFormat:                      relaytypes.RelayFormatOpenAIResponses,
 		Request:                          &dto.OpenAIResponsesRequest{MaxOutputTokens: &maxOutput},
 		RequestConversionChain:           []relaytypes.RelayFormat{relaytypes.RelayFormatOpenAIResponses},
-		TokenQuotaPreConsumed:            120,
+		TokenQuotaPreConsumed:            450,
 		TokenQuotaReservationInitialized: true,
 	}
 	info.SetEstimatePromptTokens(20)
@@ -264,7 +265,7 @@ func TestResellerCodexResponsesUsesTrustedOutputCeiling(t *testing.T) {
 		RelayFormat:                      relaytypes.RelayFormatOpenAIResponses,
 		Request:                          &dto.OpenAIResponsesRequest{},
 		ChannelMeta:                      &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeCodex, UpstreamModelName: "gpt-5.6-sol"},
-		TokenQuotaPreConsumed:            20 + relayconstant.CodexMaxOutputTokens,
+		TokenQuotaPreConsumed:            290 + relayconstant.CodexMaxOutputTokens,
 		TokenQuotaReservationInitialized: true,
 	}
 	info.SetEstimatePromptTokens(20)
@@ -303,12 +304,69 @@ func TestResellerCodexResponsesMissingLimitAllowsConcurrentReservations(t *testi
 	second.ChannelMeta = &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeCodex, UpstreamModelName: "gpt-5.6-sol"}
 	require.NoError(t, ValidateResellerOutboundHardCap(first, []byte(`{}`)))
 	require.NoError(t, ValidateResellerOutboundHardCap(second, []byte(`{}`)))
-	assert.Equal(t, 10+relayconstant.CodexMaxOutputTokens, first.Billing.GetPreConsumedQuota())
-	assert.Equal(t, 10+relayconstant.CodexMaxOutputTokens, second.Billing.GetPreConsumedQuota())
+	assert.Equal(t, 290+relayconstant.CodexMaxOutputTokens, first.Billing.GetPreConsumedQuota())
+	assert.Equal(t, 290+relayconstant.CodexMaxOutputTokens, second.Billing.GetPreConsumedQuota())
 
 	var token model.Token
 	require.NoError(t, model.DB.First(&token, 304).Error)
-	assert.Equal(t, 300_000-2*(10+relayconstant.CodexMaxOutputTokens), token.RemainQuota)
+	assert.Equal(t, 300_000-2*(290+relayconstant.CodexMaxOutputTokens), token.RemainQuota)
+}
+
+func TestResellerResponsesReservationsCoverAgentHistory(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-sol","input":[{"type":"function_call_output","call_id":"call_1","output":"` + strings.Repeat("tool output ", 20_000) + `"},{"role":"assistant","content":[{"type":"output_text","text":"История"}]}],"tools":[{"type":"function","name":"read","parameters":{"properties":{"file_id":{"type":"string"}}}}]}`)
+	info := &relaycommon.RelayInfo{TokenKey: "rsl_bound", RelayFormat: relaytypes.RelayFormatOpenAIResponses,
+		Request: &dto.OpenAIResponsesRequest{}, TokenQuotaPreConsumed: 150_000}
+	info.SetEstimatePromptTokens(11_000)
+	err := ValidateResellerOutboundHardCap(info, body)
+	require.ErrorIs(t, err, model.ErrResellerTokenQuotaInsufficient)
+	info.TokenQuotaPreConsumed = 1_000_000
+	require.NoError(t, ValidateResellerOutboundHardCap(info, body))
+	quota, err := resellerResponsesInputTokenQuota(body, 11_000, "gpt-5.6-sol")
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, quota, len(body))
+}
+
+func TestResellerResponsesHiddenHistoryRequiresFullContextReservation(t *testing.T) {
+	for _, field := range []string{
+		`"previous_response_id":"resp_saved"`,
+		`"conversation":"conv_saved"`,
+		`"input":[{"type":"reasoning","encrypted_content":"opaque"}]`,
+		`"input":[{"type":"compaction","encrypted_content":"opaque"}]`,
+		`"input":[{"type":"item_reference","id":"item_saved"}]`,
+		`"prompt":{"id":"stored_prompt"}`,
+	} {
+		t.Run(field, func(t *testing.T) {
+			body := []byte(`{"model":"gpt-5.6-sol",` + field + `}`)
+			info := &relaycommon.RelayInfo{TokenKey: "rsl_hidden", RelayFormat: relaytypes.RelayFormatOpenAIResponses,
+				Request: &dto.OpenAIResponsesRequest{}, TokenQuotaPreConsumed: 1_000_000}
+			require.ErrorIs(t, ValidateResellerOutboundHardCap(info, body), model.ErrResellerTokenQuotaInsufficient)
+			info.TokenQuotaPreConsumed = 1_178_000
+			require.NoError(t, ValidateResellerOutboundHardCap(info, body))
+			unknown := []byte(`{"model":"unknown",` + field + `}`)
+			_, err := resellerResponsesInputTokenQuota(unknown, 10, "gpt-5.6-sol")
+			require.ErrorIs(t, err, errResellerRequestHardCapUnsupported)
+		})
+	}
+	for _, body := range []string{
+		`{"tools":[{"type":"web_search"}]}`,
+		`{"input":[{"type":"input_file","file_id":"remote"}]}`,
+		`{"input":[{"id":"hidden_message"}]}`,
+	} {
+		_, err := resellerResponsesInputTokenQuota([]byte(body), 10, "gpt-5.6-sol")
+		require.ErrorIs(t, err, errResellerRequestHardCapUnsupported)
+	}
+}
+
+func TestAuthoritativeResellerUsageRejectsInvalidCounters(t *testing.T) {
+	for _, usage := range []*dto.Usage{
+		{PromptTokens: -1, CompletionTokens: 10},
+		{PromptTokens: 100, CompletionTokens: -1},
+		{PromptTokens: 100, CompletionTokens: 10, PromptTokensDetails: dto.InputTokenDetails{CachedTokens: 101}},
+		{PromptTokens: 100, CompletionTokens: 10, InputTokensDetails: &dto.InputTokenDetails{CachedTokens: -1}},
+	} {
+		_, _, authoritative := authoritativeTextTokenQuota(usage, false, 1)
+		assert.False(t, authoritative)
+	}
 }
 
 func TestResellerCodexResponsesChecksFinalUpstreamModel(t *testing.T) {

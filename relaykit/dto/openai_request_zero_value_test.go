@@ -206,3 +206,89 @@ func TestGeneralOpenAIRequestGetSystemRoleName(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAIResponsesInputTokenMetadata(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []MediaInput
+	}{
+		{
+			name:  "plain prompt",
+			input: `"Read the project"`,
+			want:  []MediaInput{{Type: "input_text", Text: "Read the project"}},
+		},
+		{
+			name: "agent tool history",
+			input: `[
+				{"role":"user","content":"Read the project"},
+				{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I will inspect the files"}]},
+				{"type":"function_call","call_id":"call_1","name":"exec_command","arguments":"{\"cmd\":\"rg --files\"}"},
+				{"type":"function_call_output","call_id":"call_1","output":"main.go\nservice/billing_session.go"},
+				{"type":"input_text","text":"Continue"}
+			]`,
+			want: []MediaInput{
+				{Type: "input_text", Text: "Read the project"},
+				{Type: "input_text", Text: "I will inspect the files"},
+				{Type: "input_text", Text: "exec_command"},
+				{Type: "input_text", Text: `{"cmd":"rg --files"}`},
+				{Type: "input_text", Text: "main.go\nservice/billing_session.go"},
+				{Type: "input_text", Text: "Continue"},
+			},
+		},
+		{
+			name: "custom tool and structured output",
+			input: `[
+				{"type":"custom_tool_call","name":"apply_patch","input":"*** Begin Patch\n*** End Patch"},
+				{"type":"custom_tool_call_output","output":[{"type":"input_text","text":"Patched"},{"type":"input_image","image_url":"https://example.com/result.png","detail":"high"}]},
+				{"type":"function_call_output","output":[{"type":"input_text","text":"Report"},{"type":"input_file","file_url":{"url":"https://example.com/report.pdf"}}]}
+			]`,
+			want: []MediaInput{
+				{Type: "input_text", Text: "apply_patch"},
+				{Type: "input_text", Text: "*** Begin Patch\n*** End Patch"},
+				{Type: "input_text", Text: "Patched"},
+				{Type: "input_image", ImageUrl: "https://example.com/result.png", Detail: "high"},
+				{Type: "input_text", Text: "Report"},
+				{Type: "input_file", FileUrl: "https://example.com/report.pdf"},
+			},
+		},
+		{
+			name: "visible reasoning and refusal are not encrypted state",
+			input: `[
+				{"type":"reasoning","summary":[{"type":"summary_text","text":"Inspected the request"}],"content":[{"type":"reasoning_text","text":"Reviewing the result"}],"encrypted_content":"opaque-state-not-countable"},
+				{"type":"message","role":"assistant","content":[{"type":"refusal","refusal":"Cannot perform this action"}]},
+				{"type":"item_reference","id":"server-side-history"}
+			]`,
+			want: []MediaInput{
+				{Type: "input_text", Text: "Inspected the request"},
+				{Type: "input_text", Text: "Reviewing the result"},
+				{Type: "input_text", Text: "Cannot perform this action"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := OpenAIResponsesRequest{
+				Model: "gpt-5",
+				Input: json.RawMessage(tt.input),
+				Tools: json.RawMessage(`[{"type":"function","name":"exec_command","description":"Run a shell command","parameters":{"type":"object","properties":{"cmd":{"type":"string"}}}}]`),
+			}
+			before, err := kitutil.Marshal(req)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, req.ParseInput())
+			meta := req.GetTokenCountMeta()
+			require.NotNil(t, meta)
+			for _, part := range tt.want {
+				if part.Type == "input_text" {
+					assert.Contains(t, meta.CombineText, part.Text)
+				}
+			}
+			assert.Contains(t, meta.CombineText, string(req.Tools))
+			assert.NotContains(t, meta.CombineText, "opaque-state-not-countable")
+			assert.NotContains(t, meta.CombineText, "server-side-history")
+			after, err := kitutil.Marshal(req)
+			require.NoError(t, err)
+			assert.Equal(t, before, after, "token counting must not alter the forwarded request")
+		})
+	}
+}

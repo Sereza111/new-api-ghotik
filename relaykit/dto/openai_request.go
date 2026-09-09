@@ -1015,94 +1015,69 @@ type MediaInput struct {
 	Detail   string `json:"detail,omitempty"` // 仅 input_image 有效
 }
 
-// ParseInput parses the Responses API `input` field into a normalized slice of MediaInput.
-// Reference implementation mirrors Message.ParseContent:
-//   - input can be a string, treated as an input_text item
-//   - input can be an array of objects with a `type` field
-//     supported types: input_text, input_image, input_file
+// ParseInput extracts visible text and media from Responses input, including
+// assistant history and tool calls/results. The result is only token-counting
+// metadata: encrypted reasoning, item references and server-side history cannot
+// be measured from it. The original input is never rewritten.
 func (r *OpenAIResponsesRequest) ParseInput() []MediaInput {
-	if r.Input == nil {
+	if len(r.Input) == 0 {
 		return nil
 	}
-
-	var mediaInputs []MediaInput
-
-	// Try string first
-	// if str, ok := kitutil.GetJsonType(r.Input); ok {
-	// 	inputs = append(inputs, MediaInput{Type: "input_text", Text: str})
-	// 	return inputs
-	// }
-	if kitutil.GetJsonType(r.Input) == "string" {
-		var str string
-		_ = kitutil.Unmarshal(r.Input, &str)
-		mediaInputs = append(mediaInputs, MediaInput{Type: "input_text", Text: str})
-		return mediaInputs
+	var input any
+	if err := kitutil.Unmarshal(r.Input, &input); err != nil {
+		return nil
 	}
+	return parseResponsesInputContent(input)
+}
 
-	// Try array of parts
-	if kitutil.GetJsonType(r.Input) == "array" {
-		var inputs []Input
-		_ = kitutil.Unmarshal(r.Input, &inputs)
-		for _, input := range inputs {
-			if kitutil.GetJsonType(input.Content) == "string" {
-				var str string
-				_ = kitutil.Unmarshal(input.Content, &str)
-				mediaInputs = append(mediaInputs, MediaInput{Type: "input_text", Text: str})
+func parseResponsesInputContent(value any) []MediaInput {
+	switch input := value.(type) {
+	case string:
+		return []MediaInput{{Type: "input_text", Text: input}}
+	case []any:
+		var parts []MediaInput
+		for _, item := range input {
+			parts = append(parts, parseResponsesInputContent(item)...)
+		}
+		return parts
+	case map[string]any:
+		inputType, _ := input["type"].(string)
+		switch inputType {
+		case "", "message":
+			return parseResponsesInputContent(input["content"])
+		case "input_text", "output_text", "summary_text", "reasoning_text":
+			return parseResponsesInputContent(input["text"])
+		case "refusal":
+			return parseResponsesInputContent(input["refusal"])
+		case "function_call":
+			parts := parseResponsesInputContent(input["name"])
+			return append(parts, parseResponsesInputContent(input["arguments"])...)
+		case "custom_tool_call":
+			parts := parseResponsesInputContent(input["name"])
+			return append(parts, parseResponsesInputContent(input["input"])...)
+		case "function_call_output", "custom_tool_call_output":
+			return parseResponsesInputContent(input["output"])
+		case "reasoning":
+			parts := parseResponsesInputContent(input["summary"])
+			return append(parts, parseResponsesInputContent(input["content"])...)
+		case "input_image", "input_file":
+			urlField := "image_url"
+			if inputType == "input_file" {
+				urlField = "file_url"
 			}
-
-			if kitutil.GetJsonType(input.Content) == "array" {
-				var array []any
-				_ = kitutil.Unmarshal(input.Content, &array)
-				for _, itemAny := range array {
-					// Already parsed MediaContent
-					if media, ok := itemAny.(MediaInput); ok {
-						mediaInputs = append(mediaInputs, media)
-						continue
-					}
-
-					// Generic map
-					item, ok := itemAny.(map[string]any)
-					if !ok {
-						continue
-					}
-
-					typeVal, ok := item["type"].(string)
-					if !ok {
-						continue
-					}
-					switch typeVal {
-					case "input_text":
-						text, _ := item["text"].(string)
-						mediaInputs = append(mediaInputs, MediaInput{Type: "input_text", Text: text})
-					case "input_image":
-						// image_url may be string or object with url field
-						var imageUrl string
-						switch v := item["image_url"].(type) {
-						case string:
-							imageUrl = v
-						case map[string]any:
-							if url, ok := v["url"].(string); ok {
-								imageUrl = url
-							}
-						}
-						mediaInputs = append(mediaInputs, MediaInput{Type: "input_image", ImageUrl: imageUrl})
-					case "input_file":
-						// file_url may be string or object with url field
-						var fileUrl string
-						switch v := item["file_url"].(type) {
-						case string:
-							fileUrl = v
-						case map[string]any:
-							if url, ok := v["url"].(string); ok {
-								fileUrl = url
-							}
-						}
-						mediaInputs = append(mediaInputs, MediaInput{Type: "input_file", FileUrl: fileUrl})
-					}
-				}
+			var url string
+			switch source := input[urlField].(type) {
+			case string:
+				url = source
+			case map[string]any:
+				url, _ = source["url"].(string)
 			}
+			if inputType == "input_file" {
+				return []MediaInput{{Type: inputType, FileUrl: url}}
+			}
+			detail, _ := input["detail"].(string)
+			return []MediaInput{{Type: inputType, ImageUrl: url, Detail: detail}}
 		}
 	}
-
-	return mediaInputs
+	return nil
 }

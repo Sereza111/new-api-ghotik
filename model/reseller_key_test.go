@@ -408,6 +408,170 @@ func TestResellerQuotaAdjustmentIsIdempotent(t *testing.T) {
 	assert.Equal(t, 100_000, stored.UsedQuota)
 }
 
+func testResellerRequestSettlement(t *testing.T, db *gorm.DB, databaseType common.DatabaseType) {
+	t.Helper()
+	previousDB := DB
+	previousMainType := common.MainDatabaseType()
+	previousLogType := common.LogDatabaseType()
+	previousRedisEnabled := common.RedisEnabled
+	DB = db
+	common.SetDatabaseTypes(databaseType, previousLogType)
+	common.RedisEnabled = false
+	initCol()
+	defer func() {
+		DB = previousDB
+		common.SetDatabaseTypes(previousMainType, previousLogType)
+		common.RedisEnabled = previousRedisEnabled
+		initCol()
+	}()
+	require.NoError(t, db.AutoMigrate(&User{}, &Token{}, &ResellerQuotaOperation{}))
+	suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
+	user := User{Username: "reseller-settle-" + suffix, AffCode: suffix, Password: "unused", Status: common.UserStatusEnabled, Quota: 1_000}
+	require.NoError(t, db.Create(&user).Error)
+	defer func() {
+		require.NoError(t, db.Where("user_id = ?", user.Id).Delete(&ResellerQuotaOperation{}).Error)
+		require.NoError(t, db.Unscoped().Where("user_id = ?", user.Id).Delete(&Token{}).Error)
+		require.NoError(t, db.Unscoped().Where("id = ?", user.Id).Delete(&User{}).Error)
+	}()
+
+	for index, tc := range []struct {
+		name     string
+		reserved int
+		actual   int
+		charged  int
+		disabled bool
+		rotate   bool
+	}{
+		{name: "debit beyond reservation", reserved: 100, actual: 350, charged: 350},
+		{name: "return unused reservation", reserved: 700, actual: 200, charged: 200},
+		{name: "explicit zero usage", reserved: 700, actual: 0, charged: 0},
+		{name: "exact reservation", reserved: 700, actual: 700, charged: 700},
+		{name: "shortage consumes available balance", reserved: 700, actual: 1_200, charged: 1_000, disabled: true},
+		{name: "shortage with zero available balance", reserved: 1_000, actual: 1_200, charged: 1_000, disabled: true},
+		{name: "settle after secret rotation", reserved: 700, actual: 200, charged: 200, rotate: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			key := "rsl_settle_" + suffix + "_" + strconv.Itoa(index)
+			token := Token{UserId: user.Id, Key: key, Status: common.TokenStatusEnabled,
+				ExpiredTime: -1, QuotaMode: TokenQuotaModeTokens, RemainQuota: 1_000}
+			require.NoError(t, db.Create(&token).Error)
+			opID := "request-" + suffix + "-" + strconv.Itoa(index)
+			require.NoError(t, ReserveResellerTokenQuota(token.Id, key, tc.reserved, opID+":reserve"))
+			if tc.rotate {
+				require.NoError(t, db.Model(&Token{}).Where("id = ?", token.Id).Updates(map[string]interface{}{
+					"key": key + "_rotated", "status": common.TokenStatusDisabled,
+				}).Error)
+			}
+			charged, err := SettleResellerTokenQuota(token.Id, key, tc.reserved, tc.actual, opID+":settle")
+			require.NoError(t, err)
+			assert.Equal(t, tc.charged, charged)
+			var stored Token
+			require.NoError(t, db.First(&stored, token.Id).Error)
+			assert.Equal(t, tc.charged, stored.UsedQuota)
+			assert.Equal(t, 1_000-tc.charged, stored.RemainQuota)
+			if tc.disabled || tc.rotate {
+				assert.Equal(t, common.TokenStatusDisabled, stored.Status)
+			}
+			// Later top-ups must not turn a replayed shortage into another debit.
+			require.NoError(t, db.Model(&Token{}).Where("id = ?", token.Id).
+				Update("remain_quota", gorm.Expr("remain_quota + ?", 50)).Error)
+			replayed, err := SettleResellerTokenQuota(token.Id, key, tc.reserved, tc.actual, opID+":settle")
+			require.NoError(t, err)
+			assert.Equal(t, charged, replayed)
+			require.NoError(t, db.First(&stored, token.Id).Error)
+			assert.Equal(t, 1_050-tc.charged, stored.RemainQuota)
+			assert.Equal(t, tc.charged, stored.UsedQuota)
+			_, err = SettleResellerTokenQuota(token.Id, key, tc.reserved, tc.actual+1, opID+":settle")
+			assert.ErrorIs(t, err, ErrResellerQuotaOperationConflict)
+			var ledger struct{ Adjustment int }
+			require.NoError(t, db.Model(&ResellerQuotaOperation{}).Select("COALESCE(SUM(adjustment), 0) AS adjustment").
+				Where("token_id = ?", token.Id).Scan(&ledger).Error)
+			assert.Equal(t, -tc.charged, ledger.Adjustment, "ledger must match the durable charge")
+			var operations int64
+			require.NoError(t, db.Model(&ResellerQuotaOperation{}).Where("token_id = ?", token.Id).Count(&operations).Error)
+			assert.EqualValues(t, 2, operations, "zero-delta settlements also need a replay marker")
+			if tc.disabled {
+				assert.ErrorIs(t, ReserveResellerTokenQuota(token.Id, key, 1, opID+":new"), ErrResellerTokenQuotaInsufficient)
+				require.NoError(t, ReserveResellerTokenQuota(token.Id, key, tc.reserved, opID+":reserve"), "a committed reservation replay stays successful")
+			}
+		})
+	}
+
+	t.Run("concurrent requests and disabled in-flight refund", func(t *testing.T) {
+		key := "rsl_concurrent_" + suffix
+		token := Token{UserId: user.Id, Key: key, Status: common.TokenStatusEnabled,
+			ExpiredTime: -1, QuotaMode: TokenQuotaModeTokens, RemainQuota: 1_000}
+		require.NoError(t, db.Create(&token).Error)
+		start := make(chan struct{})
+		results := make(chan error, 2)
+		for i := range 2 {
+			go func(index int) {
+				<-start
+				results <- ReserveResellerTokenQuota(token.Id, key, 600, suffix+":parallel:"+strconv.Itoa(index))
+			}(i)
+		}
+		close(start)
+		first, second := <-results, <-results
+		assert.True(t, (first == nil) != (second == nil), "only one reservation can fit")
+		if first != nil {
+			assert.ErrorIs(t, first, ErrResellerTokenQuotaInsufficient)
+		}
+		if second != nil {
+			assert.ErrorIs(t, second, ErrResellerTokenQuotaInsufficient)
+		}
+		require.NoError(t, ReserveResellerTokenQuota(token.Id, key, 300, suffix+":other-in-flight"))
+		charged, err := SettleResellerTokenQuota(token.Id, key, 600, 900, suffix+":shortage")
+		require.NoError(t, err)
+		assert.Equal(t, 700, charged)
+		charged, err = SettleResellerTokenQuota(token.Id, key, 300, 100, suffix+":in-flight-refund")
+		require.NoError(t, err)
+		assert.Equal(t, 100, charged)
+		var stored Token
+		require.NoError(t, db.First(&stored, token.Id).Error)
+		assert.Equal(t, 200, stored.RemainQuota)
+		assert.Equal(t, 800, stored.UsedQuota)
+		assert.Equal(t, common.TokenStatusDisabled, stored.Status, "refunds must not silently re-enable an unfunded key")
+		assert.ErrorIs(t, ReserveResellerTokenQuota(token.Id, key, 1, suffix+":after-refund"), ErrResellerTokenQuotaInsufficient)
+	})
+	assert.Equal(t, 1_000, getUserQuotaFromDB(t, user.Id), "reseller request settlement must not debit the wallet")
+}
+
+func TestResellerRequestSettlementSQLite(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:reseller-request-settlement?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	testResellerRequestSettlement(t, db, common.DatabaseTypeSQLite)
+}
+
+func TestResellerRequestSettlementMySQL(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_MYSQL_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_MYSQL_DSN is not configured")
+	}
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	testResellerRequestSettlement(t, db, common.DatabaseTypeMySQL)
+}
+
+func TestResellerRequestSettlementPostgreSQL(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN is not configured")
+	}
+	db, err := gorm.Open(postgres.New(postgres.Config{DSN: dsn, PreferSimpleProtocol: true}), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	testResellerRequestSettlement(t, db, common.DatabaseTypePostgreSQL)
+}
+
 func TestResellerTokenDeleteMethodRemovesKeyWithoutRefund(t *testing.T) {
 	truncateTables(t)
 	resetBatchUpdateTestState(t)

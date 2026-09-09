@@ -431,9 +431,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		); ok {
 			rawTokenQuota = authoritativeQuota
 			noteQuotaClamp(relayInfo, clamp)
-			if !isResellerBilling(relayInfo) {
-				relayInfo.TokenQuotaActual = &rawTokenQuota
-			}
+			relayInfo.TokenQuotaActual = &rawTokenQuota
 		}
 		if isResellerBilling(relayInfo) {
 			settlementQuota = rawTokenQuota
@@ -540,7 +538,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
 	if isResellerBilling(relayInfo) {
-		other["reseller_token_quota"] = settlementQuota
+		appendResellerSettlementInfo(other, relayInfo)
 	} else if usesRawTokenQuota(relayInfo) {
 		other["token_quota_mode"] = model.TokenQuotaModeTokens
 		other["raw_token_quota"] = rawTokenQuota

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -16,6 +17,51 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// responsesUsageForBilling keeps provider counters separate from local estimates.
+// Presence matters: an explicit zero is billable usage, whereas an empty usage
+// object cannot prove that a request consumed no tokens.
+func responsesUsageForBilling(upstream *dto.Usage, responseBody []byte) *dto.Usage {
+	if upstream == nil {
+		return nil
+	}
+	type reportedCounters struct {
+		InputTokens  *int `json:"input_tokens"`
+		OutputTokens *int `json:"output_tokens"`
+	}
+	var envelope struct {
+		Usage    *reportedCounters `json:"usage"`
+		Response *struct {
+			Usage *reportedCounters `json:"usage"`
+		} `json:"response"`
+	}
+	decodeErr := common.Unmarshal(responseBody, &envelope)
+	reported := envelope.Usage
+	if envelope.Response != nil {
+		reported = envelope.Response.Usage
+	}
+	estimated := decodeErr != nil || reported == nil || reported.InputTokens == nil || reported.OutputTokens == nil
+
+	usage := *upstream
+	usage.BillingUsage = nil
+	usage.PromptTokens = upstream.InputTokens
+	usage.CompletionTokens = upstream.OutputTokens
+	if upstream.InputTokensDetails != nil {
+		details := *upstream.InputTokensDetails
+		usage.InputTokensDetails = &details
+		usage.PromptTokensDetails = details
+	}
+	usage.UsageSource = dto.BillingUsageSourceOAIResponses
+	usage.UsageSemantic = dto.BillingUsageSemanticOpenAI
+	billingUsage := usage
+	usage.BillingUsage = &dto.BillingUsage{
+		Source:      dto.BillingUsageSourceOAIResponses,
+		Semantic:    dto.BillingUsageSemanticOpenAI,
+		Estimated:   estimated,
+		OpenAIUsage: &billingUsage,
+	}
+	return &usage
+}
 
 func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
@@ -30,7 +76,11 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
-	if oaiError := responsesResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
+	// A terminal Response object can contain both an error and billable usage.
+	// Forward that outcome and settle it; treating it as a transport rejection
+	// would retry the request and refund work the upstream already performed.
+	isTerminalResponse := responsesResponse.Object == "response" && relaycommon.IsNonBillableResponsesStatus(responsesResponse.Status)
+	if oaiError := responsesResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" && !isTerminalResponse {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 
@@ -38,15 +88,13 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
 	// compute usage
-	usage := dto.Usage{}
-	if responsesResponse.Usage != nil {
-		usage.PromptTokens = responsesResponse.Usage.InputTokens
-		usage.CompletionTokens = responsesResponse.Usage.OutputTokens
-		usage.TotalTokens = responsesResponse.Usage.TotalTokens
-		if responsesResponse.Usage.InputTokensDetails != nil {
-			usage.PromptTokensDetails.CachedTokens = responsesResponse.Usage.InputTokensDetails.CachedTokens
-			usage.PromptTokensDetails.CacheWriteTokens = responsesResponse.Usage.InputTokensDetails.CacheWriteTokens
-		}
+	usage := responsesUsageForBilling(responsesResponse.Usage, responseBody)
+	if usage == nil {
+		usage = &dto.Usage{BillingUsage: &dto.BillingUsage{
+			Source:    dto.BillingUsageSourceOAIResponses,
+			Semantic:  dto.BillingUsageSemanticOpenAI,
+			Estimated: true,
+		}}
 	}
 	// Count actual tool invocations from Output (not tool declarations).
 	for _, output := range responsesResponse.Output {
@@ -69,7 +117,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	}
 	imageCounter.Commit(info)
 
-	return &usage, nil
+	return usage, nil
 }
 
 func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
@@ -81,6 +129,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	defer service.CloseResponseBodyGracefully(resp)
 
 	var usage = &dto.Usage{}
+	hasReportedUsage := false
 	var responseTextBuilder strings.Builder
 	imageCounter := &relaycommon.ImageGenerationCallCounter{}
 	imageCommitted := false
@@ -94,25 +143,17 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Error(err)
 			return
 		}
+		switch streamResponse.Type {
+		case "response.completed", "response.done", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
+			if streamResponse.Response != nil && streamResponse.Response.Usage != nil {
+				usage = responsesUsageForBilling(streamResponse.Response.Usage, []byte(data))
+				hasReportedUsage = true
+			}
+		}
 		sendResponsesStreamData(c, streamResponse, data)
 		switch streamResponse.Type {
 		case "response.completed", "response.done":
 			if streamResponse.Response != nil {
-				if streamResponse.Response.Usage != nil {
-					if streamResponse.Response.Usage.InputTokens != 0 {
-						usage.PromptTokens = streamResponse.Response.Usage.InputTokens
-					}
-					if streamResponse.Response.Usage.OutputTokens != 0 {
-						usage.CompletionTokens = streamResponse.Response.Usage.OutputTokens
-					}
-					if streamResponse.Response.Usage.TotalTokens != 0 {
-						usage.TotalTokens = streamResponse.Response.Usage.TotalTokens
-					}
-					if streamResponse.Response.Usage.InputTokensDetails != nil {
-						usage.PromptTokensDetails.CachedTokens = streamResponse.Response.Usage.InputTokensDetails.CachedTokens
-						usage.PromptTokensDetails.CacheWriteTokens = streamResponse.Response.Usage.InputTokensDetails.CacheWriteTokens
-					}
-				}
 				if !imageCommitted {
 					if relaycommon.IsNonBillableResponsesStatus(streamResponse.Response.Status) {
 						imageCounter.Reset()
@@ -158,6 +199,14 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		}
 	})
 
+	if hasReportedUsage {
+		return usage, nil
+	}
+
+	// A stream that ends without final usage has an unknown billable total.
+	// Keep the existing local estimate for ordinary monetary accounting, but
+	// never present it as authoritative evidence for releasing a token reserve.
+	common.SetContextKey(c, constant.ContextKeyLocalCountTokens, true)
 	if usage.CompletionTokens == 0 {
 		// 计算输出文本的 token 数量
 		tempStr := responseTextBuilder.String()
@@ -173,6 +222,11 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	}
 
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	usage.BillingUsage = &dto.BillingUsage{
+		Source:    dto.BillingUsageSourceOAIResponses,
+		Semantic:  dto.BillingUsageSemanticOpenAI,
+		Estimated: true,
+	}
 
 	return usage, nil
 }

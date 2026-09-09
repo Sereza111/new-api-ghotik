@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -231,5 +233,83 @@ func requireOrderedSubstrings(t *testing.T, s string, parts ...string) {
 		idx := strings.Index(s[offset:], part)
 		require.NotEqualf(t, -1, idx, "missing %q after byte offset %d", part, offset)
 		offset += idx + len(part)
+	}
+}
+
+func TestResellerResponsesCompatibilityTerminalAccounting(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+	for _, transport := range []struct {
+		name    string
+		stream  bool
+		handler func(*gin.Context, *relaycommon.RelayInfo, *http.Response) (*dto.Usage, *types.NewAPIError)
+	}{
+		{"nonstream", false, OaiResponsesToChatHandler},
+		{"buffered", false, OaiResponsesToChatBufferedStreamHandler},
+		{"stream", true, OaiResponsesToChatStreamHandler},
+	} {
+		t.Run(transport.name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name      string
+				status    string
+				reported  string
+				input     int
+				output    int
+				estimated bool
+			}{
+				{"failed with usage", "failed", `{"input_tokens":100,"output_tokens":30,"total_tokens":130,"input_tokens_details":{"cached_tokens":70}}`, 100, 30, false},
+				{"incomplete with usage", "incomplete", `{"input_tokens":100,"output_tokens":30,"total_tokens":130}`, 100, 30, false},
+				{"cancelled with usage", "cancelled", `{"input_tokens":100,"output_tokens":30,"total_tokens":130}`, 100, 30, false},
+				{"failed explicit zero", "failed", `{"input_tokens":0,"output_tokens":0,"total_tokens":0}`, 0, 0, false},
+				{"failed missing usage", "failed", `null`, 0, 0, true},
+				{"failed partial usage", "failed", `{"input_tokens":100}`, 100, 0, true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					response := `{"object":"response","status":"` + tc.status + `","error":{"type":"server_error","message":"upstream generation interrupted"},"usage":` + tc.reported + `}`
+					if tc.status == "incomplete" {
+						response = `{"object":"response","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":` + tc.reported + `}`
+					}
+					body := response
+					if transport.name != "nonstream" {
+						body = "data: " + `{"type":"response.` + tc.status + `","response":` + response + "}\n\n"
+					}
+					c, recorder, resp, info := newResponsesChatTestContext(t, body, transport.stream)
+					info.TokenKey = "rsl_compat-accounting-test"
+					info.SetEstimatePromptTokens(200)
+					usage, apiErr := transport.handler(c, info, resp)
+					require.Nil(t, apiErr, "completed upstream work must reach settlement without gateway retry/refund")
+					require.NotNil(t, usage)
+					assert.Equal(t, tc.input, usage.PromptTokens)
+					assert.Equal(t, tc.output, usage.CompletionTokens)
+					require.NotNil(t, usage.BillingUsage)
+					assert.Equal(t, tc.estimated, usage.BillingUsage.Estimated)
+					if tc.status == "incomplete" {
+						assert.Contains(t, recorder.Body.String(), `"finish_reason":"length"`, "incomplete output keeps the normal compatibility conversion")
+					} else {
+						assert.Contains(t, recorder.Body.String(), response, "client must receive the original failed outcome")
+					}
+					if tc.name == "failed with usage" {
+						assert.Equal(t, 70, usage.PromptTokensDetails.CachedTokens)
+					}
+				})
+			}
+			for _, unlimited := range []bool{false, true} {
+				t.Run(fmt.Sprintf("ordinary error contract unlimited=%t", unlimited), func(t *testing.T) {
+					body := `{"object":"response","status":"failed","error":{"type":"server_error","message":"generation failed"},"usage":{"input_tokens":100,"output_tokens":30,"total_tokens":130}}`
+					if transport.name != "nonstream" {
+						body = "data: " + `{"type":"response.failed","response":` + body + "}\n\n"
+					}
+					c, _, resp, info := newResponsesChatTestContext(t, body, transport.stream)
+					if unlimited {
+						info.TokenKey = "rsl_unlimited-compat-test"
+						info.TokenUnlimited = true
+					}
+					usage, apiErr := transport.handler(c, info, resp)
+					require.NotNil(t, apiErr)
+					assert.Nil(t, usage)
+				})
+			}
+		})
 	}
 }

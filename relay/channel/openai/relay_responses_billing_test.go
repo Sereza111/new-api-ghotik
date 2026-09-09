@@ -194,7 +194,7 @@ func TestOaiResponsesHandlerIncompleteStatusCommitsZeroImageGeneration(t *testin
 	assert.Equal(t, 0, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolImageGeneration].CallCount)
 }
 
-func runResponsesImageBillingStream(t *testing.T, events ...string) *relaycommon.RelayInfo {
+func runResponsesBillingStream(t *testing.T, events ...string) (*gin.Context, *relaycommon.RelayInfo, *dto.Usage) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	oldTimeout := constant.StreamingTimeout
@@ -216,23 +216,176 @@ func runResponsesImageBillingStream(t *testing.T, events ...string) *relaycommon
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	c.Set(common.RequestIdKey, "responses-image-billing-test")
 	info := &relaycommon.RelayInfo{
-		OriginModelName: "gpt-5.1",
+		OriginModelName: "gpt-4o",
 		DisablePing:     true,
 		ChannelMeta: &relaycommon.ChannelMeta{
-			UpstreamModelName: "gpt-5.1",
+			UpstreamModelName: "gpt-4o",
 		},
 	}
+	info.SetEstimatePromptTokens(125)
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(strings.NewReader(body.String())),
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 	}
 
-	_, apiErr := OaiResponsesStreamHandler(c, info, resp)
+	usage, apiErr := OaiResponsesStreamHandler(c, info, resp)
 	require.Nil(t, apiErr)
+	require.NotNil(t, usage)
+	return c, info, usage
+}
+
+func runResponsesImageBillingStream(t *testing.T, events ...string) *relaycommon.RelayInfo {
+	t.Helper()
+	_, info, _ := runResponsesBillingStream(t, events...)
 	require.NotNil(t, info.ResponsesUsageInfo)
 	require.Contains(t, info.ResponsesUsageInfo.BuiltInTools, dto.BuildInToolImageGeneration)
 	return info
+}
+
+func TestOaiResponsesStreamUsageProvenance(t *testing.T) {
+	for _, eventType := range []string{
+		"response.completed", "response.done", "response.incomplete",
+		"response.failed", "response.cancelled", "response.canceled",
+	} {
+		t.Run(eventType, func(t *testing.T) {
+			c, _, usage := runResponsesBillingStream(t,
+				`{"type":"response.output_text.delta","delta":"a partial answer"}`,
+				`{"type":"`+eventType+`","response":{"usage":{"input_tokens":100,"output_tokens":30,"total_tokens":130,"input_tokens_details":{"cached_tokens":70,"cache_write_tokens":5}}}}`,
+			)
+			assert.Equal(t, 100, usage.PromptTokens)
+			assert.Equal(t, 30, usage.CompletionTokens)
+			assert.Equal(t, 130, usage.TotalTokens)
+			assert.Equal(t, 70, usage.PromptTokensDetails.CachedTokens)
+			assert.Equal(t, 5, usage.PromptTokensDetails.CacheWriteTokens)
+			require.NotNil(t, usage.BillingUsage)
+			assert.False(t, usage.BillingUsage.Estimated)
+			assert.Equal(t, dto.BillingUsageSourceOAIResponses, usage.BillingUsage.Source)
+			assert.False(t, common.GetContextKeyBool(c, constant.ContextKeyLocalCountTokens))
+		})
+	}
+
+	t.Run("explicit zero is not replaced by local estimates", func(t *testing.T) {
+		_, _, usage := runResponsesBillingStream(t,
+			`{"type":"response.output_text.delta","delta":"a partial answer"}`,
+			`{"type":"response.completed","response":{"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}}`,
+		)
+		assert.Zero(t, usage.PromptTokens)
+		assert.Zero(t, usage.CompletionTokens)
+		require.NotNil(t, usage.BillingUsage)
+		assert.False(t, usage.BillingUsage.Estimated)
+		require.NotNil(t, usage.BillingUsage.OpenAIUsage)
+		assert.Zero(t, usage.BillingUsage.OpenAIUsage.TotalTokens)
+	})
+
+	for _, reported := range []string{`{}`, `{"input_tokens":100}`, `{"output_tokens":30}`} {
+		t.Run("incomplete usage "+reported, func(t *testing.T) {
+			_, _, usage := runResponsesBillingStream(t,
+				`{"type":"response.completed","response":{"usage":`+reported+`}}`,
+			)
+			require.NotNil(t, usage.BillingUsage)
+			assert.True(t, usage.BillingUsage.Estimated)
+		})
+	}
+
+	t.Run("interrupted stream retains local provenance", func(t *testing.T) {
+		c, _, usage := runResponsesBillingStream(t,
+			`{"type":"response.output_text.delta","delta":"hello world"}`,
+		)
+		assert.Equal(t, 125, usage.PromptTokens)
+		assert.Positive(t, usage.CompletionTokens)
+		assert.True(t, common.GetContextKeyBool(c, constant.ContextKeyLocalCountTokens))
+		require.NotNil(t, usage.BillingUsage)
+		assert.True(t, usage.BillingUsage.Estimated)
+	})
+}
+
+func TestOaiResponsesNonstreamUsageProvenance(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		reported  string
+		input     int
+		output    int
+		estimated bool
+	}{
+		{"reported", `{"input_tokens":100,"output_tokens":30,"total_tokens":130}`, 100, 30, false},
+		{"explicit zero", `{"input_tokens":0,"output_tokens":0,"total_tokens":0}`, 0, 0, false},
+		{"empty object", `{}`, 0, 0, true},
+		{"partial object", `{"output_tokens":30}`, 0, 30, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			body := `{"status":"completed","output":[],"usage":` + tc.reported + `}`
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}
+			usage, apiErr := OaiResponsesHandler(c, &relaycommon.RelayInfo{}, resp)
+			require.Nil(t, apiErr)
+			require.NotNil(t, usage)
+			assert.Equal(t, tc.input, usage.PromptTokens)
+			assert.Equal(t, tc.output, usage.CompletionTokens)
+			require.NotNil(t, usage.BillingUsage)
+			assert.Equal(t, tc.estimated, usage.BillingUsage.Estimated)
+			assert.Equal(t, dto.BillingUsageSourceOAIResponses, usage.BillingUsage.Source)
+			assert.Equal(t, body, w.Body.String())
+		})
+	}
+}
+
+func TestOaiResponsesHandlerPreservesFailedResponseAccounting(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		body       string
+		wantError  bool
+		estimated  bool
+		wantOutput int
+	}{
+		{
+			name:       "failed response with usage",
+			body:       `{"object":"response","status":"failed","error":{"type":"server_error","message":"generation failed"},"usage":{"input_tokens":100,"output_tokens":30,"total_tokens":130}}`,
+			wantOutput: 30,
+		},
+		{
+			name:      "failed response without final usage",
+			body:      `{"object":"response","status":"failed","error":{"type":"server_error","message":"generation failed"},"usage":null}`,
+			estimated: true,
+		},
+		{
+			name:      "ordinary rejection remains an API error",
+			body:      `{"error":{"type":"invalid_request_error","message":"invalid request"}}`,
+			wantError: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(tc.body)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}
+			usage, apiErr := OaiResponsesHandler(c, &relaycommon.RelayInfo{}, resp)
+			if tc.wantError {
+				require.NotNil(t, apiErr)
+				assert.Nil(t, usage)
+				assert.Empty(t, w.Body.String())
+				return
+			}
+			require.Nil(t, apiErr)
+			require.NotNil(t, usage)
+			assert.Equal(t, tc.wantOutput, usage.CompletionTokens)
+			require.NotNil(t, usage.BillingUsage)
+			assert.Equal(t, tc.estimated, usage.BillingUsage.Estimated)
+			assert.Equal(t, tc.body, w.Body.String())
+		})
+	}
 }
 
 func TestOaiResponsesStreamHandlerDeduplicatesCompletedImageOutput(t *testing.T) {

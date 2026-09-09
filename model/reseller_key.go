@@ -644,7 +644,7 @@ func reserveResellerTokenQuota(id int, key string, quota int) (bool, error) {
 		common.SysLog("failed to invalidate reseller token cache before debit: " + err.Error())
 	}
 	result := DB.Model(&Token{}).
-		Where("id = ? AND unlimited_quota = ? AND remain_quota >= ?", id, false, quota).
+		Where("id = ? AND unlimited_quota = ? AND remain_quota >= ? AND status = ?", id, false, quota, common.TokenStatusEnabled).
 		Where(clause.Eq{Column: clause.Column{Name: "key"}, Value: key}).
 		Updates(map[string]interface{}{
 			"remain_quota":  gorm.Expr("remain_quota - ?", quota),
@@ -700,6 +700,24 @@ func increaseResellerTokenQuota(id int, key string, quota int) error {
 // consume quota. The existing operation ledger is shared with reseller keys
 // so an ambiguous commit can be recognized safely on retry.
 func ApplyTokenQuotaAdjustmentOnce(id int, key string, adjustment int, operationID string) error {
+	return applyTokenQuotaAdjustmentOnce(id, key, adjustment, operationID, false)
+}
+
+// ReserveResellerTokenQuota reserves a new request only while the durable key
+// is enabled. Settlements and refunds of requests already in flight remain
+// allowed after the key is disabled. A committed reservation replay is a no-op.
+func ReserveResellerTokenQuota(id int, key string, amount int, operationID string) error {
+	if !IsResellerTokenKey(key) || amount <= 0 || amount > common.MaxQuota {
+		return ErrResellerQuotaAdjustmentInvalid
+	}
+	err := applyTokenQuotaAdjustmentOnce(id, key, -amount, operationID, true)
+	if errors.Is(err, ErrTokenQuotaInsufficient) {
+		return ErrResellerTokenQuotaInsufficient
+	}
+	return err
+}
+
+func applyTokenQuotaAdjustmentOnce(id int, key string, adjustment int, operationID string, reservation bool) error {
 	key = strings.TrimPrefix(key, "sk-")
 	operationID = strings.TrimSpace(operationID)
 	if id <= 0 || key == "" || operationID == "" || utf8.RuneCountInString(operationID) > 128 ||
@@ -737,6 +755,14 @@ func ApplyTokenQuotaAdjustmentOnce(id int, key string, adjustment int, operation
 		}
 		if !token.UsesTokenQuota() {
 			return errors.New("token does not use raw-token quota")
+		}
+		if reservation && (token.Status != common.TokenStatusEnabled || token.UnlimitedQuota ||
+			(token.ExpiredTime != -1 && token.ExpiredTime <= common.GetTimestamp())) {
+			return ErrTokenQuotaInsufficient
+		}
+		if reservation && (token.RemainQuota < 0 || token.UsedQuota < 0 || token.UsedQuota > common.MaxQuota ||
+			token.RemainQuota > common.MaxQuota-token.UsedQuota) {
+			return ErrResellerQuotaAdjustmentInvalid
 		}
 		if token.UnlimitedQuota {
 			// Unlimited keys preserve the historical semantics of money-denominated
@@ -805,6 +831,117 @@ func ApplyTokenQuotaAdjustmentOnce(id int, key string, adjustment int, operation
 		common.SysLog("failed to invalidate raw token cache after idempotent adjustment: " + cacheErr.Error())
 	}
 	return nil
+}
+
+// SettleResellerTokenQuota settles measured usage against an existing request
+// reservation. It returns the total charged for this request, which can be less
+// than actual only when the remaining prepaid allocation is insufficient. That
+// shortage consumes the available balance and disables the key atomically.
+// The caller must audit actual-charged; no negative balance or wallet debit is
+// created. The immutable ID belongs to the already-authenticated request, so an
+// in-flight settlement remains valid after its reseller secret is rotated.
+func SettleResellerTokenQuota(id int, key string, reserved int, actual int, operationID string) (int, error) {
+	key = strings.TrimPrefix(key, "sk-")
+	operationID = strings.TrimSpace(operationID)
+	if id <= 0 || !IsResellerTokenKey(key) || operationID == "" || utf8.RuneCountInString(operationID) > 128 ||
+		strings.IndexFunc(operationID, unicode.IsControl) >= 0 || reserved < 0 || actual < 0 ||
+		reserved > common.MaxQuota || actual > common.MaxQuota {
+		return 0, ErrResellerQuotaAdjustmentInvalid
+	}
+	// Include the immutable arguments in the existing marker without adding a
+	// column. The token lock serializes operations sharing a request scope, even
+	// if a buggy caller retries the same operation with different usage.
+	digest := common.Sha256Raw([]byte(strconv.Itoa(id) + ":" + operationID))
+	scope := fmt.Sprintf("settle:%x:", digest)
+	durableID := scope + strconv.Itoa(reserved) + ":" + strconv.Itoa(actual)
+	charged := 0
+	currentKey := key
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var token Token
+		if err := lockForUpdate(tx).Where("id = ?", id).First(&token).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrTokenQuotaTargetNotFound
+			}
+			return err
+		}
+		if !IsResellerTokenKey(token.Key) || !token.UsesTokenQuota() || token.UnlimitedQuota {
+			return ErrResellerQuotaAdjustmentInvalid
+		}
+		currentKey = token.Key
+		var existing ResellerQuotaOperation
+		lookup := tx.Where("operation_id LIKE ?", scope+"%").First(&existing)
+		if lookup.Error == nil {
+			if existing.TokenId != id || existing.OperationId != durableID ||
+				existing.Adjustment < reserved-actual || existing.Adjustment > reserved {
+				return ErrResellerQuotaOperationConflict
+			}
+			charged = reserved - existing.Adjustment
+			return nil
+		}
+		if !errors.Is(lookup.Error, gorm.ErrRecordNotFound) {
+			return lookup.Error
+		}
+		if token.RemainQuota < 0 || token.UsedQuota < reserved || token.UsedQuota > common.MaxQuota ||
+			token.RemainQuota > common.MaxQuota-token.UsedQuota {
+			return ErrResellerQuotaAdjustmentInvalid
+		}
+
+		charged = actual
+		adjustment := reserved - actual
+		shortage := actual > reserved && actual-reserved > token.RemainQuota
+		if shortage {
+			// Both terms are nonnegative and their sum is bounded by actual.
+			charged = reserved + token.RemainQuota
+			adjustment = -token.RemainQuota
+		}
+		updates := map[string]interface{}{"accessed_time": common.GetTimestamp()}
+		if adjustment != 0 {
+			updates["remain_quota"] = gorm.Expr("remain_quota + ?", adjustment)
+			updates["used_quota"] = gorm.Expr("used_quota - ?", adjustment)
+		}
+		if shortage {
+			updates["status"] = common.TokenStatusDisabled
+		}
+		if cacheErr := invalidateTokenCacheForMutation(currentKey); cacheErr != nil {
+			common.SysLog("failed to fence reseller token cache before settlement: " + cacheErr.Error())
+		}
+		query := tx.Model(&Token{}).Where("id = ?", id)
+		if adjustment > 0 {
+			query = query.Where("used_quota >= ?", adjustment)
+		} else if adjustment < 0 {
+			query = query.Where("remain_quota >= ?", -adjustment)
+		}
+		if err := query.Updates(updates).Error; err != nil {
+			return err
+		}
+		// Zero-delta settlements also need a marker: a later retry must not
+		// consume funds that were added after an already-finalized shortage.
+		return tx.Create(&ResellerQuotaOperation{
+			OperationId: durableID, TokenId: id, UserId: token.UserId,
+			Adjustment: adjustment, CreatedTime: common.GetTimestamp(),
+		}).Error
+	})
+	if err != nil {
+		// A commit acknowledgement can be lost after both writes became durable.
+		var existing ResellerQuotaOperation
+		if lookupErr := DB.Where("operation_id LIKE ?", scope+"%").First(&existing).Error; lookupErr == nil {
+			if existing.TokenId != id || existing.OperationId != durableID ||
+				existing.Adjustment < reserved-actual || existing.Adjustment > reserved {
+				return 0, ErrResellerQuotaOperationConflict
+			}
+			charged = reserved - existing.Adjustment
+			err = nil
+		}
+	}
+	if err != nil {
+		return 0, err
+	}
+	for _, cacheKey := range []string{key, currentKey} {
+		if cacheErr := invalidateTokenCacheForMutation(cacheKey); cacheErr != nil {
+			common.SysLog("failed to invalidate reseller token cache after settlement: " + cacheErr.Error())
+		}
+	}
+	return charged, nil
 }
 
 // ApplyResellerTokenQuotaAdjustment preserves the reseller-specific API and
