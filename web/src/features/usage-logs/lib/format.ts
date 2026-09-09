@@ -315,7 +315,7 @@ export interface TieredBillingSummary {
     field: string
     shortLabel: string
     price: number
-    unit?: 'request'
+    unit?: 'request' | 'image'
   }>
 }
 
@@ -330,6 +330,7 @@ export function hasAnyCacheTokens(
   if (!other) return false
   return (
     (other.cache_tokens || 0) > 0 ||
+    (other.image_cache_tokens || 0) > 0 ||
     (other.cache_creation_tokens || 0) > 0 ||
     (other.cache_creation_tokens_5m || 0) > 0 ||
     (other.cache_creation_tokens_1h || 0) > 0
@@ -369,9 +370,10 @@ export function getTieredBillingSummary(
       priceEntries: [
         {
           field: 'fixedPrice',
-          shortLabel: 'Per-call',
+          shortLabel:
+            other.image_count !== undefined ? 'Per image' : 'Per-call',
           price: fixedPrice,
-          unit: 'request',
+          unit: other.image_count !== undefined ? 'image' : 'request',
         },
       ],
     }
@@ -384,9 +386,9 @@ export function getTieredBillingSummary(
       priceEntries: [
         {
           field: 'fixedPrice',
-          shortLabel: 'Per-call',
+          shortLabel: tier.imageCount ? 'Per image' : 'Per-call',
           price: tier.fixedPrice,
-          unit: 'request',
+          unit: tier.imageCount ? 'image' : 'request',
         },
       ],
     }
@@ -400,7 +402,7 @@ export function getTieredBillingSummary(
     if (v.group === 'cache' && !cacheTokensPresent) continue
     const raw = tier[v.field as keyof ParsedTier]
     const price = Number(raw)
-    if (Number.isFinite(price) && price > 0) {
+    if (Number.isFinite(price) && price >= 0) {
       priceEntries.push({
         field: v.field,
         shortLabel: v.shortLabel,
