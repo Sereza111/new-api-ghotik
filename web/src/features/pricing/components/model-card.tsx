@@ -27,6 +27,7 @@ import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
 
 import { DEFAULT_TOKEN_UNIT } from '../constants'
+import { useBillingTime } from '../hooks/use-billing-time'
 import {
   getCardExamplePrice,
   getDynamicDisplayGroupRatio,
@@ -78,7 +79,9 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
     Boolean(props.model.billing_expr)
   const isUnconfiguredTaskUsage = isUnconfiguredTaskUsageModel(props.model)
   const hasCachedPrice = isTokenBased && props.model.cache_ratio != null
+  const billingTime = useBillingTime(props.model.billing_expr)
   const dynamicPriceOptions = {
+    now: billingTime === undefined ? undefined : new Date(billingTime),
     tokenUnit,
     showRechargePrice,
     priceRate,
@@ -143,6 +146,11 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
               </div>
             )
           })}
+          {dynamicSummary.isTimePricing && (
+            <span className='text-muted-foreground col-span-full text-xs'>
+              {t('Current period price')}
+            </span>
+          )}
           {cardExamplePrice && (
             <span className='text-muted-foreground col-span-full text-xs break-words'>
               {cardExamplePrice.label} ≈ {cardExamplePrice.formatted}
