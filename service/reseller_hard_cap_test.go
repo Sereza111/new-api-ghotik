@@ -349,11 +349,79 @@ func TestResellerResponsesHiddenHistoryRequiresFullContextReservation(t *testing
 	}
 	for _, body := range []string{
 		`{"tools":[{"type":"web_search"}]}`,
-		`{"input":[{"type":"input_file","file_id":"remote"}]}`,
+		`{"input":[{"type":"input_file"}]}`,
 		`{"input":[{"id":"hidden_message"}]}`,
 	} {
 		_, err := resellerResponsesInputTokenQuota([]byte(body), 10, "gpt-5.6-sol")
 		require.ErrorIs(t, err, errResellerRequestHardCapUnsupported)
+	}
+}
+
+func TestResellerResponsesMediaRequiresContextReservation(t *testing.T) {
+	for _, input := range []string{
+		`[{"role":"user","content":[{"type":"input_text","text":"Describe this screenshot"},{"type":"input_image","image_url":"data:image/png;base64,cG5n","detail":"auto"}]}]`,
+		`[{"role":"user","content":[{"type":"input_image","image_url":"https://example.com/image.png"}]}]`,
+		`[{"role":"user","content":[{"type":"input_image","file_id":"file_image"}]}]`,
+		`[{"role":"user","content":[{"type":"input_file","file_id":"file_document"}]}]`,
+		`[{"role":"user","content":[{"type":"input_file","file_url":"https://example.com/document.pdf"}]}]`,
+		`[{"role":"user","content":[{"type":"input_file","file_data":"data:application/pdf;base64,cGRm","filename":"report.pdf"}]}]`,
+		`[{"type":"function_call_output","call_id":"call_1","output":[{"type":"input_image","image_url":"data:image/png;base64,cG5n"}]}]`,
+		`[{"type":"custom_tool_call_output","call_id":"call_1","output":[{"type":"input_file","file_id":"file_result"}]}]`,
+		`[{"type":"computer_call_output","call_id":"call_1","output":{"type":"computer_screenshot","image_url":"data:image/png;base64,cG5n"}}]`,
+	} {
+		t.Run(input, func(t *testing.T) {
+			body := []byte(`{"model":"gpt-6-astra","input":` + input + `}`)
+			info := &relaycommon.RelayInfo{TokenKey: "rsl_media", RelayFormat: relaytypes.RelayFormatOpenAIResponses,
+				Request: &dto.OpenAIResponsesRequest{}, TokenQuotaPreConsumed: 1_000_000}
+			require.ErrorIs(t, ValidateResellerOutboundHardCap(info, body), model.ErrResellerTokenQuotaInsufficient)
+			info.TokenQuotaPreConsumed = 1_178_000
+			require.NoError(t, ValidateResellerOutboundHardCap(info, body))
+			quota, err := resellerResponsesInputTokenQuota(body, 10, "gpt-6-astra")
+			require.NoError(t, err)
+			assert.Equal(t, 1_050_000, quota)
+			unknownModel := []byte(`{"model":"unknown","input":` + input + `}`)
+			_, err = resellerResponsesInputTokenQuota(unknownModel, 10, "gpt-6-astra")
+			require.ErrorIs(t, err, errResellerRequestHardCapUnsupported)
+		})
+	}
+	for _, input := range []string{
+		`[{"role":"user","content":[{"type":"input_image"}]}]`,
+		`[{"role":"user","content":[{"type":"input_file","file_id":123}]}]`,
+		`[{"type":"computer_call_output","output":{"type":"computer_screenshot"}}]`,
+		`[{"role":"user","content":[{"type":"unknown_media","url":"https://example.com"}]}]`,
+	} {
+		_, err := resellerResponsesInputTokenQuota([]byte(`{"model":"gpt-6-astra","input":`+input+`}`), 10, "gpt-6-astra")
+		require.ErrorIs(t, err, errResellerRequestHardCapUnsupported)
+	}
+}
+
+func TestResellerResponsesClientToolSearchReservation(t *testing.T) {
+	for _, field := range []string{
+		`"tools":[{"type":"tool_search","execution":"client"},{"type":"namespace","name":"fs","tools":[{"type":"function","name":"read","parameters":{"type":"object","properties":{"type":{"type":"string"},"input_image":{"type":"string"}}}}]}]`,
+		`"input":[{"type":"tool_search_call","execution":"client","call_id":"search_1","arguments":{"paths":["fs"]}},{"type":"tool_search_output","execution":"client","call_id":"search_1","tools":[{"type":"namespace","name":"fs","tools":[{"type":"custom","name":"read"}]}]}]`,
+		`"input":[{"type":"additional_tools","role":"developer","tools":[{"type":"function","name":"read","parameters":{"type":"object"}}]}]`,
+	} {
+		body := []byte(`{"model":"gpt-6-astra",` + field + `}`)
+		quota, err := resellerResponsesInputTokenQuota(body, 10, "gpt-6-astra")
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, quota, len(body))
+		assert.Less(t, quota, 1_050_000)
+	}
+	for _, tool := range []string{
+		`{"type":"web_search"}`,
+		`{"type":"tool_search"}`,
+		`{"type":"tool_search","execution":"server"}`,
+		`{"type":"namespace","name":"hidden","tools":[{"type":"web_search"}]}`,
+	} {
+		for _, field := range []string{
+			`"tools":[` + tool + `]`,
+			`"input":[{"type":"tool_search_output","execution":"client","tools":[` + tool + `]}]`,
+			`"input":[{"type":"additional_tools","role":"developer","tools":[` + tool + `]}]`,
+		} {
+			body := []byte(`{"model":"gpt-6-astra",` + field + `}`)
+			_, err := resellerResponsesInputTokenQuota(body, 10, "gpt-6-astra")
+			require.ErrorIs(t, err, errResellerRequestHardCapUnsupported)
+		}
 	}
 }
 

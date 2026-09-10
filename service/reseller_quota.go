@@ -485,9 +485,28 @@ func resellerResponsesInputIsBounded(value any, allowHidden bool) bool {
 			_, nameOK := input["name"].(string)
 			_, textOK := input[field].(string)
 			return nameOK && textOK
-		case "function_call_output", "custom_tool_call_output":
+		case "function_call_output", "custom_tool_call_output", "computer_call_output":
 			output, exists := input["output"]
 			return exists && output != nil && resellerResponsesInputIsBounded(output, allowHidden)
+		case "input_image", "computer_screenshot":
+			// Images can expand to more tokens than their URL or encoded bytes.
+			// Use the model context reservation, as for opaque saved history.
+			imageURL, _ := input["image_url"].(string)
+			fileID, _ := input["file_id"].(string)
+			return allowHidden && (imageURL != "" || fileID != "")
+		case "input_file":
+			fileID, _ := input["file_id"].(string)
+			fileURL, _ := input["file_url"].(string)
+			fileData, _ := input["file_data"].(string)
+			return allowHidden && (fileID != "" || fileURL != "" || fileData != "")
+		case "tool_search_call":
+			_, hasArguments := input["arguments"]
+			return input["execution"] == "client" && hasArguments
+		case "tool_search_output", "additional_tools":
+			// These history items can introduce executable definitions just like
+			// the top-level tools array. Inspect definitions, not schema fields.
+			tools, exists := input["tools"]
+			return exists && tools != nil && resellerResponsesToolsAreClientExecuted(tools)
 		case "reasoning":
 			if input["id"] != nil && input["id"] != "" && !allowHidden {
 				return false
@@ -498,6 +517,37 @@ func resellerResponsesInputIsBounded(value any, allowHidden bool) bool {
 		}
 	}
 	return false
+}
+
+func resellerResponsesToolsAreClientExecuted(value any) bool {
+	if value == nil {
+		return true
+	}
+	declarations, ok := value.([]any)
+	if !ok {
+		return false
+	}
+	for _, declaration := range declarations {
+		tool, ok := declaration.(map[string]any)
+		if !ok {
+			return false
+		}
+		switch tool["type"] {
+		case "function", "custom":
+		case "namespace":
+			nested, exists := tool["tools"]
+			if !exists || nested == nil || !resellerResponsesToolsAreClientExecuted(nested) {
+				return false
+			}
+		case "tool_search":
+			if tool["execution"] != "client" {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func resellerResponsesInputTokenQuota(jsonData []byte, estimatedTokens int, upstreamModel string) (int, error) {
@@ -519,21 +569,12 @@ func resellerResponsesInputTokenQuota(jsonData []byte, estimatedTokens int, upst
 	}
 	if !resellerResponsesInputIsBounded(request["input"], false) {
 		if !resellerResponsesInputIsBounded(request["input"], true) {
-			return 0, fmt.Errorf("%w: use explicit text history and tool results; media and unknown input types have no verified token bound", errResellerRequestHardCapUnsupported)
+			return 0, fmt.Errorf("%w: malformed or unsupported Responses input item; supported images and files require a verified model context limit", errResellerRequestHardCapUnsupported)
 		}
 		hasHiddenInput = true
 	}
-	if tools, exists := request["tools"]; exists && tools != nil {
-		declarations, ok := tools.([]any)
-		if !ok {
-			return 0, fmt.Errorf("%w: Responses tools must be an array", errResellerRequestHardCapUnsupported)
-		}
-		for _, declaration := range declarations {
-			tool, ok := declaration.(map[string]any)
-			if !ok || (tool["type"] != "function" && tool["type"] != "custom") {
-				return 0, fmt.Errorf("%w: hosted tools can add unbounded input; only client-executed function and custom tools are supported", errResellerRequestHardCapUnsupported)
-			}
-		}
+	if !resellerResponsesToolsAreClientExecuted(request["tools"]) {
+		return 0, fmt.Errorf("%w: hosted tools can add unbounded input; only client-executed tools and tool search are supported", errResellerRequestHardCapUnsupported)
 	}
 	if hasHiddenInput {
 		if name, ok := request["model"].(string); ok && strings.TrimSpace(name) != "" {
@@ -541,7 +582,7 @@ func resellerResponsesInputTokenQuota(jsonData []byte, estimatedTokens int, upst
 		}
 		limit, known := relayconstant.CodexModelContextTokenLimit(upstreamModel)
 		if !known {
-			return 0, fmt.Errorf("%w: hidden Responses history requires a verified model context limit", errResellerRequestHardCapUnsupported)
+			return 0, fmt.Errorf("%w: hidden Responses history, images and files require a verified model context limit", errResellerRequestHardCapUnsupported)
 		}
 		return limit, nil
 	}
