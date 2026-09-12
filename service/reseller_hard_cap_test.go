@@ -330,8 +330,8 @@ func TestResellerResponsesHiddenHistoryRequiresFullContextReservation(t *testing
 	for _, field := range []string{
 		`"previous_response_id":"resp_saved"`,
 		`"conversation":"conv_saved"`,
-		`"input":[{"type":"reasoning","encrypted_content":"opaque"}]`,
-		`"input":[{"type":"compaction","encrypted_content":"opaque"}]`,
+		`"input":[{"type":"reasoning","id":"reasoning_saved"}]`,
+		`"input":[{"type":"compaction"}]`,
 		`"input":[{"type":"item_reference","id":"item_saved"}]`,
 		`"prompt":{"id":"stored_prompt"}`,
 	} {
@@ -340,7 +340,7 @@ func TestResellerResponsesHiddenHistoryRequiresFullContextReservation(t *testing
 			info := &relaycommon.RelayInfo{TokenKey: "rsl_hidden", RelayFormat: relaytypes.RelayFormatOpenAIResponses,
 				Request: &dto.OpenAIResponsesRequest{}, TokenQuotaPreConsumed: 1_000_000}
 			require.ErrorIs(t, ValidateResellerOutboundHardCap(info, body), model.ErrResellerTokenQuotaInsufficient)
-			info.TokenQuotaPreConsumed = 1_178_000
+			info.TokenQuotaPreConsumed = 1_050_000
 			require.NoError(t, ValidateResellerOutboundHardCap(info, body))
 			unknown := []byte(`{"model":"unknown",` + field + `}`)
 			_, err := resellerResponsesInputTokenQuota(unknown, 10, "gpt-5.6-sol")
@@ -355,6 +355,30 @@ func TestResellerResponsesHiddenHistoryRequiresFullContextReservation(t *testing
 		_, err := resellerResponsesInputTokenQuota([]byte(body), 10, "gpt-5.6-sol")
 		require.ErrorIs(t, err, errResellerRequestHardCapUnsupported)
 	}
+}
+
+func TestResellerResponsesExplicitCodexHistoryFitsOneMillionTokenKey(t *testing.T) {
+	input := `[
+		{"type":"reasoning","id":"reasoning_1","encrypted_content":"opaque-state","summary":[]},
+		{"type":"configuration_update","reasoning":{"effort":"high"}},
+		{"type":"local_shell_call","call_id":"local_1","action":{"type":"exec","command":["rg","needle"]}},
+		{"type":"local_shell_call_output","id":"local_1","output":"{\"stdout\":\"match\"}"},
+		{"type":"shell_call","call_id":"shell_1","action":{"commands":["go test ./service"]}},
+		{"type":"shell_call_output","call_id":"shell_1","output":[{"stdout":"ok","stderr":"","outcome":{"type":"exit","exit_code":0}}]},
+		{"type":"apply_patch_call","call_id":"patch_1","operation":{"type":"update_file","path":"service/reseller_quota.go","diff":"@@"}},
+		{"type":"apply_patch_call_output","call_id":"patch_1","status":"completed","output":"Done"},
+		{"type":"computer_call","call_id":"computer_1","action":{"type":"screenshot"}},
+		{"type":"mcp_approval_response","approval_request_id":"approval_1","approve":true},
+		{"type":"program_output","id":"program_1","call_id":"call_1","result":"done","status":"completed"}
+	]`
+	body := []byte(`{"model":"gpt-6-astra","input":` + input + `}`)
+	info := &relaycommon.RelayInfo{TokenKey: "rsl_explicit_history", RelayFormat: relaytypes.RelayFormatOpenAIResponses,
+		Request: &dto.OpenAIResponsesRequest{}, TokenQuotaPreConsumed: 1_000_000}
+	require.NoError(t, ValidateResellerOutboundHardCap(info, body))
+	quota, err := resellerResponsesInputTokenQuota(body, 10, "gpt-6-astra")
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, quota, len(body))
+	assert.Less(t, quota, 1_000_000-relayconstant.CodexMaxOutputTokens)
 }
 
 func TestResellerResponsesMediaRequiresContextReservation(t *testing.T) {
@@ -374,7 +398,7 @@ func TestResellerResponsesMediaRequiresContextReservation(t *testing.T) {
 			info := &relaycommon.RelayInfo{TokenKey: "rsl_media", RelayFormat: relaytypes.RelayFormatOpenAIResponses,
 				Request: &dto.OpenAIResponsesRequest{}, TokenQuotaPreConsumed: 1_000_000}
 			require.ErrorIs(t, ValidateResellerOutboundHardCap(info, body), model.ErrResellerTokenQuotaInsufficient)
-			info.TokenQuotaPreConsumed = 1_178_000
+			info.TokenQuotaPreConsumed = 1_050_000
 			require.NoError(t, ValidateResellerOutboundHardCap(info, body))
 			quota, err := resellerResponsesInputTokenQuota(body, 10, "gpt-6-astra")
 			require.NoError(t, err)

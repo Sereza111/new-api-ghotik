@@ -461,8 +461,8 @@ func resellerResponsesInputIsBounded(value any, allowHidden bool) bool {
 		}
 		return true
 	case map[string]any:
-		if encrypted, exists := input["encrypted_content"]; exists && encrypted != nil && encrypted != "" {
-			if !allowHidden {
+		if encrypted, exists := input["encrypted_content"]; exists && encrypted != nil {
+			if _, ok := encrypted.(string); !ok {
 				return false
 			}
 		}
@@ -471,7 +471,7 @@ func resellerResponsesInputIsBounded(value any, allowHidden bool) bool {
 		case "", "message":
 			content, exists := input["content"]
 			return exists && content != nil && resellerResponsesInputIsBounded(content, allowHidden)
-		case "input_text", "output_text", "summary_text", "reasoning_text":
+		case "input_text", "output_text", "summary_text", "reasoning_text", "text":
 			_, ok := input["text"].(string)
 			return ok
 		case "refusal":
@@ -488,10 +488,22 @@ func resellerResponsesInputIsBounded(value any, allowHidden bool) bool {
 		case "function_call_output", "custom_tool_call_output", "computer_call_output":
 			output, exists := input["output"]
 			return exists && output != nil && resellerResponsesInputIsBounded(output, allowHidden)
-		case "input_image", "computer_screenshot":
+		case "local_shell_call", "local_shell_call_output", "shell_call", "shell_call_output",
+			"apply_patch_call", "apply_patch_call_output", "computer_call", "program_output",
+			"configuration_update", "compaction_trigger", "mcp_approval_response":
+			// These client/tool-history items contain their complete payload in the
+			// request. The serialized-body reservation below bounds their tokens.
+			return true
+		case "input_image", "input_audio", "input_video", "computer_screenshot":
 			// Images can expand to more tokens than their URL or encoded bytes.
 			// Use the model context reservation, as for opaque saved history.
 			imageURL, _ := input["image_url"].(string)
+			if inputType == "input_audio" {
+				imageURL, _ = input["data"].(string)
+			}
+			if inputType == "input_video" {
+				imageURL, _ = input["video_url"].(string)
+			}
 			fileID, _ := input["file_id"].(string)
 			return allowHidden && (imageURL != "" || fileID != "")
 		case "input_file":
@@ -508,11 +520,16 @@ func resellerResponsesInputIsBounded(value any, allowHidden bool) bool {
 			tools, exists := input["tools"]
 			return exists && tools != nil && resellerResponsesToolsAreClientExecuted(tools)
 		case "reasoning":
-			if input["id"] != nil && input["id"] != "" && !allowHidden {
+			encrypted, _ := input["encrypted_content"].(string)
+			if input["id"] != nil && input["id"] != "" && encrypted == "" && !allowHidden {
 				return false
 			}
 			return resellerResponsesInputIsBounded(input["summary"], allowHidden) && resellerResponsesInputIsBounded(input["content"], allowHidden)
-		case "compaction", "item_reference":
+		case "compaction":
+			encrypted, _ := input["encrypted_content"].(string)
+			return encrypted != "" || allowHidden
+		case "item_reference", "file_search_call", "web_search_call", "image_generation_call",
+			"code_interpreter_call", "mcp_list_tools", "mcp_approval_request", "mcp_call":
 			return allowHidden
 		}
 	}
@@ -700,6 +717,21 @@ func ValidateResellerOutboundHardCapForFormat(c *gin.Context, relayInfo *relayco
 	noteQuotaClamp(relayInfo, clamp)
 	if clamp != nil {
 		return clamp
+	}
+	if finalFormat == relaytypes.RelayFormatOpenAIResponses {
+		modelName := strings.TrimSpace(relayInfo.GetUpstreamModelName())
+		var request dto.OpenAIResponsesRequest
+		if err := common.Unmarshal(jsonData, &request); err != nil {
+			return err
+		}
+		if strings.TrimSpace(request.Model) != "" {
+			modelName = strings.TrimSpace(request.Model)
+		}
+		if contextLimit, known := relayconstant.CodexModelContextTokenLimit(modelName); known && maximumQuota > contextLimit {
+			// The published context window is the combined input/output ceiling,
+			// so adding the maximum output again would double-reserve it.
+			maximumQuota = contextLimit
+		}
 	}
 	if maximumQuota > relayInfo.TokenQuotaPreConsumed {
 		if relayInfo.Billing == nil {
