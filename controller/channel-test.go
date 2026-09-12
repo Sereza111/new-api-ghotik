@@ -119,6 +119,9 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 		}
 	} else {
 		// 如果没有指定端点类型，使用原有的自动检测逻辑
+		if common.IsImageGenerationModel(testModel) {
+			requestPath = "/v1/images/generations"
+		}
 
 		if strings.Contains(strings.ToLower(testModel), "rerank") {
 			requestPath = "/v1/rerank"
@@ -776,6 +779,15 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 	}
 
 	// 自动检测逻辑（保持原有行为）
+	if common.IsImageGenerationModel(model) {
+		return &dto.ImageRequest{
+			Model:  model,
+			Prompt: "a cute cat",
+			N:      lo.ToPtr(uint(1)),
+			Size:   "1024x1024",
+		}
+	}
+
 	if strings.Contains(strings.ToLower(model), "rerank") {
 		return &dto.RerankRequest{
 			Model:     model,

@@ -23,6 +23,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestBuildTestRequestAutoDetectsImageModels(t *testing.T) {
+	request := buildTestRequest("gpt-image-2.5-flare", "", nil, false)
+
+	imageRequest, ok := request.(*dto.ImageRequest)
+	require.True(t, ok)
+	assert.Equal(t, "gpt-image-2.5-flare", imageRequest.Model)
+	assert.Equal(t, "a cute cat", imageRequest.Prompt)
+}
+
 func TestValidateChannelProxy(t *testing.T) {
 	tests := []struct {
 		name    string
