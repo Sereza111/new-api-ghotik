@@ -99,42 +99,6 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	if isCompact {
 		return request, nil
 	}
-	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(request.Model)), "gpt-6") && len(request.Input) > 0 {
-		var input []json.RawMessage
-		if err := common.Unmarshal(request.Input, &input); err == nil {
-			filtered := make([]json.RawMessage, 0, len(input))
-			var configuredEffort string
-			for _, item := range input {
-				var configuration struct {
-					Type      string         `json:"type"`
-					Reasoning *dto.Reasoning `json:"reasoning"`
-				}
-				if err := common.Unmarshal(item, &configuration); err != nil {
-					return nil, err
-				}
-				if configuration.Type != "configuration_update" {
-					filtered = append(filtered, item)
-					continue
-				}
-				if configuration.Reasoning != nil && strings.TrimSpace(configuration.Reasoning.Effort) != "" {
-					configuredEffort = strings.TrimSpace(configuration.Reasoning.Effort)
-				}
-			}
-			if len(filtered) != len(input) {
-				encoded, err := common.Marshal(filtered)
-				if err != nil {
-					return nil, err
-				}
-				request.Input = encoded
-				if configuredEffort != "" && (request.Reasoning == nil || strings.TrimSpace(request.Reasoning.Effort) == "") {
-					if request.Reasoning == nil {
-						request.Reasoning = &dto.Reasoning{}
-					}
-					request.Reasoning.Effort = configuredEffort
-				}
-			}
-		}
-	}
 	// codex: store must be false
 	request.Store = json.RawMessage("false")
 	// rm max_output_tokens

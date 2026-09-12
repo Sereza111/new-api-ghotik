@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -82,10 +83,23 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
 		}
-		if hardCapErr := validateResellerPassThroughHardCap(c, info, storage); hardCapErr != nil {
+		jsonData, err := storage.Bytes()
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+		}
+		jsonData, err = normalizeLegacyResponsesConfigurationUpdates(jsonData, info.GetUpstreamModelName())
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		normalizedStorage, err := common.CreateBodyStorage(jsonData)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		defer normalizedStorage.Close()
+		if hardCapErr := validateResellerPassThroughHardCap(c, info, normalizedStorage); hardCapErr != nil {
 			return hardCapErr
 		}
-		requestBody = common.NewReplayableBodyReader(storage)
+		requestBody = common.NewReplayableBodyReader(normalizedStorage)
 	} else {
 		convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *request)
 		if err != nil {
@@ -109,6 +123,10 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			if err != nil {
 				return newAPIErrorFromParamOverride(err)
 			}
+		}
+		jsonData, err = normalizeLegacyResponsesConfigurationUpdates(jsonData, info.GetUpstreamModelName())
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
 		if hardCapErr := validateResellerOutboundHardCap(c, info, jsonData); hardCapErr != nil {
 			return hardCapErr
@@ -174,4 +192,94 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		service.PostTextConsumeQuota(c, info, usageDto, nil)
 	}
 	return nil
+}
+
+func normalizeLegacyResponsesConfigurationUpdates(jsonData []byte, fallbackModel string) ([]byte, error) {
+	var request map[string]json.RawMessage
+	if err := common.Unmarshal(jsonData, &request); err != nil {
+		return nil, err
+	}
+	modelName := strings.TrimSpace(fallbackModel)
+	if rawModel, exists := request["model"]; exists {
+		var requestedModel string
+		if err := common.Unmarshal(rawModel, &requestedModel); err == nil && strings.TrimSpace(requestedModel) != "" {
+			modelName = strings.TrimSpace(requestedModel)
+		}
+	}
+	if strings.HasPrefix(strings.ToLower(modelName), "gpt-6") {
+		return jsonData, nil
+	}
+
+	rawInput, exists := request["input"]
+	inputJSON := strings.TrimSpace(string(rawInput))
+	if !exists || inputJSON == "" || inputJSON[0] != '[' {
+		return jsonData, nil
+	}
+	var input []json.RawMessage
+	if err := common.Unmarshal(rawInput, &input); err != nil {
+		return nil, err
+	}
+	filtered := make([]json.RawMessage, 0, len(input))
+	configuredEffort := ""
+	for _, item := range input {
+		var fields map[string]json.RawMessage
+		if err := common.Unmarshal(item, &fields); err != nil || fields == nil {
+			filtered = append(filtered, item)
+			continue
+		}
+		var itemType string
+		if err := common.Unmarshal(fields["type"], &itemType); err != nil || itemType != "configuration_update" {
+			filtered = append(filtered, item)
+			continue
+		}
+		if rawReasoning, exists := fields["reasoning"]; exists {
+			var reasoning map[string]json.RawMessage
+			if err := common.Unmarshal(rawReasoning, &reasoning); err != nil {
+				return nil, err
+			}
+			if rawEffort, exists := reasoning["effort"]; exists {
+				var effort string
+				if err := common.Unmarshal(rawEffort, &effort); err != nil {
+					return nil, err
+				}
+				if strings.TrimSpace(effort) != "" {
+					configuredEffort = strings.TrimSpace(effort)
+				}
+			}
+		}
+	}
+	if len(filtered) == len(input) {
+		return jsonData, nil
+	}
+	encodedInput, err := common.Marshal(filtered)
+	if err != nil {
+		return nil, err
+	}
+	request["input"] = encodedInput
+	if configuredEffort != "" {
+		var reasoning map[string]json.RawMessage
+		if rawReasoning, exists := request["reasoning"]; exists {
+			if err := common.Unmarshal(rawReasoning, &reasoning); err != nil {
+				return nil, err
+			}
+		}
+		if reasoning == nil {
+			reasoning = make(map[string]json.RawMessage)
+		}
+		var existingEffort string
+		if rawEffort, exists := reasoning["effort"]; exists {
+			_ = common.Unmarshal(rawEffort, &existingEffort)
+		}
+		if strings.TrimSpace(existingEffort) == "" {
+			reasoning["effort"], err = common.Marshal(configuredEffort)
+			if err != nil {
+				return nil, err
+			}
+			request["reasoning"], err = common.Marshal(reasoning)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return common.Marshal(request)
 }
