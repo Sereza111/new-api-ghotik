@@ -54,3 +54,47 @@ func TestConvertOpenAIResponsesRequestDropsPenalties(t *testing.T) {
 	assert.Nil(t, request.FrequencyPenalty)
 	assert.Nil(t, request.PresencePenalty)
 }
+
+func TestConvertOpenAIResponsesRequestBackportsConfigurationUpdate(t *testing.T) {
+	adaptor := &Adaptor{}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeCodex},
+		RelayMode:   relayconstant.RelayModeResponses,
+	}
+
+	converted, err := adaptor.ConvertOpenAIResponsesRequest(nil, info, dto.OpenAIResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: json.RawMessage(`[
+			{"type":"configuration_update","reasoning":{"effort":"high"}},
+			{"role":"user","content":[{"type":"input_text","text":"hello"}]}
+		]`),
+	})
+	require.NoError(t, err)
+
+	request, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.NotNil(t, request.Reasoning)
+	assert.Equal(t, "high", request.Reasoning.Effort)
+	assert.NotContains(t, string(request.Input), "configuration_update")
+	assert.Contains(t, string(request.Input), `"text":"hello"`)
+}
+
+func TestConvertOpenAIResponsesRequestKeepsConfigurationUpdateForGPT6(t *testing.T) {
+	adaptor := &Adaptor{}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeCodex},
+		RelayMode:   relayconstant.RelayModeResponses,
+	}
+	input := json.RawMessage(`[{"type":"configuration_update","reasoning":{"effort":"max"}}]`)
+
+	converted, err := adaptor.ConvertOpenAIResponsesRequest(nil, info, dto.OpenAIResponsesRequest{
+		Model: "gpt-6-astra",
+		Input: input,
+	})
+	require.NoError(t, err)
+
+	request, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	assert.JSONEq(t, string(input), string(request.Input))
+	assert.Nil(t, request.Reasoning)
+}
