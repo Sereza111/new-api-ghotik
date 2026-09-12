@@ -50,15 +50,17 @@ type PricingReferencePrice struct {
 }
 
 var pricingReferencePrices = map[string]PricingReferencePrice{
-	"gpt-6-astra":   {InputUSD: 10, OutputUSD: 50},
-	"gpt-5.4":       {InputUSD: 2.5, OutputUSD: 15},
-	"gpt-5.4-mini":  {InputUSD: 0.75, OutputUSD: 4.5},
-	"gpt-5.5":       {InputUSD: 5, OutputUSD: 30},
-	"gpt-5.6-luna":  {InputUSD: 0.2, OutputUSD: 1.2},
-	"gpt-5.6-sol":   {InputUSD: 4, OutputUSD: 20},
-	"gpt-5.6-terra": {InputUSD: 2, OutputUSD: 12},
-	"gpt-image-2":   {RequestUSD: 1},
-	"grok-4.5":      {InputUSD: 2, OutputUSD: 6},
+	"gpt-6-astra":            {InputUSD: 10, OutputUSD: 50},
+	"gpt-5.4":                {InputUSD: 2.5, OutputUSD: 15},
+	"gpt-5.4-mini":           {InputUSD: 0.75, OutputUSD: 4.5},
+	"gpt-5.5":                {InputUSD: 5, OutputUSD: 30},
+	"gpt-5.6-luna":           {InputUSD: 0.2, OutputUSD: 1.2},
+	"gpt-5.6-sol":            {InputUSD: 4, OutputUSD: 20},
+	"gpt-5.6-terra":          {InputUSD: 2, OutputUSD: 12},
+	"gpt-image-2":            {RequestUSD: 1},
+	"gpt-image-2.5-flare":    {RequestUSD: 0.5},
+	"gpt-image-2.5-sunburst": {RequestUSD: 1},
+	"grok-4.5":               {InputUSD: 2, OutputUSD: 6},
 }
 
 func getPricingReferencePrice(modelName string) *PricingReferencePrice {
