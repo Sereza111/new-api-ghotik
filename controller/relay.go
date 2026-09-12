@@ -290,6 +290,10 @@ func relaySupportsRawTokenAccounting(relayInfo *relaycommon.RelayInfo) bool {
 	case types.RelayFormatOpenAI:
 		return relayInfo.RelayMode == relayconstant.RelayModeChatCompletions ||
 			relayInfo.RelayMode == relayconstant.RelayModeCompletions
+	case types.RelayFormatOpenAIImage:
+		// Reseller image requests are settled from their configured fixed USD
+		// price after it is converted to the key's purchased token units.
+		return model.IsResellerTokenKey(relayInfo.TokenKey)
 	default:
 		return false
 	}

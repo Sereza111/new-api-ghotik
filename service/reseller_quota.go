@@ -38,6 +38,7 @@ import (
 var (
 	errResellerOutputTokenLimitRequired  = errors.New("finite reseller token keys require an explicit non-zero output token limit")
 	errResellerRequestHardCapUnsupported = errors.New("finite reseller token key cannot enforce a hard cap for this request")
+	errResellerFixedPriceRequired        = errors.New("reseller image generation requires a positive fixed model price")
 )
 
 func isResellerBilling(relayInfo *relaycommon.RelayInfo) bool {
@@ -66,6 +67,38 @@ func resellerTokenQuota(parts ...int) (int, *common.QuotaClamp) {
 		}
 	}
 	return common.QuotaFromDecimalChecked(total)
+}
+
+func isResellerImageRequest(relayInfo *relaycommon.RelayInfo) bool {
+	return isResellerBilling(relayInfo) && relayInfo.RelayFormat == relaytypes.RelayFormatOpenAIImage
+}
+
+// resellerFixedPriceTokenQuota converts the ordinary monetary quota charged
+// for a fixed-price request into the raw token units sold to the reseller. A
+// key bought at $0.05/1M therefore spends 200k tokens for a $0.01 image and
+// 400k tokens for a $0.02 image.
+func resellerFixedPriceTokenQuota(monetaryQuota int, baseCostPerMillion string) (int, *common.QuotaClamp, error) {
+	if monetaryQuota <= 0 {
+		return 0, nil, errResellerFixedPriceRequired
+	}
+	baseCost, err := decimal.NewFromString(strings.TrimSpace(baseCostPerMillion))
+	if err != nil || !baseCost.IsPositive() {
+		return 0, nil, fmt.Errorf("%w: invalid reseller base cost", errResellerFixedPriceRequired)
+	}
+	quotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+	if !quotaPerUnit.IsPositive() {
+		return 0, nil, fmt.Errorf("%w: invalid quota conversion rate", errResellerFixedPriceRequired)
+	}
+
+	tokenQuotaDecimal := decimal.NewFromInt(int64(monetaryQuota)).
+		Mul(decimal.NewFromInt(1_000_000)).
+		Div(quotaPerUnit).
+		Div(baseCost)
+	tokenQuota, clamp := common.QuotaFromDecimalChecked(tokenQuotaDecimal)
+	if tokenQuota <= 0 && clamp == nil {
+		return 0, nil, fmt.Errorf("%w: converted quota is zero", errResellerFixedPriceRequired)
+	}
+	return tokenQuota, clamp, nil
 }
 
 func resellerOutputTokenQuota(limit uint, candidates *int) (int, error) {

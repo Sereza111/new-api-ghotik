@@ -187,6 +187,89 @@ func TestPreConsumeBillingUsesRawResellerEstimate(t *testing.T) {
 	assert.Equal(t, 100_000, user.Quota)
 }
 
+func TestResellerFixedPriceImageBillingUsesPurchasedTokenEquivalent(t *testing.T) {
+	tests := []struct {
+		name          string
+		monetaryQuota int
+		wantTokens    int
+	}{
+		{name: "$0.01 image", monetaryQuota: 5_000, wantTokens: 200_000},
+		{name: "$0.02 image", monetaryQuota: 10_000, wantTokens: 400_000},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			quota, clamp, err := resellerFixedPriceTokenQuota(testCase.monetaryQuota, "0.05")
+			require.NoError(t, err)
+			assert.Nil(t, clamp)
+			assert.Equal(t, testCase.wantTokens, quota)
+		})
+	}
+
+	truncate(t)
+	seedUser(t, 251, 100_000)
+	seedToken(t, 252, 251, "rsl_fixed-price-image", 1_000_000)
+	seedChannel(t, 259)
+	require.NoError(t, model.DB.Create(&model.ResellerKey{
+		TokenId: 252, UserId: 251, TokenMillions: 1,
+		MarkupPercent: 100, BaseCostPerMillion: "0.05",
+		Endpoint: "https://pugshop.ru/v1", CreatedTime: 1,
+	}).Error)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	relayInfo := &relaycommon.RelayInfo{
+		TokenId: 252, TokenKey: "rsl_fixed-price-image", UserId: 251,
+		OriginModelName: "gpt-image-2", RelayFormat: relaytypes.RelayFormatOpenAIImage,
+		Request:     &dto.ImageRequest{Model: "gpt-image-2", Prompt: "test"},
+		StartTime:   time.Now(),
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 259},
+		PriceData: types.PriceData{
+			UsePrice: true, ModelPrice: 0.02, QuotaToPreConsume: 10_000,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+	}
+
+	require.Nil(t, PreConsumeBilling(ctx, 10_000, relayInfo))
+	require.NotNil(t, relayInfo.Billing)
+	assert.Equal(t, 400_000, relayInfo.Billing.GetPreConsumedQuota())
+	PostTextConsumeQuota(ctx, relayInfo, &dto.Usage{PromptTokens: 1, TotalTokens: 1}, nil)
+
+	var token model.Token
+	require.NoError(t, model.DB.First(&token, 252).Error)
+	assert.Equal(t, 600_000, token.RemainQuota)
+	assert.Equal(t, 400_000, token.UsedQuota)
+	var log model.Log
+	require.NoError(t, model.LOG_DB.Where("token_id = ?", 252).Last(&log).Error)
+	var other map[string]interface{}
+	require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+	assert.Equal(t, float64(400_000), other["reseller_token_quota"])
+	assert.Equal(t, float64(400_000), other["reseller_measured_tokens"])
+
+	seedToken(t, 254, 251, "rsl_fixed-price-image-low-balance", 100_000)
+	require.NoError(t, model.DB.Model(&model.Token{}).Where("id = ?", 254).Update("used_quota", 900_000).Error)
+	require.NoError(t, model.DB.Create(&model.ResellerKey{
+		TokenId: 254, UserId: 251, TokenMillions: 1,
+		MarkupPercent: 100, BaseCostPerMillion: "0.05",
+		Endpoint: "https://pugshop.ru/v1", CreatedTime: 1,
+	}).Error)
+	insufficientInfo := &relaycommon.RelayInfo{
+		TokenId: 254, TokenKey: "rsl_fixed-price-image-low-balance", UserId: 251,
+		OriginModelName: "gpt-image-2", RelayFormat: relaytypes.RelayFormatOpenAIImage,
+		Request: &dto.ImageRequest{Model: "gpt-image-2", Prompt: "test"},
+		PriceData: types.PriceData{
+			UsePrice: true, ModelPrice: 0.02, QuotaToPreConsume: 10_000,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+	}
+	apiErr := PreConsumeBilling(ctx, 10_000, insufficientInfo)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, 403, apiErr.StatusCode)
+	assert.Nil(t, insufficientInfo.Billing)
+	token = model.Token{}
+	require.NoError(t, model.DB.First(&token, 254).Error)
+	assert.Equal(t, 100_000, token.RemainQuota)
+	assert.Equal(t, 900_000, token.UsedQuota)
+}
+
 func TestResellerInitialReservationIsIdempotent(t *testing.T) {
 	truncate(t)
 	seedUser(t, 57, 100_000)

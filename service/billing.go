@@ -66,7 +66,18 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 		if relayInfo.TokenId <= 0 || relayInfo.UserId <= 0 {
 			return types.NewError(model.ErrTokenInvalid, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
 		}
-		currentToken, tokenErr := model.GetTokenByIds(relayInfo.TokenId, relayInfo.UserId)
+		var currentToken *model.Token
+		var tokenErr error
+		if isResellerImageRequest(relayInfo) {
+			resellerKey, lookupErr := model.GetUserResellerKeyByTokenID(relayInfo.UserId, relayInfo.TokenId)
+			tokenErr = lookupErr
+			if lookupErr == nil {
+				currentToken = &resellerKey.Token
+				relayInfo.ResellerBaseCostPerMillion = resellerKey.Metadata.BaseCostPerMillion
+			}
+		} else {
+			currentToken, tokenErr = model.GetTokenByIds(relayInfo.TokenId, relayInfo.UserId)
+		}
 		if tokenErr != nil {
 			return types.NewError(tokenErr, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
 		}
@@ -112,7 +123,18 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 			}
 			if isResellerBilling(relayInfo) {
 				var requestErr error
-				rawPreConsumedQuota, clamp, requestErr = resellerRequestMaximumTokenQuota(relayInfo)
+				if isResellerImageRequest(relayInfo) {
+					if !relayInfo.PriceData.UsePrice {
+						requestErr = errResellerFixedPriceRequired
+					} else {
+						rawPreConsumedQuota, clamp, requestErr = resellerFixedPriceTokenQuota(
+							preConsumedQuota,
+							relayInfo.ResellerBaseCostPerMillion,
+						)
+					}
+				} else {
+					rawPreConsumedQuota, clamp, requestErr = resellerRequestMaximumTokenQuota(relayInfo)
+				}
 				noteQuotaClamp(relayInfo, clamp)
 				if clamp != nil {
 					return types.NewErrorWithStatusCode(
