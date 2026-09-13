@@ -600,6 +600,30 @@ func resellerResponsesToolsAreClientExecuted(value any) bool {
 	return true
 }
 
+func resellerResponsesInputContainsHostedTools(value any) bool {
+	switch input := value.(type) {
+	case []any:
+		for _, item := range input {
+			if resellerResponsesInputContainsHostedTools(item) {
+				return true
+			}
+		}
+	case map[string]any:
+		inputType, _ := input["type"].(string)
+		if inputType == "tool_search_output" || inputType == "additional_tools" {
+			if tools, exists := input["tools"]; exists && !resellerResponsesToolsAreClientExecuted(tools) {
+				return true
+			}
+		}
+		for _, item := range input {
+			if resellerResponsesInputContainsHostedTools(item) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func resellerResponsesInputTokenQuota(jsonData []byte, estimatedTokens int, upstreamModel string) (int, error) {
 	var request map[string]any
 	if err := common.Unmarshal(jsonData, &request); err != nil {
@@ -608,6 +632,10 @@ func resellerResponsesInputTokenQuota(jsonData []byte, estimatedTokens int, upst
 	if request == nil {
 		return 0, fmt.Errorf("%w: Responses request must be an object", errResellerRequestHardCapUnsupported)
 	}
+	if name, ok := request["model"].(string); ok && strings.TrimSpace(name) != "" {
+		upstreamModel = strings.TrimSpace(name)
+	}
+	contextLimit, hasContextLimit := relayconstant.CodexModelContextTokenLimit(upstreamModel)
 	hasHiddenInput := false
 	for _, field := range []string{"previous_response_id", "conversation"} {
 		if value, exists := request[field]; exists && value != nil && value != "" {
@@ -619,22 +647,26 @@ func resellerResponsesInputTokenQuota(jsonData []byte, estimatedTokens int, upst
 	}
 	if !resellerResponsesInputIsBounded(request["input"], false) {
 		if !resellerResponsesInputIsBounded(request["input"], true) {
-			return 0, fmt.Errorf("%w: malformed or unsupported Responses input item; supported images and files require a verified model context limit", errResellerRequestHardCapUnsupported)
+			if resellerResponsesInputContainsHostedTools(request["input"]) {
+				return 0, fmt.Errorf("%w: hosted tools can add unbounded input; only client-executed tools and tool search are supported", errResellerRequestHardCapUnsupported)
+			}
+			if !hasContextLimit {
+				return 0, fmt.Errorf("%w: malformed or unsupported Responses input item requires a verified model context limit", errResellerRequestHardCapUnsupported)
+			}
 		}
+		// A known model's combined context ceiling safely bounds opaque provider
+		// history, including newly introduced client-side item types. The exact
+		// upstream usage still replaces this reservation after the response.
 		hasHiddenInput = true
 	}
 	if !resellerResponsesToolsAreClientExecuted(request["tools"]) {
 		return 0, fmt.Errorf("%w: hosted tools can add unbounded input; only client-executed tools and tool search are supported", errResellerRequestHardCapUnsupported)
 	}
 	if hasHiddenInput {
-		if name, ok := request["model"].(string); ok && strings.TrimSpace(name) != "" {
-			upstreamModel = strings.TrimSpace(name)
-		}
-		limit, known := relayconstant.CodexModelContextTokenLimit(upstreamModel)
-		if !known {
+		if !hasContextLimit {
 			return 0, fmt.Errorf("%w: hidden Responses history, images and files require a verified model context limit", errResellerRequestHardCapUnsupported)
 		}
-		return limit, nil
+		return contextLimit, nil
 	}
 
 	// Byte-level tokenizers cannot produce more text tokens than UTF-8 input

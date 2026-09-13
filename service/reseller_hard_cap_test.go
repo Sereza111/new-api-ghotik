@@ -348,13 +348,17 @@ func TestResellerResponsesHiddenHistoryRequiresFullContextReservation(t *testing
 		})
 	}
 	for _, body := range []string{
-		`{"tools":[{"type":"web_search"}]}`,
 		`{"input":[{"type":"input_file"}]}`,
 		`{"input":[{"id":"hidden_message"}]}`,
 	} {
-		_, err := resellerResponsesInputTokenQuota([]byte(body), 10, "gpt-5.6-sol")
+		quota, err := resellerResponsesInputTokenQuota([]byte(body), 10, "gpt-5.6-sol")
+		require.NoError(t, err)
+		assert.Equal(t, 1_050_000, quota)
+		_, err = resellerResponsesInputTokenQuota([]byte(body), 10, "unknown")
 		require.ErrorIs(t, err, errResellerRequestHardCapUnsupported)
 	}
+	_, err := resellerResponsesInputTokenQuota([]byte(`{"tools":[{"type":"web_search"}]}`), 10, "gpt-5.6-sol")
+	require.ErrorIs(t, err, errResellerRequestHardCapUnsupported)
 }
 
 func TestResellerResponsesExplicitCodexHistoryFitsOneMillionTokenKey(t *testing.T) {
@@ -414,7 +418,14 @@ func TestResellerResponsesMediaRequiresContextReservation(t *testing.T) {
 		`[{"type":"computer_call_output","output":{"type":"computer_screenshot"}}]`,
 		`[{"role":"user","content":[{"type":"unknown_media","url":"https://example.com"}]}]`,
 	} {
-		_, err := resellerResponsesInputTokenQuota([]byte(`{"model":"gpt-6-astra","input":`+input+`}`), 10, "gpt-6-astra")
+		body := []byte(`{"model":"gpt-6-astra","input":` + input + `}`)
+		quota, err := resellerResponsesInputTokenQuota(body, 10, "gpt-6-astra")
+		require.NoError(t, err)
+		assert.Equal(t, 1_050_000, quota)
+		info := &relaycommon.RelayInfo{TokenKey: "rsl_opaque_history", RelayFormat: relaytypes.RelayFormatOpenAIResponses,
+			Request: &dto.OpenAIResponsesRequest{}, TokenQuotaPreConsumed: 50_000_000}
+		require.NoError(t, ValidateResellerOutboundHardCap(info, body))
+		_, err = resellerResponsesInputTokenQuota([]byte(`{"model":"unknown","input":`+input+`}`), 10, "gpt-6-astra")
 		require.ErrorIs(t, err, errResellerRequestHardCapUnsupported)
 	}
 }
