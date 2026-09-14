@@ -34,6 +34,7 @@ export function PriceInput(props: {
   value: string
   placeholder?: string
   disabled?: boolean
+  ariaLabel?: string
   onChange: (value: string) => void
 }) {
   return (
@@ -44,6 +45,7 @@ export function PriceInput(props: {
         value={props.value}
         placeholder={props.placeholder}
         disabled={props.disabled}
+        aria-label={props.ariaLabel}
         onChange={(event) => props.onChange(event.target.value)}
       />
       <InputGroupAddon align='inline-end'>$/1M</InputGroupAddon>
