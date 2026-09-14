@@ -21,6 +21,7 @@ import { describe, expect, test } from 'vitest'
 import type { PricingModel } from '../../types'
 import {
   calculateDiscountPercent,
+  calculateReferencePriceFromDiscount,
   getReferencePriceUSD,
 } from '../reference-price'
 
@@ -45,5 +46,11 @@ describe('reference model pricing', () => {
   test('omits a discount when the current price is not lower', () => {
     expect(calculateDiscountPercent(4, 4)).toBeNull()
     expect(calculateDiscountPercent(null, 0.1)).toBeNull()
+  })
+
+  test('derives the crossed-out price from a configured discount', () => {
+    expect(calculateReferencePriceFromDiscount(0.1, 80)).toBeCloseTo(0.5)
+    expect(calculateReferencePriceFromDiscount(0.1, 0)).toBeNull()
+    expect(calculateReferencePriceFromDiscount(0.1, 100)).toBeNull()
   })
 })

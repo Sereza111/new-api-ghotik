@@ -5927,6 +5927,14 @@
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Show discount": "Afficher la remise",
+    "Show a crossed-out regular price and discount badge on the public pricing page.": "Afficher le prix normal barré et un badge de remise sur la page publique des tarifs.",
+    "Enter a discount greater than 0 and less than 100.": "Saisissez une remise supérieure à 0 et inférieure à 100.",
+    "Set a valid price before enabling the discount.": "Définissez un prix valide avant d'activer la remise.",
+    "Billing uses the final prices above; the regular price is calculated for display only.": "La facturation utilise les prix finaux ci-dessus ; le prix normal n'est calculé que pour l'affichage.",
+    "Regular price": "Prix normal",
+    "Model regular prices": "Prix normaux des modèles",
+    "JSON map of model → regular USD prices used only for the public discount display.": "Objet JSON associant chaque modèle à ses prix normaux en USD, utilisé uniquement pour l'affichage public des remises."
   }
 }

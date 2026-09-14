@@ -64,11 +64,19 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
 import {
+  calculateDiscountPercent,
+  calculateReferencePriceFromDiscount,
+} from '@/features/pricing/lib/reference-price'
+import {
   createDefaultTaskVisualConfig,
   generateTaskExprFromConfig,
 } from '@/features/pricing/lib/task-expr'
 import { cn } from '@/lib/utils'
 
+import {
+  SettingsControlGroup,
+  SettingsSwitchField,
+} from '../components/settings-form-layout'
 import {
   EMPTY_LANE_ENABLED,
   EMPTY_LANE_PRICES,
@@ -164,6 +172,9 @@ export const ModelPricingEditorPanel = forwardRef<
   })
   const [billingExpr, setBillingExpr] = useState('')
   const [requestRuleExpr, setRequestRuleExpr] = useState('')
+  const [discountEnabled, setDiscountEnabled] = useState(false)
+  const [discountPercent, setDiscountPercent] = useState('')
+  const [discountError, setDiscountError] = useState<string | null>(null)
   const [editorReloadToken, setEditorReloadToken] = useState(0)
   const autoSwitchedForRef = useRef<string | null>(null)
   const isEditMode = !!editData
@@ -224,6 +235,7 @@ export const ModelPricingEditorPanel = forwardRef<
 
   useEffect(() => {
     const nextLaneState = createInitialLaneState(editData)
+    let nextPricingMode: PricingMode = 'per-token'
 
     if (editData) {
       form.reset({
@@ -237,7 +249,6 @@ export const ModelPricingEditorPanel = forwardRef<
         audioRatio: editData.audioRatio || '',
         audioCompletionRatio: editData.audioCompletionRatio || '',
       })
-      let nextPricingMode: PricingMode = 'per-token'
       if (editData.billingMode === 'tiered_expr') {
         nextPricingMode = 'tiered_expr'
       } else if (editData.price) {
@@ -262,6 +273,28 @@ export const ModelPricingEditorPanel = forwardRef<
       setBillingExpr('')
       setRequestRuleExpr('')
     }
+
+    const currentDiscountPrice =
+      nextPricingMode === 'per-request'
+        ? toNumberOrNull(editData?.price)
+        : toNumberOrNull(nextLaneState.promptPrice)
+    const configuredReferencePrice =
+      nextPricingMode === 'per-request'
+        ? editData?.referencePrice?.request_usd
+        : editData?.referencePrice?.input_usd
+    const configuredDiscount =
+      currentDiscountPrice === null
+        ? null
+        : calculateDiscountPercent(
+            configuredReferencePrice ?? null,
+            currentDiscountPrice
+          )
+
+    setDiscountEnabled(
+      nextPricingMode !== 'tiered_expr' && configuredReferencePrice != null
+    )
+    setDiscountPercent(configuredDiscount?.toString() ?? '')
+    setDiscountError(null)
 
     setPromptPrice(nextLaneState.promptPrice)
     setLanePrices(nextLaneState.prices)
@@ -403,29 +436,124 @@ export const ModelPricingEditorPanel = forwardRef<
     }
   }
 
-  const previewRows = useMemo(
+  const handleDiscountToggle = (checked: boolean) => {
+    setDiscountEnabled(checked)
+    setDiscountError(null)
+    if (checked && !discountPercent) setDiscountPercent('10')
+  }
+
+  const handleDiscountChange = (value: string) => {
+    if (!numericDraftRegex.test(value)) return
+    setDiscountPercent(value)
+    setDiscountError(null)
+  }
+
+  const selectedPricingModel = useMemo(
     () =>
-      buildPreviewRows(
-        watchedValues,
-        pricingMode,
-        resolvedBillingExpr,
-        requestRuleExpr,
-        promptPrice,
-        lanePrices,
-        laneEnabled,
-        t
+      pricingModels.find(
+        (model) => model.model_name === watchedValues.name.trim()
       ),
-    [
-      resolvedBillingExpr,
-      laneEnabled,
-      lanePrices,
-      pricingMode,
-      promptPrice,
-      requestRuleExpr,
-      t,
-      watchedValues,
-    ]
+    [pricingModels, watchedValues.name]
   )
+
+  const referencePrice = useMemo(() => {
+    if (!discountEnabled || pricingMode === 'tiered_expr') return undefined
+
+    const discount = toNumberOrNull(discountPercent)
+    if (discount === null) return undefined
+
+    if (pricingMode === 'per-request') {
+      const currentPrice = toNumberOrNull(watchedValues.price)
+      if (currentPrice === null) return undefined
+      const requestPrice = calculateReferencePriceFromDiscount(
+        currentPrice,
+        discount
+      )
+      return requestPrice === null
+        ? undefined
+        : { request_usd: Number(formatPricingNumber(requestPrice)) }
+    }
+
+    const inputPrice = toNumberOrNull(promptPrice)
+    if (inputPrice === null) return undefined
+    const configuredOutputPrice =
+      laneEnabled.completion && hasValue(lanePrices.completion)
+        ? toNumberOrNull(lanePrices.completion)
+        : null
+    const outputPrice =
+      configuredOutputPrice ??
+      inputPrice * (selectedPricingModel?.completion_ratio ?? 1)
+    const referenceInputPrice = calculateReferencePriceFromDiscount(
+      inputPrice,
+      discount
+    )
+    const referenceOutputPrice = calculateReferencePriceFromDiscount(
+      outputPrice,
+      discount
+    )
+    if (referenceInputPrice === null || referenceOutputPrice === null) {
+      return undefined
+    }
+    return {
+      input_usd: Number(formatPricingNumber(referenceInputPrice)),
+      output_usd: Number(formatPricingNumber(referenceOutputPrice)),
+    }
+  }, [
+    discountEnabled,
+    discountPercent,
+    laneEnabled.completion,
+    lanePrices.completion,
+    pricingMode,
+    promptPrice,
+    selectedPricingModel?.completion_ratio,
+    watchedValues.price,
+  ])
+
+  const previewRows = useMemo(() => {
+    const rows = buildPreviewRows(
+      watchedValues,
+      pricingMode,
+      resolvedBillingExpr,
+      requestRuleExpr,
+      promptPrice,
+      lanePrices,
+      laneEnabled,
+      t
+    )
+    if (!referencePrice) return rows
+
+    const prices =
+      pricingMode === 'per-request'
+        ? [`$${formatPricingNumber(referencePrice.request_usd)}`]
+        : [
+            `$${formatPricingNumber(referencePrice.input_usd)}`,
+            `$${formatPricingNumber(referencePrice.output_usd)}`,
+          ]
+    return [
+      ...rows,
+      {
+        key: 'discount',
+        label: t('Discount'),
+        value: `-${discountPercent}%`,
+      },
+      {
+        key: 'referencePrice',
+        label: t('Regular price'),
+        value: prices.join(' / '),
+      },
+    ]
+  }, [
+    discountPercent,
+    resolvedBillingExpr,
+    laneEnabled,
+    lanePrices,
+    pricingMode,
+    promptPrice,
+    requestRuleExpr,
+    referencePrice,
+    t,
+    watchedValues,
+  ])
 
   const warnings = useMemo(() => {
     const nextWarnings: string[] = []
@@ -473,6 +601,20 @@ export const ModelPricingEditorPanel = forwardRef<
   }, [editData, laneEnabled, lanePrices, pricingMode, promptPrice, t])
 
   const validatePricingValues = useCallback(() => {
+    if (discountEnabled && pricingMode !== 'tiered_expr') {
+      const discount = toNumberOrNull(discountPercent)
+      if (discount === null || discount <= 0 || discount >= 100) {
+        setDiscountError(
+          t('Enter a discount greater than 0 and less than 100.')
+        )
+        return false
+      }
+      if (!referencePrice) {
+        setDiscountError(t('Set a valid price before enabling the discount.'))
+        return false
+      }
+    }
+
     if (
       pricingMode === 'per-token' &&
       toNumberOrNull(promptPrice) === null &&
@@ -498,7 +640,17 @@ export const ModelPricingEditorPanel = forwardRef<
     }
 
     return true
-  }, [form, laneEnabled, lanePrices, pricingMode, promptPrice, t])
+  }, [
+    discountEnabled,
+    discountPercent,
+    form,
+    laneEnabled,
+    lanePrices,
+    pricingMode,
+    promptPrice,
+    referencePrice,
+    t,
+  ])
 
   const buildSubmitData = useCallback(
     (values: ModelPricingFormValues) => {
@@ -513,6 +665,7 @@ export const ModelPricingEditorPanel = forwardRef<
         imageRatio: values.imageRatio || '',
         audioRatio: values.audioRatio || '',
         audioCompletionRatio: values.audioCompletionRatio || '',
+        referencePrice,
       }
 
       if (pricingMode === 'tiered_expr') {
@@ -522,7 +675,7 @@ export const ModelPricingEditorPanel = forwardRef<
 
       return data
     },
-    [pricingMode, requestRuleExpr, resolvedBillingExpr]
+    [pricingMode, referencePrice, requestRuleExpr, resolvedBillingExpr]
   )
 
   useImperativeHandle(
@@ -752,6 +905,49 @@ export const ModelPricingEditorPanel = forwardRef<
                     </FieldGroup>
                   </TabsContent>
                 </Tabs>
+
+                {pricingMode !== 'tiered_expr' && (
+                  <SettingsControlGroup className='space-y-3'>
+                    <SettingsSwitchField
+                      checked={discountEnabled}
+                      onCheckedChange={handleDiscountToggle}
+                      label={t('Show discount')}
+                      description={t(
+                        'Show a crossed-out regular price and discount badge on the public pricing page.'
+                      )}
+                      aria-label={t('Show discount')}
+                    />
+                    {discountEnabled && (
+                      <Field>
+                        <FieldLabel>{t('Discount')}</FieldLabel>
+                        <InputGroup>
+                          <InputGroupInput
+                            inputMode='decimal'
+                            value={discountPercent}
+                            placeholder='10'
+                            aria-label={t('Discount')}
+                            onChange={(event) =>
+                              handleDiscountChange(event.target.value)
+                            }
+                          />
+                          <InputGroupAddon align='inline-end'>
+                            %
+                          </InputGroupAddon>
+                        </InputGroup>
+                        <FieldDescription>
+                          {t(
+                            'Billing uses the final prices above; the regular price is calculated for display only.'
+                          )}
+                        </FieldDescription>
+                        {discountError && (
+                          <p className='text-destructive text-sm'>
+                            {discountError}
+                          </p>
+                        )}
+                      </Field>
+                    )}
+                  </SettingsControlGroup>
+                )}
               </FieldGroup>
 
               <aside className='bg-muted/20 sticky top-0 rounded-lg border'>

@@ -5927,6 +5927,14 @@
     "Zero retention": "零數據保留",
     "Zhipu": "智譜",
     "Zhipu V4": "智譜 V4",
-    "Zoom": "縮放"
+    "Zoom": "縮放",
+    "Show discount": "顯示折扣",
+    "Show a crossed-out regular price and discount badge on the public pricing page.": "在公開定價頁顯示刪除線原價和折扣徽章。",
+    "Enter a discount greater than 0 and less than 100.": "請輸入大於 0 且小於 100 的折扣。",
+    "Set a valid price before enabling the discount.": "請先設定有效價格，再啟用折扣。",
+    "Billing uses the final prices above; the regular price is calculated for display only.": "計費使用上方的最終價格；原價僅用於顯示。",
+    "Regular price": "原價",
+    "Model regular prices": "模型原價",
+    "JSON map of model → regular USD prices used only for the public discount display.": "模型 → 原價（美元）的 JSON 對應，僅用於公開折扣顯示。"
   }
 }

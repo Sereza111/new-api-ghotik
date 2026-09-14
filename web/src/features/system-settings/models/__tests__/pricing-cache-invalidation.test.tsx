@@ -90,6 +90,7 @@ vi.mock('../conflict-confirm-dialog', () => ({
 
 const emptyModelRatios = {
   ModelPrice: '{}',
+  ModelReferencePrice: '{}',
   ModelRatio: '{}',
   CompletionRatio: '{}',
   CacheRatio: '{}',

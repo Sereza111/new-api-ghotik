@@ -5927,6 +5927,14 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Show discount": "割引を表示",
+    "Show a crossed-out regular price and discount badge on the public pricing page.": "公開料金ページに通常価格の取り消し線と割引バッジを表示します。",
+    "Enter a discount greater than 0 and less than 100.": "0 より大きく 100 より小さい割引率を入力してください。",
+    "Set a valid price before enabling the discount.": "割引を有効にする前に、有効な価格を設定してください。",
+    "Billing uses the final prices above; the regular price is calculated for display only.": "請求には上記の最終価格が使用され、通常価格は表示用にのみ計算されます。",
+    "Regular price": "通常価格",
+    "Model regular prices": "モデルの通常価格",
+    "JSON map of model → regular USD prices used only for the public discount display.": "モデルから通常の USD 価格への JSON マップです。公開ページの割引表示にのみ使用されます。"
   }
 }

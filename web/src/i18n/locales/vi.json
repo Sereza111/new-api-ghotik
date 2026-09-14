@@ -5927,6 +5927,14 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Show discount": "Hiển thị giảm giá",
+    "Show a crossed-out regular price and discount badge on the public pricing page.": "Hiển thị giá gốc bị gạch và nhãn giảm giá trên trang bảng giá công khai.",
+    "Enter a discount greater than 0 and less than 100.": "Nhập mức giảm giá lớn hơn 0 và nhỏ hơn 100.",
+    "Set a valid price before enabling the discount.": "Hãy đặt giá hợp lệ trước khi bật giảm giá.",
+    "Billing uses the final prices above; the regular price is calculated for display only.": "Thanh toán sử dụng giá cuối cùng ở trên; giá gốc chỉ được tính để hiển thị.",
+    "Regular price": "Giá gốc",
+    "Model regular prices": "Giá gốc của mô hình",
+    "JSON map of model → regular USD prices used only for the public discount display.": "Ánh xạ JSON từ mô hình đến giá gốc bằng USD, chỉ dùng để hiển thị giảm giá công khai."
   }
 }

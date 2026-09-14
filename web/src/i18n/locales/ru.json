@@ -5927,6 +5927,14 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Show discount": "Показывать скидку",
+    "Show a crossed-out regular price and discount badge on the public pricing page.": "Показывать зачёркнутую обычную цену и процент скидки на публичной странице тарифов.",
+    "Enter a discount greater than 0 and less than 100.": "Введите скидку больше 0 и меньше 100.",
+    "Set a valid price before enabling the discount.": "Перед включением скидки укажите корректную цену.",
+    "Billing uses the final prices above; the regular price is calculated for display only.": "Для списания используются итоговые цены выше; обычная цена рассчитывается только для отображения.",
+    "Regular price": "Обычная цена",
+    "Model regular prices": "Обычные цены моделей",
+    "JSON map of model → regular USD prices used only for the public discount display.": "JSON-карта модели → обычные цены в USD, используемые только для отображения скидки в публичном прайсе."
   }
 }

@@ -86,6 +86,23 @@ export function calculateDiscountPercent(
   return Math.round((1 - currentPrice / referencePrice) * 100)
 }
 
+export function calculateReferencePriceFromDiscount(
+  currentPrice: number,
+  discountPercent: number
+): number | null {
+  if (
+    !Number.isFinite(currentPrice) ||
+    currentPrice <= 0 ||
+    !Number.isFinite(discountPercent) ||
+    discountPercent <= 0 ||
+    discountPercent >= 100
+  ) {
+    return null
+  }
+
+  return currentPrice / (1 - discountPercent / 100)
+}
+
 export function getTokenDiscountPercent(
   model: PricingModel,
   type: Extract<PriceType, 'input' | 'output'>,

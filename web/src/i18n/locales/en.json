@@ -5927,6 +5927,14 @@
     "Zero retention": "Zero retention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Show discount": "Show discount",
+    "Show a crossed-out regular price and discount badge on the public pricing page.": "Show a crossed-out regular price and discount badge on the public pricing page.",
+    "Enter a discount greater than 0 and less than 100.": "Enter a discount greater than 0 and less than 100.",
+    "Set a valid price before enabling the discount.": "Set a valid price before enabling the discount.",
+    "Billing uses the final prices above; the regular price is calculated for display only.": "Billing uses the final prices above; the regular price is calculated for display only.",
+    "Regular price": "Regular price",
+    "Model regular prices": "Model regular prices",
+    "JSON map of model → regular USD prices used only for the public discount display.": "JSON map of model → regular USD prices used only for the public discount display."
   }
 }
