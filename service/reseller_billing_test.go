@@ -130,7 +130,7 @@ func testResellerPanelTariffSettlement(t *testing.T) {
 				StartTime: time.Now(), ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 503},
 			}
 			seedTariffReseller(t, info, "0.05")
-			info.PriceData = types.PriceData{ModelRatio: tc.ratio, CompletionRatio: tc.completion,
+			info.PriceData = types.PriceData{ModelPrice: -1, ModelRatio: tc.ratio, CompletionRatio: tc.completion,
 				CacheRatio: tc.cacheRatio, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: tc.group}}
 			info.SetEstimatePromptTokens(tc.input)
 			require.Nil(t, PreConsumeBilling(ctx, 1, info))

@@ -141,9 +141,16 @@ func resellerMaximumTariffQuota(info *relaycommon.RelayInfo, input, output, cont
 		return 0, nil, fmt.Errorf("%w: expression pricing has no verified maximum charge", errResellerRequestHardCapUnsupported)
 	}
 	p := info.PriceData
-	for _, ratio := range []float64{p.ModelPrice, p.ModelRatio, p.CompletionRatio, p.CacheRatio,
-		p.CacheCreationRatio, p.CacheCreation5mRatio, p.CacheCreation1hRatio, p.ImageRatio,
-		p.AudioRatio, p.AudioCompletionRatio, p.GroupRatioInfo.GroupRatio} {
+	ratios := []float64{p.GroupRatioInfo.GroupRatio}
+	if p.UsePrice {
+		ratios = append(ratios, p.ModelPrice)
+	} else {
+		// ModelPrice=-1 is the normal sentinel for per-token tariffs.
+		ratios = append(ratios, p.ModelRatio, p.CompletionRatio, p.CacheRatio,
+			p.CacheCreationRatio, p.CacheCreation5mRatio, p.CacheCreation1hRatio,
+			p.ImageRatio, p.AudioRatio, p.AudioCompletionRatio)
+	}
+	for _, ratio := range ratios {
 		if ratio < 0 || math.IsNaN(ratio) || math.IsInf(ratio, 0) {
 			return 0, nil, errors.New("invalid reseller tariff ratio")
 		}
