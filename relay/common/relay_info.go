@@ -135,10 +135,12 @@ type RelayInfo struct {
 	TokenQuotaCharged     *int
 	TokenQuotaOperationID string
 	TokenQuotaUnfunded    int
-	// ResellerBaseCostPerMillion is the immutable commercial snapshot used to
-	// convert fixed-price requests (for example image generation) into the raw
-	// token units purchased for this reseller key.
+	// ResellerBaseCostPerMillion converts the panel's monetary charge into
+	// purchased package units. It is frozen at key purchase, not a model price.
 	ResellerBaseCostPerMillion string
+	// ResellerTariffBilling is captured at pre-consume. Legacy in-flight
+	// settlements without this snapshot retain their original accounting units.
+	ResellerTariffBilling bool
 	// ForcePreConsume 为 true 时禁用 BillingSession 的信任额度旁路，
 	// 强制预扣全额。用于异步任务（视频/音乐生成等），因为请求返回后任务仍在运行，
 	// 必须在提交前锁定全额。

@@ -20,6 +20,10 @@ import (
 // appendResellerSettlementInfo reports the durable debit, not the requested
 // settlement target. An unreconciled hold is explicitly separate from usage.
 func appendResellerSettlementInfo(other map[string]interface{}, info *relaycommon.RelayInfo) {
+	if info.ResellerTariffBilling {
+		other["reseller_billing_basis"] = "panel_tariff_v1"
+		other["reseller_base_cost_per_million"] = info.ResellerBaseCostPerMillion
+	}
 	charged := info.TokenQuotaPreConsumed
 	if info.TokenQuotaCharged != nil {
 		charged = *info.TokenQuotaCharged

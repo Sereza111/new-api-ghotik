@@ -68,12 +68,13 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 		}
 		var currentToken *model.Token
 		var tokenErr error
-		if isResellerImageRequest(relayInfo) {
+		if isResellerBilling(relayInfo) {
 			resellerKey, lookupErr := model.GetUserResellerKeyByTokenID(relayInfo.UserId, relayInfo.TokenId)
 			tokenErr = lookupErr
 			if lookupErr == nil {
 				currentToken = &resellerKey.Token
 				relayInfo.ResellerBaseCostPerMillion = resellerKey.Metadata.BaseCostPerMillion
+				relayInfo.ResellerTariffBilling = true
 			}
 		} else {
 			currentToken, tokenErr = model.GetTokenByIds(relayInfo.TokenId, relayInfo.UserId)
@@ -127,7 +128,7 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 					if !relayInfo.PriceData.UsePrice {
 						requestErr = errResellerFixedPriceRequired
 					} else {
-						rawPreConsumedQuota, clamp, requestErr = resellerFixedPriceTokenQuota(
+						rawPreConsumedQuota, clamp, requestErr = resellerTariffTokenQuota(
 							preConsumedQuota,
 							relayInfo.ResellerBaseCostPerMillion,
 						)
@@ -193,7 +194,9 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 		preConsumed := relayInfo.Billing.GetPreConsumedQuota()
 		delta := actualQuota - preConsumed
 
-		if delta > 0 {
+		if isResellerBilling(relayInfo) {
+			logger.LogInfo(ctx, fmt.Sprintf("reseller package settlement: actual=%d units, reserved=%d units, adjustment=%d units", actualQuota, preConsumed, delta))
+		} else if delta > 0 {
 			logger.LogInfo(ctx, fmt.Sprintf("预扣费后补扣费：%s（实际消耗：%s，预扣费：%s）",
 				logger.FormatQuota(delta),
 				logger.FormatQuota(actualQuota),

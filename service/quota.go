@@ -262,7 +262,9 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 	settlementQuota := quota
 	rawTokenQuota := relayInfo.TokenQuotaPreConsumed
 	if usesRawTokenQuota(relayInfo) {
-		if hasReportedRealtimeTokenUsage(originUsage) {
+		if relayInfo.ResellerTariffBilling && isResellerBilling(relayInfo) {
+			rawTokenQuota = resellerTariffSettlementQuota(ctx, relayInfo, quota, hasReportedRealtimeTokenUsage(originUsage))
+		} else if hasReportedRealtimeTokenUsage(originUsage) {
 			rawTokenQuota, clamp = resellerRealtimeTokenQuota(usage)
 			noteQuotaClamp(relayInfo, clamp)
 			relayInfo.TokenQuotaActual = &rawTokenQuota
@@ -416,7 +418,11 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	settlementQuota := quota
 	rawTokenQuota := relayInfo.TokenQuotaPreConsumed
 	if usesRawTokenQuota(relayInfo) {
-		if authoritativeQuota, authoritativeClamp, ok := authoritativeTextTokenQuota(
+		if relayInfo.ResellerTariffBilling && isResellerBilling(relayInfo) {
+			_, _, authoritative := authoritativeTextTokenQuota(originUsage,
+				common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens), relayInfo.GetEstimatePromptTokens())
+			rawTokenQuota = resellerTariffSettlementQuota(ctx, relayInfo, quota, authoritative)
+		} else if authoritativeQuota, authoritativeClamp, ok := authoritativeTextTokenQuota(
 			originUsage,
 			common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens),
 			relayInfo.GetEstimatePromptTokens(),

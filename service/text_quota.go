@@ -424,7 +424,11 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	settlementQuota := summary.Quota
 	rawTokenQuota := relayInfo.TokenQuotaPreConsumed
 	if usesRawTokenQuota(relayInfo) {
-		if isResellerImageRequest(relayInfo) {
+		if relayInfo.ResellerTariffBilling && isResellerBilling(relayInfo) {
+			_, _, authoritative := authoritativeTextTokenQuota(originUsage,
+				common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens), relayInfo.GetEstimatePromptTokens())
+			rawTokenQuota = resellerTariffSettlementQuota(ctx, relayInfo, summary.Quota, authoritative || isResellerImageRequest(relayInfo))
+		} else if isResellerImageRequest(relayInfo) {
 			imageQuota, clamp, err := resellerFixedPriceTokenQuota(
 				summary.Quota,
 				relayInfo.ResellerBaseCostPerMillion,

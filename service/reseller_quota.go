@@ -22,15 +22,18 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 )
@@ -81,9 +84,23 @@ func resellerFixedPriceTokenQuota(monetaryQuota int, baseCostPerMillion string) 
 	if monetaryQuota <= 0 {
 		return 0, nil, errResellerFixedPriceRequired
 	}
+	return resellerTariffTokenQuota(monetaryQuota, baseCostPerMillion)
+}
+
+// resellerTariffTokenQuota uses the same final monetary quota as the panel.
+// Zero is a valid configured free tariff; negative or invalid costs never credit
+// a package. Round up only the currency-to-package conversion, preserving the
+// panel's own monetary rounding and preventing fractional undercharging.
+func resellerTariffTokenQuota(monetaryQuota int, baseCostPerMillion string) (int, *common.QuotaClamp, error) {
+	if monetaryQuota < 0 {
+		return 0, nil, errors.New("negative reseller monetary quota")
+	}
 	baseCost, err := decimal.NewFromString(strings.TrimSpace(baseCostPerMillion))
 	if err != nil || !baseCost.IsPositive() {
-		return 0, nil, fmt.Errorf("%w: invalid reseller base cost", errResellerFixedPriceRequired)
+		return 0, nil, errors.New("invalid reseller base cost")
+	}
+	if common.QuotaPerUnit <= 0 || math.IsNaN(common.QuotaPerUnit) || math.IsInf(common.QuotaPerUnit, 0) {
+		return 0, nil, errors.New("invalid quota conversion rate")
 	}
 	quotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 	if !quotaPerUnit.IsPositive() {
@@ -94,11 +111,127 @@ func resellerFixedPriceTokenQuota(monetaryQuota int, baseCostPerMillion string) 
 		Mul(decimal.NewFromInt(1_000_000)).
 		Div(quotaPerUnit).
 		Div(baseCost)
-	tokenQuota, clamp := common.QuotaFromDecimalChecked(tokenQuotaDecimal)
-	if tokenQuota <= 0 && clamp == nil {
-		return 0, nil, fmt.Errorf("%w: converted quota is zero", errResellerFixedPriceRequired)
-	}
+	tokenQuota, clamp := common.QuotaFromDecimalChecked(tokenQuotaDecimal.Ceil())
 	return tokenQuota, clamp, nil
+}
+
+func resellerTariffSettlementQuota(ctx *gin.Context, info *relaycommon.RelayInfo, monetaryQuota int, authoritative bool) int {
+	if !authoritative {
+		return info.TokenQuotaPreConsumed
+	}
+	quota, clamp, err := resellerTariffTokenQuota(monetaryQuota, info.ResellerBaseCostPerMillion)
+	noteQuotaClamp(info, clamp)
+	if err != nil {
+		logger.LogError(ctx, "failed to convert reseller panel tariff: "+err.Error())
+		return info.TokenQuotaPreConsumed
+	}
+	info.TokenQuotaActual = &quota
+	return quota
+}
+
+// resellerMaximumTariffQuota reserves package units at the most expensive
+// permitted input category and the output rate. Cache reads/writes can overlap
+// in provider usage; their combined cost must fit too. Request overrides are
+// checked again immediately before relay using the final PriceData.
+func resellerMaximumTariffQuota(info *relaycommon.RelayInfo, input, output, contextLimit int) (int, *common.QuotaClamp, error) {
+	if input < 0 || output < 0 {
+		return 0, nil, errResellerRequestHardCapUnsupported
+	}
+	if info.TieredBillingSnapshot != nil {
+		return 0, nil, fmt.Errorf("%w: expression pricing has no verified maximum charge", errResellerRequestHardCapUnsupported)
+	}
+	p := info.PriceData
+	for _, ratio := range []float64{p.ModelPrice, p.ModelRatio, p.CompletionRatio, p.CacheRatio,
+		p.CacheCreationRatio, p.CacheCreation5mRatio, p.CacheCreation1hRatio, p.ImageRatio,
+		p.AudioRatio, p.AudioCompletionRatio, p.GroupRatioInfo.GroupRatio} {
+		if ratio < 0 || math.IsNaN(ratio) || math.IsInf(ratio, 0) {
+			return 0, nil, errors.New("invalid reseller tariff ratio")
+		}
+	}
+	var monetary decimal.Decimal
+	if p.UsePrice {
+		monetary = decimal.NewFromFloat(p.ModelPrice).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
+	} else {
+		cacheWrite := max(p.CacheCreationRatio, p.CacheCreation5mRatio, p.CacheCreation1hRatio)
+		inputRatio := max(1, p.CacheRatio+cacheWrite+p.ImageRatio)
+		inputRate := decimal.NewFromFloat(p.ModelRatio).Mul(decimal.NewFromFloat(inputRatio))
+		// Gemini's audio price is separate from the text model ratio.
+		audioPrice := operation_setting.GetGeminiInputAudioPricePerMillionTokens(info.OriginModelName)
+		if audioPrice < 0 || math.IsNaN(audioPrice) || math.IsInf(audioPrice, 0) {
+			return 0, nil, errors.New("invalid reseller audio tariff")
+		}
+		inputRate = inputRate.Add(decimal.NewFromFloat(audioPrice).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).Div(decimal.NewFromInt(1_000_000)))
+		outputRate := decimal.NewFromFloat(p.ModelRatio).Mul(decimal.NewFromFloat(p.CompletionRatio))
+		monetary = inputRate.Mul(decimal.NewFromInt(int64(input))).Add(outputRate.Mul(decimal.NewFromInt(int64(output))))
+		if contextLimit > 0 {
+			// Either category can occupy the combined context window. Use its
+			// higher rate instead of subtracting output from hidden input history.
+			contextRate := decimal.Max(inputRate, outputRate)
+			monetary = decimal.Min(monetary, contextRate.Mul(decimal.NewFromInt(int64(contextLimit))))
+		}
+	}
+	monetary = p.ApplyOtherRatiosToDecimal(monetary.Mul(decimal.NewFromFloat(p.GroupRatioInfo.GroupRatio)))
+	quota, clamp := common.QuotaFromDecimalChecked(monetary.Ceil())
+	if clamp != nil {
+		return quota, clamp, nil
+	}
+	return resellerTariffTokenQuota(quota, info.ResellerBaseCostPerMillion)
+}
+
+// Paid built-in tools need a provider-enforced call limit in addition to the
+// token limit. Client-side function tools do not incur these surcharges.
+func resellerToolTariffQuota(info *relaycommon.RelayInfo, format relaytypes.RelayFormat, body []byte) (int, *common.QuotaClamp, error) {
+	var request struct {
+		MaxToolCalls *uint `json:"max_tool_calls"`
+		Tools        []struct {
+			Type         string                 `json:"type"`
+			MaxUses      *uint                  `json:"max_uses"`
+			GoogleSearch map[string]interface{} `json:"googleSearch"`
+		} `json:"tools"`
+	}
+	if err := common.Unmarshal(body, &request); err != nil {
+		return 0, nil, err
+	}
+	toolCost := decimal.Zero
+	for _, tool := range request.Tools {
+		name := tool.Type
+		if strings.HasPrefix(name, "web_search_") && name != dto.BuildInToolWebSearchPreview {
+			name = dto.BuildInToolWebSearch
+		}
+		if tool.GoogleSearch != nil {
+			name = dto.BuildInToolGoogleSearch
+		}
+		price := operation_setting.GetToolPriceForModel(name, info.OriginModelName)
+		if price <= 0 {
+			continue
+		}
+		if math.IsNaN(price) || math.IsInf(price, 0) {
+			return 0, nil, errors.New("invalid reseller tool tariff")
+		}
+		limit := tool.MaxUses
+		if format == relaytypes.RelayFormatOpenAIResponses {
+			limit = request.MaxToolCalls
+		}
+		if name == dto.BuildInToolGoogleSearch {
+			limit = common.GetPointer(uint(1)) // New API bills this once per request.
+		}
+		if limit == nil || *limit > uint(common.MaxQuota) {
+			return 0, nil, fmt.Errorf("%w: paid tool %s requires a bounded call limit", errResellerRequestHardCapUnsupported, name)
+		}
+		toolCost = toolCost.Add(decimal.NewFromFloat(price).Mul(decimal.NewFromInt(int64(*limit))).Div(decimal.NewFromInt(1000)))
+	}
+	if strings.HasSuffix(info.OriginModelName, "search-preview") && format != relaytypes.RelayFormatOpenAIResponses {
+		price := operation_setting.GetToolPriceForModel(dto.BuildInToolWebSearchPreview, info.OriginModelName)
+		if price > 0 && !math.IsNaN(price) && !math.IsInf(price, 0) {
+			toolCost = toolCost.Add(decimal.NewFromFloat(price).Div(decimal.NewFromInt(1000)))
+		}
+	}
+	monetary := toolCost.Mul(decimal.NewFromFloat(common.QuotaPerUnit)).Mul(decimal.NewFromFloat(info.PriceData.GroupRatioInfo.GroupRatio))
+	quota, clamp := common.QuotaFromDecimalChecked(monetary.Ceil())
+	if clamp != nil {
+		return quota, clamp, nil
+	}
+	return resellerTariffTokenQuota(quota, info.ResellerBaseCostPerMillion)
 }
 
 func resellerOutputTokenQuota(limit uint, candidates *int) (int, error) {
@@ -229,6 +362,9 @@ func resellerRequestMaximumTokenQuota(relayInfo *relaycommon.RelayInfo) (int, *c
 	}
 	if !requiresOutput && promptQuota == 0 {
 		return 0, nil, fmt.Errorf("%w: input token count is empty or cannot be measured", errResellerRequestHardCapUnsupported)
+	}
+	if relayInfo.ResellerTariffBilling {
+		return resellerMaximumTariffQuota(relayInfo, promptQuota, outputQuota, 0)
 	}
 	quota, clamp := resellerTokenQuota(promptQuota, outputQuota)
 	return quota, clamp, nil
@@ -783,6 +919,7 @@ func ValidateResellerOutboundHardCapForFormat(c *gin.Context, relayInfo *relayco
 	if clamp != nil {
 		return clamp
 	}
+	contextLimit := 0
 	if finalFormat == relaytypes.RelayFormatOpenAIResponses {
 		modelName := strings.TrimSpace(relayInfo.GetUpstreamModelName())
 		var request dto.OpenAIResponsesRequest
@@ -792,10 +929,34 @@ func ValidateResellerOutboundHardCapForFormat(c *gin.Context, relayInfo *relayco
 		if strings.TrimSpace(request.Model) != "" {
 			modelName = strings.TrimSpace(request.Model)
 		}
-		if contextLimit, known := relayconstant.CodexModelContextTokenLimit(modelName); known && maximumQuota > contextLimit {
+		contextLimit, _ = relayconstant.CodexModelContextTokenLimit(modelName)
+		if contextLimit > 0 && maximumQuota > contextLimit {
 			// The published context window is the combined input/output ceiling,
 			// so adding the maximum output again would double-reserve it.
 			maximumQuota = contextLimit
+		}
+	}
+	if relayInfo.ResellerTariffBilling {
+		maximumQuota, clamp, err = resellerMaximumTariffQuota(relayInfo, promptQuota, outputQuota, contextLimit)
+		noteQuotaClamp(relayInfo, clamp)
+		if err != nil {
+			return err
+		}
+		if clamp != nil {
+			return clamp
+		}
+		toolQuota, toolClamp, toolErr := resellerToolTariffQuota(relayInfo, finalFormat, jsonData)
+		noteQuotaClamp(relayInfo, toolClamp)
+		if toolErr != nil {
+			return toolErr
+		}
+		if toolClamp != nil {
+			return toolClamp
+		}
+		maximumQuota, clamp = resellerTokenQuota(maximumQuota, toolQuota)
+		noteQuotaClamp(relayInfo, clamp)
+		if clamp != nil {
+			return clamp
 		}
 	}
 	if maximumQuota > relayInfo.TokenQuotaPreConsumed {

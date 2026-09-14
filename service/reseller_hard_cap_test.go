@@ -227,6 +227,7 @@ func TestResellerOutboundHardCapExtendsReservationBeforeRelay(t *testing.T) {
 		OriginModelName: "text-embedding-3-small",
 	}
 	info.SetEstimatePromptTokens(1)
+	seedTariffReseller(t, info, "2")
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Set(string(constant.ContextKeyOriginalModel), "text-embedding-3-small")
 	require.Nil(t, PreConsumeBilling(ctx, 1, info))
@@ -294,6 +295,8 @@ func TestResellerCodexResponsesMissingLimitAllowsConcurrentReservations(t *testi
 
 	first := newRequest()
 	second := newRequest()
+	seedTariffReseller(t, first, "2")
+	second.PriceData = first.PriceData
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	require.Nil(t, PreConsumeBilling(ctx, 1, first))
 	require.Nil(t, PreConsumeBilling(ctx, 1, second))

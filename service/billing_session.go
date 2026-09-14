@@ -535,7 +535,11 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIErro
 		effectiveFundingQuota = 0
 		logger.LogInfo(c, fmt.Sprintf("用户 %d 额度充足, 信任且不需要预扣费 (funding=%s)", s.relayInfo.UserId, s.funding.Source()))
 	} else if effectiveFundingQuota > 0 {
-		logger.LogInfo(c, fmt.Sprintf("用户 %d 需要预扣费 %s (funding=%s)", s.relayInfo.UserId, logger.FormatQuota(effectiveFundingQuota), s.funding.Source()))
+		if isResellerBilling(s.relayInfo) {
+			logger.LogInfo(c, fmt.Sprintf("reseller package reservation: userId=%d, units=%d", s.relayInfo.UserId, effectiveFundingQuota))
+		} else {
+			logger.LogInfo(c, fmt.Sprintf("用户 %d 需要预扣费 %s (funding=%s)", s.relayInfo.UserId, logger.FormatQuota(effectiveFundingQuota), s.funding.Source()))
+		}
 	}
 	tokenQuota := effectiveFundingQuota
 	if usesRawTokenQuota(s.relayInfo) {

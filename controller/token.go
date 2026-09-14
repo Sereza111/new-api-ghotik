@@ -308,6 +308,10 @@ func GetTokenUsage(c *gin.Context) {
 	if expiredAt == -1 {
 		expiredAt = 0
 	}
+	billingBasis := token.EffectiveQuotaMode()
+	if model.IsResellerTokenKey(token.Key) {
+		billingBasis = "panel_tariff_v1"
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"code":    true,
@@ -316,6 +320,7 @@ func GetTokenUsage(c *gin.Context) {
 			"object":               "token_usage",
 			"name":                 token.Name,
 			"quota_mode":           token.EffectiveQuotaMode(),
+			"billing_basis":        billingBasis,
 			"total_granted":        token.RemainQuota + token.UsedQuota,
 			"total_used":           token.UsedQuota,
 			"total_available":      token.RemainQuota,
