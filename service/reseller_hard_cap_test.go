@@ -30,6 +30,7 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -307,12 +308,13 @@ func TestResellerCodexResponsesMissingLimitAllowsConcurrentReservations(t *testi
 	second.ChannelMeta = &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeCodex, UpstreamModelName: "gpt-5.6-sol"}
 	require.NoError(t, ValidateResellerOutboundHardCap(first, []byte(`{}`)))
 	require.NoError(t, ValidateResellerOutboundHardCap(second, []byte(`{}`)))
-	assert.Equal(t, 290+relayconstant.CodexMaxOutputTokens, first.Billing.GetPreConsumedQuota())
-	assert.Equal(t, 290+relayconstant.CodexMaxOutputTokens, second.Billing.GetPreConsumedQuota())
+	expectedReservation := 290 + resellerTariffDefaultOutputReservation
+	assert.Equal(t, expectedReservation, first.Billing.GetPreConsumedQuota())
+	assert.Equal(t, expectedReservation, second.Billing.GetPreConsumedQuota())
 
 	var token model.Token
 	require.NoError(t, model.DB.First(&token, 304).Error)
-	assert.Equal(t, 300_000-2*(290+relayconstant.CodexMaxOutputTokens), token.RemainQuota)
+	assert.Equal(t, 300_000-2*expectedReservation, token.RemainQuota)
 }
 
 func TestResellerResponsesReservationsCoverAgentHistory(t *testing.T) {
@@ -362,6 +364,28 @@ func TestResellerResponsesHiddenHistoryRequiresFullContextReservation(t *testing
 	}
 	_, err := resellerResponsesInputTokenQuota([]byte(`{"tools":[{"type":"web_search"}]}`), 10, "gpt-5.6-sol")
 	require.ErrorIs(t, err, errResellerRequestHardCapUnsupported)
+}
+
+func TestResellerTariffResponsesHistoryUsesApproximateReservation(t *testing.T) {
+	body := []byte(`{"model":"gpt-6-astra","previous_response_id":"resp_saved"}`)
+	info := &relaycommon.RelayInfo{
+		TokenKey:                   "rsl_tariff-hidden",
+		RelayFormat:                relaytypes.RelayFormatOpenAIResponses,
+		Request:                    &dto.OpenAIResponsesRequest{},
+		TokenQuotaPreConsumed:      2_000_000,
+		ResellerTariffBilling:      true,
+		ResellerBaseCostPerMillion: "0.05",
+		PriceData: types.PriceData{
+			ModelRatio: .1, CompletionRatio: 5,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+	}
+	info.SetEstimatePromptTokens(64_000)
+
+	inputQuota, err := resellerResponsesTariffInputTokenQuota(body, 64_000, "gpt-6-astra")
+	require.NoError(t, err)
+	assert.Less(t, inputQuota, 1_050_000)
+	require.NoError(t, ValidateResellerOutboundHardCap(info, body))
 }
 
 func TestResellerResponsesExplicitCodexHistoryFitsOneMillionTokenKey(t *testing.T) {

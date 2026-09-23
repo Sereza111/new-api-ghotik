@@ -44,6 +44,12 @@ var (
 	errResellerFixedPriceRequired        = errors.New("reseller image generation requires a positive fixed model price")
 )
 
+// Responses/Codex requests without an explicit output limit are common. The
+// upstream ceiling remains the trusted absolute bound for legacy raw-token
+// keys, while reseller tariff reservations use a practical estimate so a small
+// prepaid package is not blocked by a theoretical 128k-token response.
+const resellerTariffDefaultOutputReservation = 8_192
+
 func isResellerBilling(relayInfo *relaycommon.RelayInfo) bool {
 	return relayInfo != nil &&
 		(relayInfo.BillingSource == BillingSourceReseller || model.IsResellerTokenKey(relayInfo.TokenKey))
@@ -159,15 +165,23 @@ func resellerMaximumTariffQuota(info *relaycommon.RelayInfo, input, output, cont
 	if p.UsePrice {
 		monetary = decimal.NewFromFloat(p.ModelPrice).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
 	} else {
-		cacheWrite := max(p.CacheCreationRatio, p.CacheCreation5mRatio, p.CacheCreation1hRatio)
-		inputRatio := max(1, p.CacheRatio+cacheWrite+p.ImageRatio)
-		inputRate := decimal.NewFromFloat(p.ModelRatio).Mul(decimal.NewFromFloat(inputRatio))
-		// Gemini's audio price is separate from the text model ratio.
-		audioPrice := operation_setting.GetGeminiInputAudioPricePerMillionTokens(info.OriginModelName)
-		if audioPrice < 0 || math.IsNaN(audioPrice) || math.IsInf(audioPrice, 0) {
-			return 0, nil, errors.New("invalid reseller audio tariff")
+		// The panel prices actual input categories independently: uncached input,
+		// cache reads, cache writes and images are not all charged for the same
+		// token. Before upstream usage is known, reserve the ordinary input rate;
+		// calculateTextQuotaSummary applies the exact category split at settlement.
+		inputRate := decimal.NewFromFloat(p.ModelRatio)
+		if info.AudioUsage {
+			// Gemini audio has a separate per-million price. Include it only for an
+			// explicitly audio request, otherwise every text call is inflated.
+			audioPrice := operation_setting.GetGeminiInputAudioPricePerMillionTokens(info.OriginModelName)
+			if audioPrice < 0 || math.IsNaN(audioPrice) || math.IsInf(audioPrice, 0) {
+				return 0, nil, errors.New("invalid reseller audio tariff")
+			}
+			audioRate := decimal.NewFromFloat(audioPrice).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).Div(decimal.NewFromInt(1_000_000))
+			if audioRate.GreaterThan(inputRate) {
+				inputRate = audioRate
+			}
 		}
-		inputRate = inputRate.Add(decimal.NewFromFloat(audioPrice).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).Div(decimal.NewFromInt(1_000_000)))
 		outputRate := decimal.NewFromFloat(p.ModelRatio).Mul(decimal.NewFromFloat(p.CompletionRatio))
 		monetary = inputRate.Mul(decimal.NewFromInt(int64(input))).Add(outputRate.Mul(decimal.NewFromInt(int64(output))))
 		if contextLimit > 0 {
@@ -579,6 +593,9 @@ func resellerOutboundPromptTokenQuota(c *gin.Context, relayInfo *relaycommon.Rel
 		// A heuristic text estimate is not a hard reservation, even when every
 		// tool result was extracted. Validate hidden-context features and use
 		// the final UTF-8 payload as a conservative input bound instead.
+		if relayInfo.ResellerTariffBilling {
+			return resellerResponsesTariffInputTokenQuota(jsonData, relayInfo.GetEstimatePromptTokens(), relayInfo.GetUpstreamModelName())
+		}
 		return resellerResponsesInputTokenQuota(jsonData, relayInfo.GetEstimatePromptTokens(), relayInfo.GetUpstreamModelName())
 	}
 	request, err := resellerOutboundRequest(format, jsonData, requiresOutput)
@@ -768,6 +785,18 @@ func resellerResponsesInputContainsHostedTools(value any) bool {
 }
 
 func resellerResponsesInputTokenQuota(jsonData []byte, estimatedTokens int, upstreamModel string) (int, error) {
+	return resellerResponsesInputTokenQuotaMode(jsonData, estimatedTokens, upstreamModel, false)
+}
+
+// resellerResponsesTariffInputTokenQuota keeps unsupported model shapes behind
+// the verified context-limit check, while avoiding a full context-window
+// reservation for normal reseller tariff requests. Final usage settlement is
+// still authoritative and caps the package at its remaining balance.
+func resellerResponsesTariffInputTokenQuota(jsonData []byte, estimatedTokens int, upstreamModel string) (int, error) {
+	return resellerResponsesInputTokenQuotaMode(jsonData, estimatedTokens, upstreamModel, true)
+}
+
+func resellerResponsesInputTokenQuotaMode(jsonData []byte, estimatedTokens int, upstreamModel string, approximateHiddenInput bool) (int, error) {
 	var request map[string]any
 	if err := common.Unmarshal(jsonData, &request); err != nil {
 		return 0, err
@@ -808,6 +837,21 @@ func resellerResponsesInputTokenQuota(jsonData []byte, estimatedTokens int, upst
 	if hasHiddenInput {
 		if !hasContextLimit {
 			return 0, fmt.Errorf("%w: hidden Responses history, images and files require a verified model context limit", errResellerRequestHardCapUnsupported)
+		}
+		if approximateHiddenInput {
+			structures := bytes.Count(jsonData, []byte{'{'}) + bytes.Count(jsonData, []byte{'['})
+			if len(jsonData) > common.MaxQuota || structures > (common.MaxQuota-256)/32 {
+				return 0, fmt.Errorf("%w: Responses input exceeds the reservation limit", errResellerRequestHardCapUnsupported)
+			}
+			bodyQuota, clamp := resellerTokenQuota(len(jsonData), 256+32*structures)
+			if clamp != nil {
+				return 0, clamp
+			}
+			approximate := max(estimatedTokens, common.PreConsumedQuota, bodyQuota)
+			if approximate > contextLimit {
+				approximate = contextLimit
+			}
+			return approximate, nil
 		}
 		return contextLimit, nil
 	}
@@ -856,6 +900,15 @@ func resellerOutboundOutputTokenQuota(relayInfo *relaycommon.RelayInfo, format r
 		limit, ok := relayconstant.CodexModelOutputTokenLimit(modelName)
 		if !ok {
 			return 0, fmt.Errorf("%w: upstream model %q has no trusted output token limit", errResellerRequestHardCapUnsupported, modelName)
+		}
+		if relayInfo.ResellerTariffBilling {
+			reservation := resellerTariffDefaultOutputReservation
+			if estimated := relayInfo.GetEstimateCompletionTokens(); estimated > reservation {
+				reservation = estimated
+			}
+			if reservation < limit {
+				return reservation, nil
+			}
 		}
 		return limit, nil
 	case relaytypes.RelayFormatClaude:

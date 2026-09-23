@@ -181,6 +181,28 @@ func TestResellerTariffConversionBoundaries(t *testing.T) {
 	require.NotNil(t, clamp)
 }
 
+func TestResellerTariffReservationUsesPanelBaseInputRate(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		ResellerTariffBilling:      true,
+		ResellerBaseCostPerMillion: "0.05",
+		OriginModelName:            "gpt-6-astra",
+		PriceData: types.PriceData{
+			ModelRatio: .1, CompletionRatio: 5, CacheRatio: .1,
+			CacheCreationRatio: 1.25,
+			GroupRatioInfo:     types.GroupRatioInfo{GroupRatio: 1},
+		},
+	}
+
+	// The reservation cannot know whether the input will be a cache read or a
+	// cache write. The panel charges the reported category at settlement; the
+	// pre-reservation therefore uses ordinary input plus the output ceiling,
+	// instead of adding every cache category to the same input tokens.
+	quota, clamp, err := resellerMaximumTariffQuota(info, 100_000, 1_000, 0)
+	require.NoError(t, err)
+	assert.Nil(t, clamp)
+	assert.Equal(t, 420_000, quota)
+}
+
 func TestResellerTariffHardCapCoversRatesAndPaidTools(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	info := &relaycommon.RelayInfo{
