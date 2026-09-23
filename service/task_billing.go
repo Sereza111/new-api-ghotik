@@ -16,6 +16,30 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// TaskBillingContextForSubmission freezes the panel tariff and the prepaid
+// amount charged at the durable submission barrier.
+func TaskBillingContextForSubmission(info *relaycommon.RelayInfo, monetaryQuota int) (*model.TaskBillingContext, error) {
+	bc := &model.TaskBillingContext{
+		ModelPrice: info.PriceData.ModelPrice, ModelRatio: info.PriceData.ModelRatio,
+		GroupRatio:  info.PriceData.GroupRatioInfo.GroupRatio,
+		OtherRatios: info.PriceData.OtherRatios(), OriginModelName: info.OriginModelName,
+		PerCallBilling: common.StringsContains(constant.TaskPricePatches, info.OriginModelName) || info.PriceData.UsePrice,
+		TieredSnapshot: info.TieredBillingSnapshot,
+	}
+	if info.ResellerTariffBilling {
+		quota, clamp, err := resellerTariffTokenQuota(monetaryQuota, info.ResellerBaseCostPerMillion)
+		if err != nil {
+			return nil, err
+		}
+		if clamp != nil {
+			return nil, clamp
+		}
+		bc.ResellerBaseCostPerMillion = info.ResellerBaseCostPerMillion
+		bc.ResellerReservedQuota = quota
+	}
+	return bc, nil
+}
+
 // LogTaskConsumption 记录任务消费日志和统计信息（仅记录，不涉及实际扣费）。
 // 实际扣费已由 BillingSession（PreConsumeBilling + SettleBilling）完成。
 func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model.Task) {
@@ -66,6 +90,9 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 		}
 	}
 	appendTaskLogInfo(task, other)
+	if isResellerBilling(info) {
+		appendResellerSettlementInfo(other, info)
+	}
 	attachQuotaSaturation(c, info, other)
 	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
 		ChannelId: info.ChannelId,
@@ -154,6 +181,10 @@ func taskAdjustResellerTokenQuota(ctx context.Context, task *model.Task, delta i
 func taskBillingOther(task *model.Task) map[string]interface{} {
 	other := make(map[string]interface{})
 	if bc := task.PrivateData.BillingContext; bc != nil {
+		if bc.ResellerBaseCostPerMillion != "" {
+			other["reseller_billing_basis"] = "panel_tariff_v1"
+			other["reseller_base_cost_per_million"] = bc.ResellerBaseCostPerMillion
+		}
 		other["model_price"] = bc.ModelPrice
 		if bc.ModelRatio > 0 {
 			other["model_ratio"] = bc.ModelRatio
@@ -227,10 +258,59 @@ func taskModelName(task *model.Task) string {
 	return task.Properties.OriginModelName
 }
 
+func settleResellerTaskQuota(ctx context.Context, task *model.Task, monetaryQuota int, reason string, clamps ...*common.QuotaClamp) bool {
+	packageQuota, clamp, err := resellerTariffTokenQuota(monetaryQuota, task.PrivateData.BillingContext.ResellerBaseCostPerMillion)
+	if err != nil {
+		logger.LogError(ctx, fmt.Sprintf("reseller task tariff conversion failed (task=%s): %s", task.TaskID, err))
+		return false
+	}
+	settlement, err := model.SettleResellerTaskQuota(task, monetaryQuota, packageQuota)
+	if err != nil {
+		logger.LogError(ctx, fmt.Sprintf("reseller task settlement failed (task=%s): %s", task.TaskID, err))
+		return false
+	}
+	if !settlement.Applied {
+		return true
+	}
+	if settlement.Unfunded > 0 {
+		logger.LogError(ctx, fmt.Sprintf("reseller task exceeds prepaid allocation (task=%s, unfunded=%d)", task.TaskID, settlement.Unfunded))
+	}
+	model.UpdateUserUsedQuota(task.UserId, settlement.MonetaryDelta)
+	model.UpdateChannelUsedQuota(task.ChannelId, settlement.MonetaryDelta)
+	if settlement.MonetaryDelta == 0 {
+		return true
+	}
+	logType, logQuota, packageDelta := model.LogTypeConsume, settlement.MonetaryDelta, settlement.PackageDelta
+	if logQuota < 0 {
+		logType, logQuota, packageDelta = model.LogTypeRefund, -logQuota, -packageDelta
+	}
+	other := taskBillingOther(task)
+	other["reseller_token_quota"] = packageDelta
+	other["reseller_measured_tokens"] = packageQuota
+	other["reason"] = reason
+	if settlement.Unfunded > 0 {
+		other["admin_info"] = map[string]any{"reseller_unfunded_tokens": settlement.Unfunded}
+	}
+	attachQuotaSaturationToOther(other, clamp)
+	for _, quotaClamp := range clamps {
+		attachQuotaSaturationToOther(other, quotaClamp)
+	}
+	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
+		UserId: task.UserId, LogType: logType, ChannelId: task.ChannelId,
+		ModelName: taskModelName(task), Quota: logQuota, TokenId: task.PrivateData.TokenId,
+		Group: task.Group, Other: other, NodeName: task.PrivateData.NodeName,
+	})
+	return true
+}
+
 // RefundTaskQuota 统一的任务失败退款逻辑。
 // 当异步任务失败时，退还资金与令牌额度，并回减用户和渠道用量。
 // 返回资金来源是否已成功退还；失败时保留 quota，供显式重试或人工对账。
 func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool {
+	if task.PrivateData.BillingSource == BillingSourceReseller && task.PrivateData.BillingContext != nil &&
+		task.PrivateData.BillingContext.ResellerBaseCostPerMillion != "" {
+		return settleResellerTaskQuota(ctx, task, 0, reason)
+	}
 	quota := task.Quota
 	if quota == 0 {
 		return true
@@ -287,6 +367,11 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 // clamps 可选：若计算 actualQuota 时发生额度饱和，将其记入日志 admin_info（仅管理员可见）。
 func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string, clamps ...*common.QuotaClamp) {
 	if actualQuota < 0 {
+		return
+	}
+	if task.PrivateData.BillingSource == BillingSourceReseller && task.PrivateData.BillingContext != nil &&
+		task.PrivateData.BillingContext.ResellerBaseCostPerMillion != "" {
+		settleResellerTaskQuota(ctx, task, actualQuota, reason, clamps...)
 		return
 	}
 	preConsumedQuota := task.Quota
@@ -368,7 +453,8 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 	if totalTokens <= 0 {
 		return false
 	}
-	if task.PrivateData.BillingSource == BillingSourceReseller {
+	if task.PrivateData.BillingSource == BillingSourceReseller &&
+		(task.PrivateData.BillingContext == nil || task.PrivateData.BillingContext.ResellerBaseCostPerMillion == "") {
 		actualQuota, clamp := resellerTokenQuota(totalTokens)
 		RecalculateTaskQuota(ctx, task, actualQuota, fmt.Sprintf("reseller raw token settlement: tokens=%d", totalTokens), clamp)
 		return true

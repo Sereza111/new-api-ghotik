@@ -944,6 +944,87 @@ func SettleResellerTokenQuota(id int, key string, reserved int, actual int, oper
 	return charged, nil
 }
 
+type ResellerTaskSettlement struct {
+	Applied       bool
+	MonetaryDelta int
+	PackageDelta  int
+	Charged       int
+	Unfunded      int
+}
+
+// SettleResellerTaskQuota commits the package adjustment and task marker in
+// one transaction. The task row is the durable idempotency key, including a
+// failed task's refund; polling again cannot credit the package twice.
+func SettleResellerTaskQuota(task *Task, monetaryQuota, packageQuota int) (ResellerTaskSettlement, error) {
+	result := ResellerTaskSettlement{}
+	if task == nil || task.ID <= 0 || monetaryQuota < 0 || packageQuota < 0 ||
+		monetaryQuota > common.MaxQuota || packageQuota > common.MaxQuota {
+		return result, ErrResellerQuotaAdjustmentInvalid
+	}
+	var stored Task
+	var cacheKey string
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).First(&stored, task.ID).Error; err != nil {
+			return err
+		}
+		bc := stored.PrivateData.BillingContext
+		if stored.PrivateData.BillingSource != "reseller_prepaid" || bc == nil || bc.ResellerBaseCostPerMillion == "" ||
+			task.PrivateData.BillingContext == nil || bc.ResellerBaseCostPerMillion != task.PrivateData.BillingContext.ResellerBaseCostPerMillion {
+			return ErrResellerQuotaAdjustmentInvalid
+		}
+		if bc.ResellerSettled {
+			if stored.Quota != monetaryQuota {
+				return ErrResellerQuotaOperationConflict
+			}
+			result.Charged = bc.ResellerChargedQuota
+			result.Unfunded = packageQuota - result.Charged
+			return nil
+		}
+		var token Token
+		if err := lockForUpdate(tx).Where("id = ? AND user_id = ?", stored.PrivateData.TokenId, stored.UserId).First(&token).Error; err != nil {
+			return err
+		}
+		reserved := bc.ResellerReservedQuota
+		if !IsResellerTokenKey(token.Key) || token.UnlimitedQuota || !token.UsesTokenQuota() ||
+			reserved < 0 || reserved > common.MaxQuota || token.UsedQuota < reserved ||
+			token.RemainQuota < 0 || token.UsedQuota > common.MaxQuota || token.RemainQuota > common.MaxQuota-token.UsedQuota {
+			return ErrResellerQuotaAdjustmentInvalid
+		}
+		charged := packageQuota
+		if charged > reserved+token.RemainQuota {
+			charged = reserved + token.RemainQuota
+		}
+		delta := charged - reserved
+		updates := map[string]any{
+			"remain_quota": token.RemainQuota - delta,
+			"used_quota":   token.UsedQuota + delta,
+		}
+		if charged < packageQuota {
+			updates["status"] = common.TokenStatusDisabled
+		}
+		if err := tx.Model(&Token{}).Where("id = ?", token.Id).Updates(updates).Error; err != nil {
+			return err
+		}
+		result = ResellerTaskSettlement{Applied: true, MonetaryDelta: monetaryQuota - stored.Quota,
+			PackageDelta: delta, Charged: charged, Unfunded: packageQuota - charged}
+		stored.Quota = monetaryQuota
+		bc.ResellerSettled = true
+		bc.ResellerChargedQuota = charged
+		cacheKey = token.Key
+		return tx.Model(&stored).Select("quota", "private_data").Updates(&stored).Error
+	})
+	if err != nil {
+		return ResellerTaskSettlement{}, err
+	}
+	*task = stored
+	if cacheKey != "" {
+		if err := invalidateTokenCacheForMutation(cacheKey); err != nil {
+			common.SysLog("failed to invalidate reseller task balance cache: " + err.Error())
+		}
+	}
+	return result, nil
+}
+
 // ApplyResellerTokenQuotaAdjustment preserves the reseller-specific API and
 // error contract while using the shared raw-token idempotency ledger.
 func ApplyResellerTokenQuotaAdjustment(id int, key string, adjustment int, operationID string) error {

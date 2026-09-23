@@ -32,6 +32,13 @@ func appendResellerSettlementInfo(other map[string]interface{}, info *relaycommo
 	}
 	other["reseller_token_quota"] = charged
 	other["reseller_reserved_tokens"] = info.FinalPreConsumedQuota
+	if info.ResellerTariffBilling {
+		other["reseller_reserved_panel_quota"] = info.FinalPreConsumedQuota
+		reserved, _, err := resellerTariffTokenQuota(info.FinalPreConsumedQuota, info.ResellerBaseCostPerMillion)
+		if err == nil {
+			other["reseller_reserved_tokens"] = reserved
+		}
+	}
 	if info.TokenQuotaActual != nil {
 		other["reseller_measured_tokens"] = *info.TokenQuotaActual
 	} else {

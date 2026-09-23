@@ -41,16 +41,18 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 	}
 
 	fullBalanceHeld := false
+	monetaryPreConsumedQuota := preConsumedQuota
 	if usesRawTokenQuota(relayInfo) {
 		estimatedPromptTokens := relayInfo.GetEstimatePromptTokens()
 		if estimatedPromptTokens < common.PreConsumedQuota {
 			estimatedPromptTokens = common.PreConsumedQuota
 		}
 		var clamp *common.QuotaClamp
-		rawPreConsumedQuota, clamp := resellerTokenQuota(
-			estimatedPromptTokens,
-			relayInfo.GetEstimateCompletionTokens(),
-		)
+		rawPreConsumedQuota := 0
+		if !isResellerBilling(relayInfo) {
+			rawPreConsumedQuota, clamp = resellerTokenQuota(
+				estimatedPromptTokens, relayInfo.GetEstimateCompletionTokens())
+		}
 		noteQuotaClamp(relayInfo, clamp)
 		if clamp != nil {
 			return types.NewErrorWithStatusCode(
@@ -124,18 +126,11 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 			}
 			if isResellerBilling(relayInfo) {
 				var requestErr error
-				if isResellerImageRequest(relayInfo) {
-					if !relayInfo.PriceData.UsePrice {
-						requestErr = errResellerFixedPriceRequired
-					} else {
-						rawPreConsumedQuota, clamp, requestErr = resellerTariffTokenQuota(
-							preConsumedQuota,
-							relayInfo.ResellerBaseCostPerMillion,
-						)
-					}
-				} else {
-					rawPreConsumedQuota, clamp, requestErr = resellerRequestMaximumTokenQuota(relayInfo)
-				}
+				// The panel's estimate is already priced for this request. Reseller
+				// funding changes its denomination, not its endpoint permissions or
+				// the model's context/output limits.
+				rawPreConsumedQuota, clamp, requestErr = resellerTariffTokenQuota(
+					preConsumedQuota, relayInfo.ResellerBaseCostPerMillion)
 				noteQuotaClamp(relayInfo, clamp)
 				if clamp != nil {
 					return types.NewErrorWithStatusCode(
@@ -180,6 +175,12 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 	}
 	session.fullBalanceHeld = fullBalanceHeld
 	relayInfo.Billing = session
+	if relayInfo.ResellerTariffBilling {
+		relayInfo.Billing = &resellerTariffSession{
+			session: session, monetaryReservation: monetaryPreConsumedQuota,
+		}
+		relayInfo.FinalPreConsumedQuota = monetaryPreConsumedQuota
+	}
 	return nil
 }
 
@@ -194,7 +195,7 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 		preConsumed := relayInfo.Billing.GetPreConsumedQuota()
 		delta := actualQuota - preConsumed
 
-		if isResellerBilling(relayInfo) {
+		if isResellerBilling(relayInfo) && !relayInfo.ResellerTariffBilling {
 			logger.LogInfo(ctx, fmt.Sprintf("reseller package settlement: actual=%d units, reserved=%d units, adjustment=%d units", actualQuota, preConsumed, delta))
 		} else if delta > 0 {
 			logger.LogInfo(ctx, fmt.Sprintf("预扣费后补扣费：%s（实际消耗：%s，预扣费：%s）",

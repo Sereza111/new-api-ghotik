@@ -196,6 +196,9 @@ func TestResellerChatToResponsesModeMutationStillUsesOpenAIOutputCap(t *testing.
 }
 
 func TestResellerOutboundHardCapRecountsFinalInput(t *testing.T) {
+	previous := constant.CountToken
+	constant.CountToken = true
+	t.Cleanup(func() { constant.CountToken = previous })
 	info := &relaycommon.RelayInfo{
 		TokenKey:                         "rsl_recount",
 		RelayFormat:                      relaytypes.RelayFormatEmbedding,
@@ -214,7 +217,7 @@ func TestResellerOutboundHardCapRecountsFinalInput(t *testing.T) {
 	assert.ErrorIs(t, err, model.ErrResellerTokenQuotaInsufficient)
 }
 
-func TestResellerOutboundHardCapExtendsReservationBeforeRelay(t *testing.T) {
+func TestResellerPanelTariffDoesNotReserveAgainForFinalBody(t *testing.T) {
 	truncate(t)
 	seedUser(t, 301, 100_000)
 	seedToken(t, 302, 301, "rsl_extend-final", 10_000)
@@ -236,7 +239,7 @@ func TestResellerOutboundHardCapExtendsReservationBeforeRelay(t *testing.T) {
 
 	err := ValidateResellerOutboundHardCapWithContext(ctx, info, []byte(`{"input":"this final provider input is substantially longer than the original reservation"}`))
 	require.NoError(t, err)
-	assert.Greater(t, info.Billing.GetPreConsumedQuota(), 1)
+	assert.Equal(t, 1, info.Billing.GetPreConsumedQuota())
 
 	var token model.Token
 	require.NoError(t, model.DB.First(&token, 302).Error)
@@ -301,14 +304,14 @@ func TestResellerCodexResponsesMissingLimitAllowsConcurrentReservations(t *testi
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	require.Nil(t, PreConsumeBilling(ctx, 1, first))
 	require.Nil(t, PreConsumeBilling(ctx, 1, second))
-	assert.Equal(t, 10, first.Billing.GetPreConsumedQuota())
-	assert.Equal(t, 10, second.Billing.GetPreConsumedQuota())
+	assert.Equal(t, 1, first.Billing.GetPreConsumedQuota())
+	assert.Equal(t, 1, second.Billing.GetPreConsumedQuota())
 
 	first.ChannelMeta = &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeCodex, UpstreamModelName: "gpt-5.6-sol"}
 	second.ChannelMeta = &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeCodex, UpstreamModelName: "gpt-5.6-sol"}
 	require.NoError(t, ValidateResellerOutboundHardCap(first, []byte(`{}`)))
 	require.NoError(t, ValidateResellerOutboundHardCap(second, []byte(`{}`)))
-	expectedReservation := 290 + resellerTariffDefaultOutputReservation
+	expectedReservation := 1
 	assert.Equal(t, expectedReservation, first.Billing.GetPreConsumedQuota())
 	assert.Equal(t, expectedReservation, second.Billing.GetPreConsumedQuota())
 
@@ -583,7 +586,7 @@ func TestResellerOpenAIResponsesKeepsExplicitOutputLimit(t *testing.T) {
 	assert.Equal(t, 512, quota)
 }
 
-func TestEstimateRequestTokenCountsResellerWhenGlobalCountingDisabled(t *testing.T) {
+func TestEstimateRequestTokenRespectsPanelCountingSettingForReseller(t *testing.T) {
 	previous := constant.CountToken
 	constant.CountToken = false
 	defer func() { constant.CountToken = previous }()
@@ -595,7 +598,7 @@ func TestEstimateRequestTokenCountsResellerWhenGlobalCountingDisabled(t *testing
 
 	resellerTokens, err := EstimateRequestToken(ctx, meta, reseller)
 	require.NoError(t, err)
-	assert.Greater(t, resellerTokens, 0)
+	assert.Zero(t, resellerTokens)
 	ordinaryTokens, err := EstimateRequestToken(ctx, meta, ordinary)
 	require.NoError(t, err)
 	assert.Zero(t, ordinaryTokens)

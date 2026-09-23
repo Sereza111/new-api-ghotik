@@ -26,6 +26,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
@@ -33,7 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRelayRejectsUnmeteredResellerRequestsBeforeUpstream(t *testing.T) {
+func TestRelayRejectsUnmeteredRawTokenRequestsBeforeUpstream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tests := []struct {
 		name   string
@@ -54,7 +55,8 @@ func TestRelayRejectsUnmeteredResellerRequestsBeforeUpstream(t *testing.T) {
 			ctx, _ := gin.CreateTestContext(response)
 			ctx.Request = httptest.NewRequest(http.MethodPost, testCase.path, strings.NewReader(testCase.body))
 			ctx.Request.Header.Set("Content-Type", "application/json")
-			common.SetContextKey(ctx, constant.ContextKeyTokenKey, "rsl_opaque-test-key")
+			common.SetContextKey(ctx, constant.ContextKeyTokenKey, "raw-test-key")
+			common.SetContextKey(ctx, constant.ContextKeyTokenQuotaMode, model.TokenQuotaModeTokens)
 
 			Relay(ctx, testCase.format)
 

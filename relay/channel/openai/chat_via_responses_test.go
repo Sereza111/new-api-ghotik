@@ -236,6 +236,30 @@ func requireOrderedSubstrings(t *testing.T, s string, parts ...string) {
 	}
 }
 
+func TestResellerTariffResponsesUsesPanelUsageFallback(t *testing.T) {
+	body := `{"id":"resp_1","object":"response","model":"gpt-test","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello from the model"}]}]}`
+	var panelUsage *dto.Usage
+	for _, reseller := range []bool{false, true} {
+		c, recorder, resp, info := newResponsesChatTestContext(t, body, false)
+		info.SetEstimatePromptTokens(42)
+		if reseller {
+			info.TokenKey = "rsl_tariff-fallback"
+			info.ResellerTariffBilling = true
+		}
+		usage, apiErr := OaiResponsesToChatHandler(c, info, resp)
+		require.Nil(t, apiErr)
+		require.NotNil(t, usage)
+		assert.Contains(t, recorder.Body.String(), "Hello from the model")
+		assert.Equal(t, 42, usage.PromptTokens)
+		assert.Positive(t, usage.CompletionTokens)
+		if reseller {
+			assert.Equal(t, panelUsage, usage)
+		} else {
+			panelUsage = usage
+		}
+	}
+}
+
 func TestResellerResponsesCompatibilityTerminalAccounting(t *testing.T) {
 	oldTimeout := constant.StreamingTimeout
 	constant.StreamingTimeout = 30

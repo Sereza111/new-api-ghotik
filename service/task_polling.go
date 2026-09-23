@@ -623,7 +623,8 @@ func truncateBase64(s string) string {
 //
 // 表达式求值失败会保留预扣额度，因此也视为已接管，避免错误全退。
 func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) bool {
-	if task.PrivateData.BillingSource == BillingSourceReseller {
+	if task.PrivateData.BillingSource == BillingSourceReseller &&
+		(task.PrivateData.BillingContext == nil || task.PrivateData.BillingContext.ResellerBaseCostPerMillion == "") {
 		if task.Status == model.TaskStatusFailure {
 			return false
 		}

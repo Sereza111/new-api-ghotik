@@ -24,10 +24,10 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -121,19 +121,66 @@ func resellerTariffTokenQuota(monetaryQuota int, baseCostPerMillion string) (int
 	return tokenQuota, clamp, nil
 }
 
-func resellerTariffSettlementQuota(ctx *gin.Context, info *relaycommon.RelayInfo, monetaryQuota int, authoritative bool) int {
-	if !authoritative {
-		return info.TokenQuotaPreConsumed
-	}
-	quota, clamp, err := resellerTariffTokenQuota(monetaryQuota, info.ResellerBaseCostPerMillion)
-	noteQuotaClamp(info, clamp)
-	if err != nil {
-		logger.LogError(ctx, "failed to convert reseller panel tariff: "+err.Error())
-		return info.TokenQuotaPreConsumed
-	}
-	info.TokenQuotaActual = &quota
-	return quota
+// resellerTariffSession exposes the same monetary billing interface as an
+// ordinary panel key. Only the funding boundary converts USD quota into the
+// immutable units purchased with this reseller package.
+type resellerTariffSession struct {
+	session             *BillingSession
+	monetaryReservation int
+	mu                  sync.Mutex
 }
+
+func (s *resellerTariffSession) packageQuota(monetaryQuota int) (int, error) {
+	quota, clamp, err := resellerTariffTokenQuota(monetaryQuota, s.session.relayInfo.ResellerBaseCostPerMillion)
+	noteQuotaClamp(s.session.relayInfo, clamp)
+	if err != nil {
+		return 0, err
+	}
+	if clamp != nil {
+		return 0, clamp
+	}
+	return quota, nil
+}
+
+func (s *resellerTariffSession) Settle(monetaryQuota int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	quota, clamp, err := resellerTariffTokenQuota(monetaryQuota, s.session.relayInfo.ResellerBaseCostPerMillion)
+	noteQuotaClamp(s.session.relayInfo, clamp)
+	if err != nil {
+		return err
+	}
+	// A delivered response settles its saturated charge against the remaining
+	// allocation. Pre-consume/Reserve reject saturation before sending upstream.
+	s.session.relayInfo.TokenQuotaActual = &quota
+	err = s.session.Settle(quota)
+	s.session.relayInfo.FinalPreConsumedQuota = s.monetaryReservation
+	return err
+}
+
+func (s *resellerTariffSession) Reserve(monetaryQuota int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	quota, err := s.packageQuota(monetaryQuota)
+	if err != nil {
+		return err
+	}
+	err = s.session.Reserve(quota)
+	if err == nil && monetaryQuota > s.monetaryReservation {
+		s.monetaryReservation = monetaryQuota
+	}
+	s.session.relayInfo.FinalPreConsumedQuota = s.monetaryReservation
+	return err
+}
+
+func (s *resellerTariffSession) GetPreConsumedQuota() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.monetaryReservation
+}
+
+func (s *resellerTariffSession) Refund(ctx *gin.Context) { s.session.Refund(ctx) }
+func (s *resellerTariffSession) NeedsRefund() bool       { return s.session.NeedsRefund() }
 
 // resellerMaximumTariffQuota reserves package units at the most expensive
 // permitted input category and the output rate. Cache reads/writes can overlap
@@ -950,7 +997,7 @@ func ValidateResellerOutboundHardCapWithContext(c *gin.Context, relayInfo *relay
 // final format. Pass-through handlers use the original request format because
 // a previous retry may have left conversion history on RelayInfo.
 func ValidateResellerOutboundHardCapForFormat(c *gin.Context, relayInfo *relaycommon.RelayInfo, finalFormat relaytypes.RelayFormat, jsonData []byte) error {
-	if !isResellerBilling(relayInfo) || relayInfo.TokenUnlimited {
+	if !isResellerBilling(relayInfo) || relayInfo.TokenUnlimited || relayInfo.ResellerTariffBilling {
 		return nil
 	}
 	_, requiresOutput, err := resellerRequestOutputTokenQuota(relayInfo)

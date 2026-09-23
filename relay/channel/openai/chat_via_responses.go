@@ -22,9 +22,10 @@ import (
 )
 
 // resellerResponsesUsageForSettlement separates a completed upstream attempt
-// from a transport rejection. Missing final counters retain the token reserve.
+// from a transport rejection for legacy raw-token packages. Tariff packages
+// use the ordinary panel usage fallback instead.
 func resellerResponsesUsageForSettlement(info *relaycommon.RelayInfo, upstream *dto.Usage, body []byte) *dto.Usage {
-	if info.TokenUnlimited || (info.BillingSource != service.BillingSourceReseller && !model.IsResellerTokenKey(info.TokenKey)) {
+	if info.ResellerTariffBilling || info.TokenUnlimited || (info.BillingSource != service.BillingSourceReseller && !model.IsResellerTokenKey(info.TokenKey)) {
 		return nil
 	}
 	if usage := responsesUsageForBilling(upstream, body); usage != nil {

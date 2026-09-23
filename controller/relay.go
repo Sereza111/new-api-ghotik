@@ -138,7 +138,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
-	needCountToken := constant.CountToken || model.IsResellerTokenKey(relayInfo.TokenKey)
+	needCountToken := constant.CountToken
 	// Avoid building huge CombineText (strings.Join) when token counting and sensitive check are both disabled.
 	var meta *types.TokenCountMeta
 	if needSensitiveCheck || needCountToken {
@@ -175,7 +175,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	// common.SetContextKey(c, constant.ContextKeyTokenCountMeta, meta)
 
-	if priceData.FreeModel && !relayUsesRawTokenQuota(relayInfo) {
+	if priceData.FreeModel && !relayUsesRawTokenQuota(relayInfo) && !model.IsResellerTokenKey(relayInfo.TokenKey) {
 		logger.LogInfo(c, fmt.Sprintf("模型 %s 免费，跳过预扣费", relayInfo.OriginModelName))
 	} else {
 		newAPIError = service.PreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo)
@@ -271,7 +271,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 func relayUsesRawTokenQuota(relayInfo *relaycommon.RelayInfo) bool {
 	return relayInfo != nil &&
-		(model.IsResellerTokenKey(relayInfo.TokenKey) || relayInfo.TokenQuotaMode == model.TokenQuotaModeTokens)
+		!model.IsResellerTokenKey(relayInfo.TokenKey) && relayInfo.TokenQuotaMode == model.TokenQuotaModeTokens
 }
 
 func relaySupportsRawTokenAccounting(relayInfo *relaycommon.RelayInfo) bool {
@@ -625,10 +625,6 @@ func executeTaskSubmissionWith(
 	if relayUsesRawTokenQuota(relayInfo) {
 		message := "raw-token quota keys support token-metered synchronous APIs only"
 		code := "raw_token_quota_task_unsupported"
-		if model.IsResellerTokenKey(relayInfo.TokenKey) {
-			message = "prepaid reseller keys support token-metered synchronous APIs only"
-			code = "reseller_key_task_unsupported"
-		}
 		return nil, service.TaskErrorWrapperLocal(
 			errors.New(message),
 			code,
@@ -775,14 +771,10 @@ func executeTaskSubmissionWith(
 	task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 	task.PrivateData.TokenId = relayInfo.TokenId
 	task.PrivateData.NodeName = common.NodeName
-	task.PrivateData.BillingContext = &model.TaskBillingContext{
-		ModelPrice:      relayInfo.PriceData.ModelPrice,
-		GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
-		ModelRatio:      relayInfo.PriceData.ModelRatio,
-		OtherRatios:     relayInfo.PriceData.OtherRatios(),
-		OriginModelName: relayInfo.OriginModelName,
-		PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
-		TieredSnapshot:  relayInfo.TieredBillingSnapshot,
+	var billingContextErr error
+	task.PrivateData.BillingContext, billingContextErr = service.TaskBillingContextForSubmission(relayInfo, result.Quota)
+	if billingContextErr != nil {
+		return nil, service.TaskErrorWrapperLocal(billingContextErr, "task_billing_snapshot_failed", http.StatusBadRequest)
 	}
 	task.Quota = result.Quota
 	task.Data = result.TaskData
