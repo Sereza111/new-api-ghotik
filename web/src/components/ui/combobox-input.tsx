@@ -45,6 +45,7 @@ interface ComboboxInputProps {
   'aria-label'?: string
   'aria-labelledby'?: string
   'aria-invalid'?: React.AriaAttributes['aria-invalid']
+  'aria-required'?: React.AriaAttributes['aria-required']
 }
 
 export function ComboboxInput({
@@ -61,6 +62,7 @@ export function ComboboxInput({
   'aria-label': ariaLabel,
   'aria-labelledby': ariaLabelledBy,
   'aria-invalid': ariaInvalid,
+  'aria-required': ariaRequired,
 }: ComboboxInputProps) {
   const { t } = useTranslation()
   const listId = React.useId()
@@ -186,6 +188,7 @@ export function ComboboxInput({
         aria-label={ariaLabel}
         aria-labelledby={ariaLabelledBy}
         aria-invalid={ariaInvalid}
+        aria-required={ariaRequired}
         aria-expanded={!!showDropdown}
         aria-controls={
           showDropdown && filteredOptions.length > 0 ? listId : undefined

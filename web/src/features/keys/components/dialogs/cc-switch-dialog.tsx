@@ -74,7 +74,7 @@ function buildCCSwitchURL(
   apiKey: string
 ): string {
   const serverAddress = getServerAddress()
-  const endpoint = app === 'codex' ? serverAddress + '/v1' : serverAddress
+  const endpoint = app === 'codex' ? `${serverAddress}/v1` : serverAddress
   const params = new URLSearchParams()
   params.set('resource', 'provider')
   params.set('app', app)
@@ -199,12 +199,14 @@ export function CCSwitchDialog(props: Props) {
 
         {currentConfig.modelFields.map((field) => (
           <div key={field.key} className='space-y-2'>
-            <Label htmlFor={`cc-switch-${field.key}`} required={field.required}>
+            <Label htmlFor={`cc-switch-${field.key}`}>
               {t(field.labelKey)}
+              {field.required ? <span aria-hidden='true'>*</span> : null}
             </Label>
             <Combobox
               id={`cc-switch-${field.key}`}
               aria-label={t(field.labelKey)}
+              aria-required={field.required}
               options={modelOptions}
               value={models[field.key] || ''}
               onValueChange={(v) =>

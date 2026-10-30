@@ -61,6 +61,7 @@ type LegacyComboboxProps = {
   'aria-labelledby'?: string
   'aria-describedby'?: string
   'aria-invalid'?: React.AriaAttributes['aria-invalid']
+  'aria-required'?: React.AriaAttributes['aria-required']
 }
 
 function Combobox(props: LegacyComboboxProps): React.ReactElement
@@ -80,6 +81,7 @@ function Combobox(
         aria-label={props['aria-label']}
         aria-labelledby={props['aria-labelledby']}
         aria-invalid={props['aria-invalid']}
+        aria-required={props['aria-required']}
         onKeyDown={props.onKeyDown}
         options={props.options}
         value={props.value ?? ''}
@@ -144,6 +146,7 @@ function OptionCombobox(props: LegacyComboboxProps) {
           aria-labelledby={props['aria-labelledby']}
           aria-describedby={props['aria-describedby']}
           aria-invalid={props['aria-invalid']}
+          aria-required={props['aria-required']}
           placeholder={
             props.searchPlaceholder ?? props.placeholder ?? t('Search...')
           }

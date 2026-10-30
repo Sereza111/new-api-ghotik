@@ -55,6 +55,7 @@ describe('CC Switch model selection', () => {
       const user = userEvent.setup()
       await user.click(screen.getByRole('radio', { name: app }))
       const input = screen.getByRole('combobox', { name: 'Primary Model' })
+      expect(input).toHaveAttribute('aria-required', 'true')
 
       await user.click(input)
 
