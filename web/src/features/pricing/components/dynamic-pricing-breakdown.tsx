@@ -186,7 +186,10 @@ function formatBreakdownConditionSummary(
         t(tier.conditionText)
       )
     }
-    return formatConditionSummary(tier.conditions, t)
+    return (
+      formatConditionSummary(tier.conditions, t) ||
+      t(tierCount > 1 ? 'Other cases' : 'All requests')
+    )
   }
   return (
     taskTierConditions(tier, schema, language, t) ||

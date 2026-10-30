@@ -114,7 +114,13 @@ func runProgram(prog *vm.Program, requestRules []RequestRuleTrace, usedVars map[
 		},
 		"param": func(path string) any {
 			path = strings.TrimSpace(path)
-			if path == "" || len(request.Body) == 0 {
+			if path == "" {
+				return nil
+			}
+			if path == "size" && request.ImageSize != nil {
+				return *request.ImageSize
+			}
+			if len(request.Body) == 0 {
 				return nil
 			}
 			result := gjson.GetBytes(request.Body, path)

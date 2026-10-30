@@ -71,6 +71,41 @@ func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {
 	require.Equal(t, common.QuotaPerUnit, info.TieredBillingSnapshot.QuotaPerUnit)
 }
 
+func TestModelPriceHelperTieredFreezesCanonicalImageSize(t *testing.T) {
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		saved[key] = value
+		return nil
+	}))
+	t.Cleanup(func() { require.NoError(t, config.GlobalConfig.LoadFromDB(saved)) })
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode":    `{"image-size-model":"tiered_expr"}`,
+		"billing_setting.billing_expr":    `{"image-size-model":"param(\"size\") == \"4K\" ? tier(\"4K\", fixed(0.04)) * image_count : tier(\"other\", fixed(0.01)) * image_count"}`,
+		"group_ratio_setting.group_ratio": `{"default":1}`,
+	}))
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	ctx.Set("group", "default")
+	count := uint(2)
+	request := &dto.ImageRequest{Model: "image-size-model", Prompt: "cat", N: &count, Size: "3840x2160"}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "image-size-model",
+		UserGroup:       "default",
+		UsingGroup:      "default",
+		Request:         request,
+	}
+
+	price, err := ModelPriceHelper(ctx, info, 0, request.GetTokenCountMeta())
+	require.NoError(t, err)
+	assert.Equal(t, 40_000, price.QuotaToPreConsume)
+	require.NotNil(t, info.TieredBillingSnapshot)
+	require.NotNil(t, info.TieredBillingSnapshot.EstimatedImageSize)
+	assert.Equal(t, "4K", *info.TieredBillingSnapshot.EstimatedImageSize)
+	assert.Equal(t, "4K", *info.BillingRequestInput.ImageSize)
+	assert.Empty(t, price.OtherRatios(), "expression pricing must not use legacy request ratios")
+}
+
 func TestFixedPricePreConsumeAndRealtimeRejection(t *testing.T) {
 	saved := map[string]string{}
 	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
@@ -786,7 +821,7 @@ func TestInputPreConsumeMultiplierLegacyAndRequestPrices(t *testing.T) {
 				reservation := &priceTestReservation{held: price.QuotaToPreConsume}
 				info.Billing = reservation
 				operation_setting.GetQuotaSetting().PreConsumeMultiplier = 10
-				require.Nil(t, service.PrepareImageBillingForRequest(ctx, info, 2))
+				require.Nil(t, service.PrepareImageBillingForRequest(ctx, info, 2, ""))
 				assert.Equal(t, 750, reservation.held, "retry must reuse the original fractional multiplier")
 			}
 		})

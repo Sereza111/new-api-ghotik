@@ -15,8 +15,8 @@ import (
 
 // PrepareImageBillingForRequest reserves the effective outbound image quantity
 // before each attempt, including channel retries and parameter overrides. The
-// client request body stays frozen; only the independent quantity is refreshed.
-func PrepareImageBillingForRequest(c *gin.Context, info *relaycommon.RelayInfo, count int) *types.NewAPIError {
+// client request body stays frozen; only independent billing inputs are refreshed.
+func PrepareImageBillingForRequest(c *gin.Context, info *relaycommon.RelayInfo, count int, size string) *types.NewAPIError {
 	if count < 1 || count > dto.MaxImageN {
 		return types.NewErrorWithStatusCode(fmt.Errorf("image_count must be an integer between 1 and %d", dto.MaxImageN), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
@@ -61,6 +61,9 @@ func PrepareImageBillingForRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 		// Overwrite the per-attempt ratio so a failed attempt cannot leak its
 		// quantity into another channel.
 		info.PriceData.AddOtherRatio("n", float64(quantity))
+		if info.PriceData.HasOtherRatio("image_size") {
+			info.PriceData.AddOtherRatio("image_size", dto.ImageRequestSizePriceRatio(size))
+		}
 		base := info.ImageQuotaBeforeGroup
 		if info.PriceData.UsePrice {
 			base = info.PriceData.ModelPrice * common.QuotaPerUnit

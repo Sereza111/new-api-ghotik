@@ -46,18 +46,21 @@ const PROBE_LABELS = {
   p: 'Billable input tokens',
   c: 'Billable output tokens',
   len: 'Full input length',
+  image_size: 'Output image size',
 } as const
 
 export function BillingTimeProbeFields(props: {
   probe: VisualComparison['probe']
   timezone: string
   includeTokens?: boolean
+  includeImageSize?: boolean
   invalidTimezone?: boolean
   onChange: (probe: VisualComparison['probe'], timezone: string) => void
 }) {
   const { t } = useTranslation()
   const probes: VisualComparison['probe'][] = [...TIME_FUNCS]
   if (props.includeTokens) probes.push('len', 'p', 'c')
+  if (props.includeImageSize) probes.push('image_size')
   const isTime = (TIME_FUNCS as readonly string[]).includes(props.probe)
   const zones = COMMON_TIMEZONES.map((zone) => ({
     value: zone.value,
@@ -122,6 +125,32 @@ export function BillingConditionValueInput(props: {
   probe?: VisualComparison['probe']
 }) {
   const { t, i18n } = useTranslation()
+  if (props.probe === 'image_size') {
+    const sizes = ['1K', '2K', '4K']
+    return (
+      <Select
+        items={sizes.map((value) => ({ value, label: value }))}
+        value={props.value}
+        onValueChange={(value) => value !== null && props.onChange(value)}
+      >
+        <SelectTrigger
+          size='sm'
+          className='w-24'
+          aria-label={props.label ?? t('Condition value')}
+          aria-invalid={props.invalid || undefined}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent alignItemWithTrigger={false}>
+          {sizes.map((size) => (
+            <SelectItem key={size} value={size}>
+              {size}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    )
+  }
   if (
     props.probe === 'weekday' &&
     !props.normalizeNumberDrafts &&

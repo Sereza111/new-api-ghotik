@@ -251,6 +251,46 @@ func TestRequestProbeHelpers(t *testing.T) {
 	}
 }
 
+func TestImageSizeProbePrefersCanonicalBillingTier(t *testing.T) {
+	canonicalSize := "4K"
+	cost, trace, err := billingexpr.RunExprWithRequest(
+		`param("size") == "1K" ? tier("1K", fixed(0.01)) : param("size") == "4K" ? tier("4K", fixed(0.04)) : tier("2K", fixed(0.02))`,
+		billingexpr.TokenParams{},
+		billingexpr.RequestInput{
+			Body:      []byte(`{"size":"1K"}`),
+			ImageSize: &canonicalSize,
+		},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, 40_000.0, cost)
+	assert.Equal(t, "4K", trace.MatchedTier)
+}
+
+func TestImageSizeSubscriptionPricingMultipliesByImageCount(t *testing.T) {
+	const expression = `(param("size") == "1K" ? tier("1K", fixed(0.00402)) : param("size") == "2K" ? tier("2K", fixed(0.00603)) : tier("4K", fixed(0.00804))) * image_count`
+	for _, tc := range []struct {
+		size     string
+		count    int
+		wantCost float64
+		wantTier string
+	}{
+		{size: "1K", count: 1, wantCost: 4_020, wantTier: "1K"},
+		{size: "2K", count: 2, wantCost: 12_060, wantTier: "2K"},
+		{size: "4K", count: 3, wantCost: 24_120, wantTier: "4K"},
+	} {
+		t.Run(tc.size, func(t *testing.T) {
+			cost, trace, err := billingexpr.RunExprWithRequest(
+				expression,
+				billingexpr.TokenParams{},
+				billingexpr.RequestInput{ImageCount: &tc.count, ImageSize: &tc.size},
+			)
+			require.NoError(t, err)
+			assert.InDelta(t, tc.wantCost, cost, 1e-9)
+			assert.Equal(t, tc.wantTier, trace.MatchedTier)
+		})
+	}
+}
+
 func TestHeaderProbeHelper(t *testing.T) {
 	cost, _, err := billingexpr.RunExprWithRequest(
 		`p * 0.5 + c * 1.0 * (has(header("anthropic-beta"), "fast-mode") ? 2 : 1)`,

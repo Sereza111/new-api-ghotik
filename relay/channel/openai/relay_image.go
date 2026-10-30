@@ -30,12 +30,26 @@ import (
 )
 
 func updateOpenAIImageSize(info *relaycommon.RelayInfo, ratio float64, exact bool) {
-	if info == nil || !info.PriceData.UsePrice || !info.PriceData.HasOtherRatio("image_size") || ratio <= 0 {
+	if info == nil || ratio <= 0 {
 		return
 	}
-	current := info.PriceData.OtherRatios()["image_size"]
-	if exact || ratio > current {
-		info.PriceData.AddOtherRatio("image_size", ratio)
+	if info.PriceData.UsePrice && info.PriceData.HasOtherRatio("image_size") {
+		current := info.PriceData.OtherRatios()["image_size"]
+		if exact || ratio > current {
+			info.PriceData.AddOtherRatio("image_size", ratio)
+		}
+	}
+	var tier string
+	switch ratio {
+	case 1:
+		tier = "1K"
+	case 1.5:
+		tier = "2K"
+	case 2:
+		tier = "4K"
+	}
+	if tier != "" {
+		info.UpdateImageSize(tier, exact)
 	}
 }
 

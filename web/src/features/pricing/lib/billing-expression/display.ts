@@ -80,6 +80,20 @@ function tokenConditions(node: ExpressionNode): TokenTierCondition[] | null {
   return conditions
 }
 
+function isImageSizeCondition(node: ExpressionNode): boolean {
+  return (
+    node.kind === 'binary' &&
+    ['==', '!='].includes(node.operator) &&
+    node.left.kind === 'call' &&
+    node.left.name === 'param' &&
+    node.left.args[0]?.kind === 'literal' &&
+    node.left.args[0].value === 'size' &&
+    node.right.kind === 'literal' &&
+    typeof node.right.value === 'string' &&
+    ['1K', '2K', '4K'].includes(node.right.value)
+  )
+}
+
 function nonnegativePriceLiteral(node: ExpressionNode): number | null {
   if (
     node.kind === 'literal' &&
@@ -182,7 +196,10 @@ function tokenTier(
 }
 
 /** Legacy token summary contract: ordered linear chain, never a minimum or partial price extraction. */
-export function readTokenTierChain(node: ExpressionNode): TokenTier[] | null {
+export function readTokenTierChain(
+  node: ExpressionNode,
+  source?: string
+): TokenTier[] | null {
   if (
     node.kind === 'conditional' &&
     node.condition.kind === 'binary' &&
@@ -220,7 +237,7 @@ export function readTokenTierChain(node: ExpressionNode): TokenTier[] | null {
     ]) {
       if (factor.kind === 'variable' && factor.name === 'image_count') {
         return (
-          readTokenTierChain(pricing)?.map((tier) => ({
+          readTokenTierChain(pricing, source)?.map((tier) => ({
             ...tier,
             imageCount: true,
           })) ?? null
@@ -231,11 +248,19 @@ export function readTokenTierChain(node: ExpressionNode): TokenTier[] | null {
   const tiers: TokenTier[] = []
   let remaining = node
   while (remaining.kind === 'conditional') {
-    const conditions = tokenConditions(remaining.condition)
-    if (!conditions) return null
+    let conditions = tokenConditions(remaining.condition)
+    let conditionText: string | undefined
+    if (!conditions) {
+      if (!source || !isImageSizeCondition(remaining.condition)) return null
+      conditions = []
+      conditionText = source.slice(
+        remaining.condition.start,
+        remaining.condition.end
+      )
+    }
     const tier = tokenTier(remaining.yes, conditions)
     if (!tier) return null
-    tiers.push(tier)
+    tiers.push(conditionText ? { ...tier, conditionText } : tier)
     remaining = remaining.no
   }
   const fallback = tokenTier(remaining, [])
@@ -273,7 +298,7 @@ function timeTierBranches(
     if (!yes || !no) return null
     return [...yes, ...no]
   }
-  const tiers = readTokenTierChain(node)
+  const tiers = readTokenTierChain(node, compiled.source)
   if (!tiers || path.length === 0) return null
   const timeDescription = path
     .map(({ condition, matches }) => {

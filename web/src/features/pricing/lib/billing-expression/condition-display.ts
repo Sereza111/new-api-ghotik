@@ -148,6 +148,22 @@ function describeBillingCondition(
   }
   if (
     node.kind === 'binary' &&
+    ['==', '!='].includes(node.operator) &&
+    node.left.kind === 'call' &&
+    node.left.name === 'param' &&
+    node.left.args[0]?.kind === 'literal' &&
+    node.left.args[0].value === 'size' &&
+    node.right.kind === 'literal' &&
+    typeof node.right.value === 'string'
+  ) {
+    return {
+      text: `${t('Output image size')} ${node.operator === '==' ? '=' : '!='} ${node.right.value}`,
+      kind: 'combined',
+      timezone: '',
+    }
+  }
+  if (
+    node.kind === 'binary' &&
     ['<', '<=', '>', '>=', '==', '!='].includes(node.operator) &&
     node.left.kind === 'variable' &&
     node.right.kind === 'literal' &&

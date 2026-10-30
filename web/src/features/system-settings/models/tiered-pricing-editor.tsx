@@ -163,6 +163,11 @@ const PRESET_GROUPS: PresetGroup[] = [
     group: 'Multimodal',
     presets: [
       {
+        key: 'image-size-pricing',
+        label: 'Output image size',
+        expr: '(param("size") == "1K" ? tier("1K", fixed(0.00402)) : param("size") == "2K" ? tier("2K", fixed(0.00603)) : tier("4K", fixed(0.00804))) * image_count',
+      },
+      {
         key: 'gpt-image-1-mini',
         label: 'GPT Image 1 Mini',
         expr: 'tier("base", p * 2 + c * 8 + img * 2.5)',
@@ -700,7 +705,7 @@ function PresetSection({ applyPreset }: PresetSectionProps) {
                 className='h-7 text-xs'
                 onClick={() => applyPreset(preset)}
               >
-                {preset.label}
+                {t(preset.label)}
               </Button>
             ))}
           </div>

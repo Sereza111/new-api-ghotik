@@ -386,7 +386,7 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, billing
 	if err != nil {
 		return hosttypes.PriceData{}, err
 	}
-	if usedVars["image_count"] {
+	if usedVars["image_count"] || usedVars["image_size"] {
 		requestInput, err = ResolveImageBillingRequestInput(c, info, requestInput)
 		if err != nil {
 			return hosttypes.PriceData{}, err

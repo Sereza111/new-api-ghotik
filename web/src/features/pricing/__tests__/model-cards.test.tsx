@@ -38,6 +38,7 @@ import {
 import { CachedPriceCell } from '../components/cached-price-cell'
 import { ModelCard } from '../components/model-card'
 import { ModelCardGrid } from '../components/model-card-grid'
+import { ModelPriceCell } from '../components/model-price-cell'
 import type { PricingModel } from '../types'
 
 function pricingModel(overrides: Partial<PricingModel> = {}): PricingModel {
@@ -51,6 +52,24 @@ function pricingModel(overrides: Partial<PricingModel> = {}): PricingModel {
     group_ratio: { default: 1, premium: 3 },
     ...overrides,
   }
+}
+
+function normalizedText(element: Element | null): string {
+  if (!element) throw new Error('Expected an element containing a price')
+  return (element.textContent ?? '')
+    .replaceAll('\u00a0', ' ')
+    .replaceAll(',', '.')
+}
+
+function expectLocalizedPrice(
+  element: Element | null,
+  values: string[],
+  unit?: string
+) {
+  const text = normalizedText(element)
+  expect(text).toContain('$')
+  for (const value of values) expect(text).toContain(value)
+  if (unit) expect(text).toContain(unit)
 }
 
 let queryClient: QueryClient
@@ -99,12 +118,8 @@ describe('model cards', () => {
         options={{ tokenUnit: 'M' }}
       />
     )
-    expect(screen.getByText('Cache Read').parentElement).toHaveTextContent(
-      '$1.25'
-    )
-    expect(screen.getByText('Image Cache').parentElement).toHaveTextContent(
-      '$0'
-    )
+    expectLocalizedPrice(screen.getByText('Cache Read').parentElement, ['1.25'])
+    expectLocalizedPrice(screen.getByText('Image Cache').parentElement, ['0'])
   })
   it('shows fixed prices per request in both token display units', () => {
     const model = pricingModel({
@@ -114,10 +129,17 @@ describe('model cards', () => {
     const { rerender } = render(
       <ModelCard model={model} onClick={vi.fn()} tokenUnit='K' />
     )
-    expect(screen.getByText('$0.01')).toBeVisible()
-    expect(screen.getByText('/ request')).toBeVisible()
+    expectLocalizedPrice(
+      screen.getByRole('group', { name: 'Pricing' }),
+      ['0.01'],
+      '/ request'
+    )
     rerender(<ModelCard model={model} onClick={vi.fn()} tokenUnit='M' />)
-    expect(screen.getByText('$0.01')).toBeVisible()
+    expectLocalizedPrice(
+      screen.getByRole('group', { name: 'Pricing' }),
+      ['0.01'],
+      '/ request'
+    )
     expect(screen.queryByText('/ 1M')).not.toBeInTheDocument()
   })
   it('updates the current time tier at a minute boundary and after returning to the page', () => {
@@ -130,14 +152,18 @@ describe('model cards', () => {
     })
     render(<ModelCard model={model} onClick={vi.fn()} tokenUnit='M' />)
     expect(screen.getByText('Current period price')).toBeVisible()
-    expect(screen.getByText('$1.5')).toBeVisible()
+    expectLocalizedPrice(screen.getByRole('group', { name: 'Pricing' }), [
+      '1.5',
+    ])
     act(() => vi.advanceTimersByTime(1000))
-    expect(screen.getByText('$3')).toBeVisible()
+    expectLocalizedPrice(screen.getByRole('group', { name: 'Pricing' }), ['3'])
     act(() => {
       vi.setSystemTime(new Date('2026-09-07T12:00:00+08:00'))
       fireEvent(document, new Event('visibilitychange'))
     })
-    expect(screen.getByText('$1.5')).toBeVisible()
+    expectLocalizedPrice(screen.getByRole('group', { name: 'Pricing' }), [
+      '1.5',
+    ])
   })
 
   it('copies the complete long model name without opening details', async () => {
@@ -351,24 +377,26 @@ describe('model cards', () => {
       usdExchangeRate: 6,
     }
     const { rerender } = render(<ModelCard {...props} tokenUnit='M' />)
-    expect(screen.getByText('Input').parentElement).toHaveTextContent(
-      /\$3\s*\/\s*1M/
+    expectLocalizedPrice(
+      screen.getByLabelText('Our price').parentElement?.parentElement ?? null,
+      ['3', '9'],
+      '/ 1M'
     )
-    expect(screen.getByText('Output').parentElement).toHaveTextContent(
-      /\$9\s*\/\s*1M/
-    )
-    expect(screen.getByText('Cached').parentElement).toHaveTextContent(
-      /\$0\s*\/\s*1M/
+    expectLocalizedPrice(
+      screen.getByText('Cached').parentElement,
+      ['0'],
+      '/ 1M'
     )
     rerender(<ModelCard {...props} tokenUnit='K' />)
-    expect(screen.getByText('Input').parentElement).toHaveTextContent(
-      /\$0.003\s*\/\s*1K/
+    expectLocalizedPrice(
+      screen.getByLabelText('Our price').parentElement?.parentElement ?? null,
+      ['0.003', '0.009'],
+      '/ 1K'
     )
-    expect(screen.getByText('Output').parentElement).toHaveTextContent(
-      /\$0.009\s*\/\s*1K/
-    )
-    expect(screen.getByText('Cached').parentElement).toHaveTextContent(
-      /\$0\s*\/\s*1K/
+    expectLocalizedPrice(
+      screen.getByText('Cached').parentElement,
+      ['0'],
+      '/ 1K'
     )
   })
 
@@ -384,7 +412,11 @@ describe('model cards', () => {
         tokenUnit='K'
       />
     )
-    expect(screen.getByText(/\$0.6/)).toHaveTextContent(/\$0.6\s*\/\s*request/)
+    expectLocalizedPrice(
+      screen.getByRole('group', { name: 'Pricing' }),
+      ['0.6'],
+      '/ request'
+    )
     expect(screen.queryByText(/1K|1M/)).not.toBeInTheDocument()
     expect(screen.getAllByText('Per Request')).toHaveLength(1)
     expect(screen.queryByText('Per-request')).not.toBeInTheDocument()
@@ -405,11 +437,15 @@ describe('model cards', () => {
         usdExchangeRate={6}
       />
     )
-    expect(screen.getByText('Input').parentElement).toHaveTextContent(
-      /\$0.0045\s*\/\s*1K/
+    expectLocalizedPrice(
+      screen.getByText('Input').parentElement,
+      ['0.0045'],
+      '/ 1K'
     )
-    expect(screen.getByText('Output').parentElement).toHaveTextContent(
-      /\$0.0225\s*\/\s*1K/
+    expectLocalizedPrice(
+      screen.getByText('Output').parentElement,
+      ['0.0225'],
+      '/ 1K'
     )
   })
 
@@ -491,7 +527,10 @@ describe('model cards', () => {
         tokenUnit='K'
       />
     )
-    expect(screen.getByText(/0.4.*0.8/)).toHaveTextContent(/0.4 – \$0.8/)
+    expectLocalizedPrice(screen.getByText('seconds').parentElement, [
+      '0.4',
+      '0.8',
+    ])
     expect(screen.getByText(/^\/\s*s$/)).toBeVisible()
     expect(screen.queryByText(/1K|1M/)).not.toBeInTheDocument()
   })
@@ -571,10 +610,30 @@ describe('model cards', () => {
         tokenUnit='K'
       />
     )
-    expect(screen.getByText('$42 – $70').parentElement).toHaveTextContent(
-      '$42 – $70 / 1M token'
+    expectLocalizedPrice(
+      screen.getByText('tokens').parentElement,
+      ['42', '70'],
+      '/ 1M token'
     )
     expect(screen.getByText(/480p · 5s ≈/)).toBeVisible()
+  })
+
+  it('shows official reference prices and the discount for dynamic token pricing', () => {
+    render(
+      <ModelPriceCell
+        model={pricingModel({
+          billing_mode: 'tiered_expr',
+          billing_expr: 'tier("base", p * 0.1 + c * 0.6)',
+          reference_price: { input_usd: 4, output_usd: 20 },
+        })}
+        options={{ tokenUnit: 'M' }}
+      />
+    )
+
+    expectLocalizedPrice(screen.getByLabelText('Our price'), ['0.1', '0.6'])
+    expectLocalizedPrice(screen.getByLabelText('Official price'), ['4', '20'])
+    expect(screen.getByText('-98%')).toBeVisible()
+    expect(screen.getByText('/ 1M tokens')).toBeVisible()
   })
 
   it('keeps an unrecognized expression visible with the special billing message', () => {

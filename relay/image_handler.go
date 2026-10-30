@@ -50,6 +50,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	if err != nil {
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
+	imageSize := request.Size
 
 	var requestBody io.Reader
 	var jsonData []byte
@@ -104,7 +105,8 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		// This is a different trust boundary from ingress: channel overrides
 		// and pass-through bodies can change the quantity actually submitted.
 		var outbound struct {
-			N *uint `json:"n"`
+			N    *uint  `json:"n"`
+			Size string `json:"size"`
 		}
 		if err := common.Unmarshal(jsonData, &outbound); err != nil {
 			return types.NewErrorWithStatusCode(fmt.Errorf("invalid image billing parameters: %w", err), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
@@ -117,6 +119,9 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
+		if outbound.Size != "" {
+			imageSize = outbound.Size
+		}
 		logger.LogDebug(c, "image request body: %s", jsonData)
 		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {
@@ -125,7 +130,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		defer closer.Close()
 		requestBody = body
 	}
-	if billingErr := service.PrepareImageBillingForRequest(c, info, imageCount); billingErr != nil {
+	if billingErr := service.PrepareImageBillingForRequest(c, info, imageCount, imageSize); billingErr != nil {
 		return billingErr
 	}
 
