@@ -250,9 +250,9 @@ func TestModelPriceHelperRequestBillingRatiosOnlyApplyToFixedPrice(t *testing.T)
 		wantImageCount bool
 	}{
 		{
-			name:           "fixed price applies image count",
+			name:           "fixed price applies image count and resolution",
 			model:          "fixed-image-price",
-			wantQuota:      180000,
+			wantQuota:      270000,
 			wantUsePrice:   true,
 			wantImageCount: true,
 		},
@@ -275,7 +275,7 @@ func TestModelPriceHelperRequestBillingRatiosOnlyApplyToFixedPrice(t *testing.T)
 			}
 			meta := &types.TokenCountMeta{
 				ImagePriceRatio: 3,
-				BillingRatios:   map[string]float64{"n": 3},
+				BillingRatios:   map[string]float64{"n": 3, "image_size": 1.5},
 			}
 
 			priceData, err := ModelPriceHelper(ctx, info, 1000, meta)
@@ -284,6 +284,7 @@ func TestModelPriceHelperRequestBillingRatiosOnlyApplyToFixedPrice(t *testing.T)
 			require.Equal(t, tt.wantQuota, priceData.QuotaToPreConsume)
 			require.Equal(t, tt.wantUsePrice, priceData.UsePrice)
 			require.Equal(t, tt.wantImageCount, priceData.HasOtherRatio("n"))
+			require.Equal(t, tt.wantImageCount, priceData.HasOtherRatio("image_size"))
 			require.Equal(t, priceData.OtherRatios(), info.PriceData.OtherRatios())
 		})
 	}

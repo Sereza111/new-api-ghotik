@@ -243,3 +243,68 @@ func TestGetAndValidOpenAIImageRequestNBounds(t *testing.T) {
 		require.Contains(t, err.Error(), boundErr)
 	})
 }
+
+func TestOpenAIImageResolutionPricing(t *testing.T) {
+	tests := []struct {
+		name      string
+		size      string
+		wantRatio float64
+	}{
+		{name: "named 1K", size: "1K", wantRatio: 1},
+		{name: "one kilopixel dimensions", size: "1024x1024", wantRatio: 1},
+		{name: "named 2K", size: "2K", wantRatio: 1.5},
+		{name: "two kilopixel dimensions", size: "2048x1152", wantRatio: 1.5},
+		{name: "named 4K", size: "4K", wantRatio: 2},
+		{name: "four kilopixel dimensions", size: "3840x2160", wantRatio: 2},
+		{name: "just above 1K", size: "1025x1024", wantRatio: 1.5},
+		{name: "just above 2K", size: "2049x1024", wantRatio: 2},
+		{name: "automatic size", size: "auto", wantRatio: 1.5},
+		{name: "empty size", size: "", wantRatio: 1.5},
+		{name: "malformed size", size: "large", wantRatio: 1.5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &dto.ImageRequest{Model: "gpt-image-2.5-sunburst", Prompt: "draw a cat", Size: tt.size}
+			meta := req.GetTokenCountMeta()
+			require.Equal(t, tt.wantRatio, meta.BillingRatios["image_size"])
+			require.Equal(t, 1.0, meta.BillingRatios["n"])
+		})
+	}
+
+	t.Run("DALL-E keeps legacy size and quality pricing", func(t *testing.T) {
+		req := &dto.ImageRequest{Model: "dall-e-3", Prompt: "draw a cat", Size: "1024x1792", Quality: "hd"}
+		meta := req.GetTokenCountMeta()
+		require.Equal(t, 3.0, meta.ImagePriceRatio)
+		require.NotContains(t, meta.BillingRatios, "image_size")
+	})
+
+	t.Run("unrelated image model does not gain OpenAI resolution pricing", func(t *testing.T) {
+		req := &dto.ImageRequest{Model: "custom-image-model", Prompt: "draw a cat", Size: "4K"}
+		require.NotContains(t, req.GetTokenCountMeta().BillingRatios, "image_size")
+	})
+
+	t.Run("multipart edit carries size and count billing ratios", func(t *testing.T) {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		require.NoError(t, writer.WriteField("model", "gpt-image-2.5-sunburst"))
+		require.NoError(t, writer.WriteField("prompt", "edit this image"))
+		require.NoError(t, writer.WriteField("size", "3840x2160"))
+		require.NoError(t, writer.WriteField("n", "2"))
+		part, err := writer.CreateFormFile("image", "input.png")
+		require.NoError(t, err)
+		_, err = part.Write([]byte("fake image"))
+		require.NoError(t, err)
+		require.NoError(t, writer.Close())
+
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", &body)
+		c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+
+		req, err := GetAndValidOpenAIImageRequest(c, relayconstant.RelayModeImagesEdits)
+		require.NoError(t, err)
+		meta := req.GetTokenCountMeta()
+		require.Equal(t, 2.0, meta.BillingRatios["image_size"])
+		require.Equal(t, 2.0, meta.BillingRatios["n"])
+	})
+}

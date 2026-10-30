@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strconv"
+	"strings"
 
 	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -13,6 +15,57 @@ import (
 // MaxImageN caps the image generation count. Without this bound a huge or
 // wrapped-negative n overflows quota calculation into a negative charge.
 const MaxImageN = 128
+
+const defaultImageSizePriceRatio = 1.5
+
+// ImageSizePriceRatio maps an image resolution to the 1K/2K/4K price tiers.
+// The boolean is false when size cannot be classified.
+func ImageSizePriceRatio(size string) (float64, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(size))
+	switch normalized {
+	case "1k":
+		return 1, true
+	case "2k":
+		return 1.5, true
+	case "4k":
+		return 2, true
+	}
+
+	normalized = strings.ReplaceAll(normalized, "\u00d7", "x")
+	dimensions := strings.Split(normalized, "x")
+	if len(dimensions) != 2 {
+		return 0, false
+	}
+	width, err := strconv.Atoi(strings.TrimSpace(dimensions[0]))
+	if err != nil || width <= 0 {
+		return 0, false
+	}
+	height, err := strconv.Atoi(strings.TrimSpace(dimensions[1]))
+	if err != nil || height <= 0 {
+		return 0, false
+	}
+	maxEdge := width
+	if height > maxEdge {
+		maxEdge = height
+	}
+	switch {
+	case maxEdge <= 1024:
+		return 1, true
+	case maxEdge <= 2048:
+		return 1.5, true
+	default:
+		return 2, true
+	}
+}
+
+// ImageRequestSizePriceRatio uses the conservative 2K tier when a request
+// leaves the size automatic or supplies an unrecognized value.
+func ImageRequestSizePriceRatio(size string) float64 {
+	if ratio, ok := ImageSizePriceRatio(size); ok {
+		return ratio
+	}
+	return defaultImageSizePriceRatio
+}
 
 // ImageBillingParameters contains only the provider scalars parsed by request
 // validation. Keep this separate from the complete provider request payload.
@@ -160,9 +213,16 @@ func indexComma(s string) int {
 }
 
 func (i *ImageRequest) GetTokenCountMeta() *types.TokenCountMeta {
+	billingRatios := map[string]float64{}
+
+	model := strings.ToLower(i.Model)
 	imageN := uint(1)
 	if i.N != nil && *i.N > 0 {
 		imageN = *i.N
+	}
+	billingRatios["n"] = float64(imageN)
+	if strings.HasPrefix(model, "gpt-image-") {
+		billingRatios["image_size"] = ImageRequestSizePriceRatio(i.Size)
 	}
 
 	// Keep n separate from ImagePriceRatio so size/quality and count remain
@@ -172,7 +232,7 @@ func (i *ImageRequest) GetTokenCountMeta() *types.TokenCountMeta {
 		CombineText:     i.Prompt,
 		MaxTokens:       1584,
 		ImagePriceRatio: i.legacyDallePriceRatio(),
-		BillingRatios:   map[string]float64{"n": float64(imageN)},
+		BillingRatios:   billingRatios,
 	}
 }
 

@@ -1,10 +1,17 @@
 package openai
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,7 +26,84 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"golang.org/x/image/webp"
 )
+
+func updateOpenAIImageSize(info *relaycommon.RelayInfo, ratio float64, exact bool) {
+	if info == nil || !info.PriceData.UsePrice || !info.PriceData.HasOtherRatio("image_size") || ratio <= 0 {
+		return
+	}
+	current := info.PriceData.OtherRatios()["image_size"]
+	if exact || ratio > current {
+		info.PriceData.AddOtherRatio("image_size", ratio)
+	}
+}
+
+func openAIImageDataSizeRatio(imageData gjson.Result) (ratio float64, exact bool, ok bool) {
+	if encoded := imageData.Get("b64_json").String(); encoded != "" {
+		if comma := strings.IndexByte(encoded, ','); comma >= 0 {
+			encoded = encoded[comma+1:]
+		}
+		decoder := base64.NewDecoder(base64.StdEncoding, strings.NewReader(encoded))
+		decoded, err := io.ReadAll(io.LimitReader(decoder, 1024*1024))
+		if err == nil {
+			config, _, decodeErr := image.DecodeConfig(bytes.NewReader(decoded))
+			if decodeErr != nil {
+				config, decodeErr = webp.DecodeConfig(bytes.NewReader(decoded))
+			}
+			if decodeErr == nil {
+				ratio, ok = dto.ImageSizePriceRatio(strconv.Itoa(config.Width) + "x" + strconv.Itoa(config.Height))
+				return ratio, ok, ok
+			}
+		}
+	}
+	for _, field := range []string{"output_size", "size"} {
+		if ratio, ok := dto.ImageSizePriceRatio(imageData.Get(field).String()); ok {
+			return ratio, false, true
+		}
+	}
+	width := imageData.Get("width").Int()
+	height := imageData.Get("height").Int()
+	if width > 0 && height > 0 {
+		ratio, ok = dto.ImageSizePriceRatio(strconv.FormatInt(width, 10) + "x" + strconv.FormatInt(height, 10))
+		return ratio, false, ok
+	}
+	return 0, false, false
+}
+
+// openAIImageResponseSizeRatio returns the largest actual output tier. Exact
+// is true only when every returned image is verified from decoded image bytes,
+// allowing settlement to lower as well as raise the request-time estimate.
+func openAIImageResponseSizeRatio(responseBody []byte) (ratio float64, exact bool) {
+	items := gjson.GetBytes(responseBody, "data").Array()
+	if len(items) == 0 {
+		return 0, false
+	}
+	responseRatio := 0.0
+	for _, field := range []string{"output_size", "size"} {
+		if candidate, ok := dto.ImageSizePriceRatio(gjson.GetBytes(responseBody, field).String()); ok {
+			responseRatio = candidate
+			break
+		}
+	}
+	exactCount := 0
+	for _, item := range items {
+		candidate, candidateExact, ok := openAIImageDataSizeRatio(item)
+		if !ok && responseRatio > 0 {
+			candidate, ok = responseRatio, true
+		}
+		if !ok {
+			continue
+		}
+		if candidateExact {
+			exactCount++
+		}
+		if candidate > ratio {
+			ratio = candidate
+		}
+	}
+	return ratio, exactCount == len(items)
+}
 
 // OpenaiImageHandler handles non-streaming OpenAI image responses
 // (generations/edits), returning the parsed usage for billing.
@@ -42,6 +126,8 @@ func OpenaiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 	}
 
 	info.UpdateImageCount(openaiImageResponseCount(responseBody))
+	actualSizeRatio, exactSize := openAIImageResponseSizeRatio(responseBody)
+	updateOpenAIImageSize(info, actualSizeRatio, exactSize)
 
 	// 写入新的 response body
 	service.IOCopyBytesGracefully(c, resp, responseBody)
@@ -142,6 +228,8 @@ func OpenaiImageStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 	usage := &dto.Usage{}
 	var lastStreamData []byte
 	var completedImages int64
+	var completedImagesWithVerifiedSize int64
+	var actualSizeRatio float64
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		raw := common.StringToByteSlice(data)
@@ -162,6 +250,14 @@ func OpenaiImageStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 			}
 			if chunk.Type == "image_generation.completed" || chunk.Type == "image_edit.completed" {
 				completedImages++
+				if ratio, exact, ok := openAIImageDataSizeRatio(gjson.ParseBytes(raw)); ok {
+					if exact {
+						completedImagesWithVerifiedSize++
+					}
+					if ratio > actualSizeRatio {
+						actualSizeRatio = ratio
+					}
+				}
 			}
 		}
 		if err := writeOpenaiImageStreamChunk(c, raw); err != nil {
@@ -189,6 +285,8 @@ func OpenaiImageStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 		if upstreamFinished || completedImages > int64(info.RequestedImageCount()) {
 			info.UpdateImageCount(completedImages)
 		}
+		exactSize := upstreamFinished && completedImages > 0 && completedImagesWithVerifiedSize == completedImages
+		updateOpenAIImageSize(info, actualSizeRatio, exactSize)
 	}
 	return usage, nil
 }
@@ -279,6 +377,8 @@ func openaiImageJSONAsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo,
 	applyUsagePostProcessing(info, &usageResp.Usage, responseBody)
 
 	info.UpdateImageCount(openaiImageResponseCount(responseBody))
+	actualSizeRatio, exactSize := openAIImageResponseSizeRatio(responseBody)
+	updateOpenAIImageSize(info, actualSizeRatio, exactSize)
 
 	helper.SetEventStreamHeaders(c)
 	c.Status(http.StatusOK)
