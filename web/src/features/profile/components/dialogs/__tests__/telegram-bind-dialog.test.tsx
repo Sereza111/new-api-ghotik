@@ -20,7 +20,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
-import { TelegramBindDialog } from '../telegram-bind-dialog'
+import { TelegramBindDialog } from '@/features/security/components/dialogs/telegram-bind-dialog'
 
 const startTelegramBind = vi.fn()
 const getTelegramBindStatus = vi.fn()
@@ -30,7 +30,7 @@ vi.mock('@/components/dialog', () => ({
     props.open ? <div>{props.children}</div> : null,
 }))
 
-vi.mock('../../../api', () => ({
+vi.mock('@/features/profile/api', () => ({
   startTelegramBind: (...args: unknown[]) => startTelegramBind(...args),
   getTelegramBindStatus: (...args: unknown[]) => getTelegramBindStatus(...args),
 }))

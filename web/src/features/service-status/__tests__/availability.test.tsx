@@ -90,7 +90,11 @@ describe('ServiceStatus', () => {
                   avg_latency_ms: 20_300,
                   success_rate: 100,
                   avg_tps: 35.44,
-                  recent_success_rates: [100, 100, 100],
+                  recent_success_series: [
+                    { ts: 1_800_000_000, success_rate: 100 },
+                    { ts: 1_800_003_600, success_rate: 100 },
+                    { ts: 1_800_007_200, success_rate: 100 },
+                  ],
                 },
               ],
             },
