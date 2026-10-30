@@ -58,6 +58,12 @@ export type ModelPricingFormValues = z.infer<
 
 export type PricingMode = 'per-token' | 'per-request' | 'tiered_expr'
 
+export type ReferencePriceData = {
+  input_usd?: number
+  output_usd?: number
+  request_usd?: number
+}
+
 export type LaneKey =
   | 'completion'
   | 'cache'
@@ -80,6 +86,7 @@ export type ModelRatioData = {
   billingMode?: PricingMode
   billingExpr?: string
   requestRuleExpr?: string
+  referencePrice?: ReferencePriceData
 }
 
 export function usesTaskModelPricing(

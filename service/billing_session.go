@@ -64,13 +64,39 @@ func (s *BillingSession) Settle(actualQuota int) error {
 			s.relayInfo.UserId, s.relayInfo.TokenId, tokenActualQuota))
 		tokenActualQuota = 0
 	}
-	if isReseller && tokenActualQuota > s.tokenConsumed {
-		// The reservation is the hard per-request ceiling. Providers can return
-		// malformed or late usage after the response has already been streamed;
-		// never debit the key beyond its reservation in that case.
-		common.SysLog(fmt.Sprintf("reseller settlement quota exceeds reservation; clamped (userId=%d, tokenId=%d, actual=%d, reserved=%d)",
-			s.relayInfo.UserId, s.relayInfo.TokenId, tokenActualQuota, s.tokenConsumed))
-		tokenActualQuota = s.tokenConsumed
+	if isReseller && tracksRaw {
+		if s.settlementStarted && tokenActualQuota != s.settlementTarget {
+			return fmt.Errorf("billing settlement target changed from %d to %d", s.settlementTarget, tokenActualQuota)
+		}
+		if !s.settlementStarted {
+			if err := s.reconcilePendingTokenReservationLocked(); err != nil {
+				return err
+			}
+			s.settlementStarted = true
+			s.settlementTarget = tokenActualQuota
+			s.settlementReserved = s.tokenConsumed
+		}
+		phase := fmt.Sprintf("settle_from_%d_to_%d", s.settlementReserved, s.settlementTarget)
+		charged := s.settlementTarget
+		if !s.relayInfo.IsPlayground {
+			var err error
+			charged, err = model.SettleResellerTokenQuota(s.relayInfo.TokenId, s.relayInfo.TokenKey,
+				s.settlementReserved, s.settlementTarget, s.tokenOperationID(phase))
+			if err != nil {
+				return err
+			}
+		}
+		s.tokenConsumed = charged
+		s.relayInfo.TokenQuotaCharged = &charged
+		s.relayInfo.TokenQuotaUnfunded = s.settlementTarget - charged
+		if s.relayInfo.TokenQuotaUnfunded > 0 {
+			common.SysError(fmt.Sprintf("reseller usage exceeds available allocation; key disabled (requestId=%s, tokenId=%d, measured=%d, charged=%d, unfunded=%d)",
+				s.relayInfo.RequestId, s.relayInfo.TokenId, s.settlementTarget, charged, s.relayInfo.TokenQuotaUnfunded))
+		}
+		s.fundingSettled = true // prepaid funding was purchased at key issuance
+		s.settled = true
+		s.syncRelayInfo()
+		return nil
 	}
 	if usesRawTokenQuota(s.relayInfo) && !isReseller {
 		if !tracksRaw {
@@ -214,6 +240,12 @@ func (s *BillingSession) Refund(c *gin.Context) {
 		s.mu.Unlock()
 		return
 	}
+	if isResellerBilling(s.relayInfo) && s.settlementStarted {
+		// A delivered response must never become free after a failed/ambiguous
+		// database acknowledgement. Retry its durable settlement instead.
+		s.mu.Unlock()
+		return
+	}
 	if s.pendingToken != nil {
 		s.refundStarted = true
 	}
@@ -353,6 +385,9 @@ func (s *BillingSession) NeedsRefund() bool {
 }
 
 func (s *BillingSession) needsRefundLocked() bool {
+	if isResellerBilling(s.relayInfo) && s.settlementStarted {
+		return false
+	}
 	if s.settled || s.refunded || s.fundingSettled {
 		// fundingSettled 时资金来源已提交结算，不能再退预扣费
 		return false
@@ -582,10 +617,10 @@ func (s *BillingSession) reserveToken(delta int, targetQuota int, phase string, 
 			isExtension: isExtension,
 		}
 		if isResellerBilling(s.relayInfo) {
-			err = model.ApplyResellerTokenQuotaAdjustment(
+			err = model.ReserveResellerTokenQuota(
 				s.relayInfo.TokenId,
 				s.relayInfo.TokenKey,
-				-delta,
+				delta,
 				s.tokenOperationID(phase),
 			)
 		} else {
@@ -618,10 +653,10 @@ func (s *BillingSession) reconcilePendingTokenReservationLocked() error {
 	}
 	var err error
 	if isResellerBilling(s.relayInfo) {
-		err = model.ApplyResellerTokenQuotaAdjustment(
+		err = model.ReserveResellerTokenQuota(
 			s.relayInfo.TokenId,
 			s.relayInfo.TokenKey,
-			-pending.delta,
+			pending.delta,
 			s.tokenOperationID(pending.phase),
 		)
 	} else {

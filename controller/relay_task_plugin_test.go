@@ -38,12 +38,12 @@ type taskSubmissionTestBilling struct {
 	refunds    int
 }
 
-func TestExecuteTaskSubmissionRejectsResellerKeysBeforeUpstream(t *testing.T) {
+func TestExecuteTaskSubmissionRejectsRawTokenKeysBeforeUpstream(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
 	called := false
 
-	outcome, taskErr := executeTaskSubmissionWith(c, &relaycommon.RelayInfo{TokenKey: "rsl_task-not-supported"}, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+	outcome, taskErr := executeTaskSubmissionWith(c, &relaycommon.RelayInfo{TokenKey: "raw-task-key", TokenQuotaMode: model.TokenQuotaModeTokens}, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
 		called = true
 		return &relay.TaskSubmitResult{}, nil
 	})
@@ -51,7 +51,7 @@ func TestExecuteTaskSubmissionRejectsResellerKeysBeforeUpstream(t *testing.T) {
 	assert.Nil(t, outcome)
 	require.NotNil(t, taskErr)
 	assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
-	assert.Equal(t, "reseller_key_task_unsupported", taskErr.Code)
+	assert.Equal(t, "raw_token_quota_task_unsupported", taskErr.Code)
 	assert.False(t, called)
 }
 
@@ -252,11 +252,17 @@ func TestExecuteTaskSubmissionPersistsPinnedPluginProvenance(t *testing.T) {
 	})
 	billing := &taskSubmissionTestBilling{events: &events}
 	info := taskSubmissionRelayInfo(billing)
+	info.TokenKey = "rsl_task-supported"
+	info.TokenQuotaMode = model.TokenQuotaModeTokens
+	info.ResellerTariffBilling = true
+	info.ResellerBaseCostPerMillion = "0.05"
+	info.TokenQuotaPreConsumed = 400_000
 
 	outcome, taskErr := executeTaskSubmissionWith(c, info, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
 		return &relay.TaskSubmitResult{
 			UpstreamTaskID: "upstream-private",
 			Platform:       constant.TaskPlatform("document-parser"),
+			Quota:          10_000,
 		}, nil
 	})
 
@@ -280,6 +286,8 @@ func TestExecuteTaskSubmissionPersistsPinnedPluginProvenance(t *testing.T) {
 	require.NotNil(t, stored.PrivateData.Execution.TaskPlugin.Author)
 	assert.Equal(t, "Community Author", stored.PrivateData.Execution.TaskPlugin.Author.Name)
 	assert.Equal(t, "upstream-private", stored.PrivateData.UpstreamTaskID)
+	assert.Equal(t, "0.05", stored.PrivateData.BillingContext.ResellerBaseCostPerMillion)
+	assert.Equal(t, 400_000, stored.PrivateData.BillingContext.ResellerReservedQuota)
 }
 
 // A submit route declaring retainResult: false persists the task row for

@@ -20,6 +20,7 @@ package service
 
 import (
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -29,6 +30,7 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -194,6 +196,9 @@ func TestResellerChatToResponsesModeMutationStillUsesOpenAIOutputCap(t *testing.
 }
 
 func TestResellerOutboundHardCapRecountsFinalInput(t *testing.T) {
+	previous := constant.CountToken
+	constant.CountToken = true
+	t.Cleanup(func() { constant.CountToken = previous })
 	info := &relaycommon.RelayInfo{
 		TokenKey:                         "rsl_recount",
 		RelayFormat:                      relaytypes.RelayFormatEmbedding,
@@ -212,7 +217,7 @@ func TestResellerOutboundHardCapRecountsFinalInput(t *testing.T) {
 	assert.ErrorIs(t, err, model.ErrResellerTokenQuotaInsufficient)
 }
 
-func TestResellerOutboundHardCapExtendsReservationBeforeRelay(t *testing.T) {
+func TestResellerPanelTariffDoesNotReserveAgainForFinalBody(t *testing.T) {
 	truncate(t)
 	seedUser(t, 301, 100_000)
 	seedToken(t, 302, 301, "rsl_extend-final", 10_000)
@@ -226,6 +231,7 @@ func TestResellerOutboundHardCapExtendsReservationBeforeRelay(t *testing.T) {
 		OriginModelName: "text-embedding-3-small",
 	}
 	info.SetEstimatePromptTokens(1)
+	seedTariffReseller(t, info, "2")
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Set(string(constant.ContextKeyOriginalModel), "text-embedding-3-small")
 	require.Nil(t, PreConsumeBilling(ctx, 1, info))
@@ -233,7 +239,7 @@ func TestResellerOutboundHardCapExtendsReservationBeforeRelay(t *testing.T) {
 
 	err := ValidateResellerOutboundHardCapWithContext(ctx, info, []byte(`{"input":"this final provider input is substantially longer than the original reservation"}`))
 	require.NoError(t, err)
-	assert.Greater(t, info.Billing.GetPreConsumedQuota(), 1)
+	assert.Equal(t, 1, info.Billing.GetPreConsumedQuota())
 
 	var token model.Token
 	require.NoError(t, model.DB.First(&token, 302).Error)
@@ -247,7 +253,7 @@ func TestResellerOutboundHardCapRejectsMissingOrChangedLimit(t *testing.T) {
 		RelayFormat:                      relaytypes.RelayFormatOpenAIResponses,
 		Request:                          &dto.OpenAIResponsesRequest{MaxOutputTokens: &maxOutput},
 		RequestConversionChain:           []relaytypes.RelayFormat{relaytypes.RelayFormatOpenAIResponses},
-		TokenQuotaPreConsumed:            120,
+		TokenQuotaPreConsumed:            450,
 		TokenQuotaReservationInitialized: true,
 	}
 	info.SetEstimatePromptTokens(20)
@@ -264,7 +270,7 @@ func TestResellerCodexResponsesUsesTrustedOutputCeiling(t *testing.T) {
 		RelayFormat:                      relaytypes.RelayFormatOpenAIResponses,
 		Request:                          &dto.OpenAIResponsesRequest{},
 		ChannelMeta:                      &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeCodex, UpstreamModelName: "gpt-5.6-sol"},
-		TokenQuotaPreConsumed:            20 + relayconstant.CodexMaxOutputTokens,
+		TokenQuotaPreConsumed:            290 + relayconstant.CodexMaxOutputTokens,
 		TokenQuotaReservationInitialized: true,
 	}
 	info.SetEstimatePromptTokens(20)
@@ -293,22 +299,207 @@ func TestResellerCodexResponsesMissingLimitAllowsConcurrentReservations(t *testi
 
 	first := newRequest()
 	second := newRequest()
+	seedTariffReseller(t, first, "2")
+	second.PriceData = first.PriceData
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	require.Nil(t, PreConsumeBilling(ctx, 1, first))
 	require.Nil(t, PreConsumeBilling(ctx, 1, second))
-	assert.Equal(t, 10, first.Billing.GetPreConsumedQuota())
-	assert.Equal(t, 10, second.Billing.GetPreConsumedQuota())
+	assert.Equal(t, 1, first.Billing.GetPreConsumedQuota())
+	assert.Equal(t, 1, second.Billing.GetPreConsumedQuota())
 
 	first.ChannelMeta = &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeCodex, UpstreamModelName: "gpt-5.6-sol"}
 	second.ChannelMeta = &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeCodex, UpstreamModelName: "gpt-5.6-sol"}
 	require.NoError(t, ValidateResellerOutboundHardCap(first, []byte(`{}`)))
 	require.NoError(t, ValidateResellerOutboundHardCap(second, []byte(`{}`)))
-	assert.Equal(t, 10+relayconstant.CodexMaxOutputTokens, first.Billing.GetPreConsumedQuota())
-	assert.Equal(t, 10+relayconstant.CodexMaxOutputTokens, second.Billing.GetPreConsumedQuota())
+	expectedReservation := 1
+	assert.Equal(t, expectedReservation, first.Billing.GetPreConsumedQuota())
+	assert.Equal(t, expectedReservation, second.Billing.GetPreConsumedQuota())
 
 	var token model.Token
 	require.NoError(t, model.DB.First(&token, 304).Error)
-	assert.Equal(t, 300_000-2*(10+relayconstant.CodexMaxOutputTokens), token.RemainQuota)
+	assert.Equal(t, 300_000-2*expectedReservation, token.RemainQuota)
+}
+
+func TestResellerResponsesReservationsCoverAgentHistory(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-sol","input":[{"type":"function_call_output","call_id":"call_1","output":"` + strings.Repeat("tool output ", 20_000) + `"},{"role":"assistant","content":[{"type":"output_text","text":"История"}]}],"tools":[{"type":"function","name":"read","parameters":{"properties":{"file_id":{"type":"string"}}}}]}`)
+	info := &relaycommon.RelayInfo{TokenKey: "rsl_bound", RelayFormat: relaytypes.RelayFormatOpenAIResponses,
+		Request: &dto.OpenAIResponsesRequest{}, TokenQuotaPreConsumed: 150_000}
+	info.SetEstimatePromptTokens(11_000)
+	err := ValidateResellerOutboundHardCap(info, body)
+	require.ErrorIs(t, err, model.ErrResellerTokenQuotaInsufficient)
+	info.TokenQuotaPreConsumed = 1_000_000
+	require.NoError(t, ValidateResellerOutboundHardCap(info, body))
+	quota, err := resellerResponsesInputTokenQuota(body, 11_000, "gpt-5.6-sol")
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, quota, len(body))
+}
+
+func TestResellerResponsesHiddenHistoryRequiresFullContextReservation(t *testing.T) {
+	for _, field := range []string{
+		`"previous_response_id":"resp_saved"`,
+		`"conversation":"conv_saved"`,
+		`"input":[{"type":"reasoning","id":"reasoning_saved"}]`,
+		`"input":[{"type":"compaction"}]`,
+		`"input":[{"type":"item_reference","id":"item_saved"}]`,
+		`"prompt":{"id":"stored_prompt"}`,
+	} {
+		t.Run(field, func(t *testing.T) {
+			body := []byte(`{"model":"gpt-5.6-sol",` + field + `}`)
+			info := &relaycommon.RelayInfo{TokenKey: "rsl_hidden", RelayFormat: relaytypes.RelayFormatOpenAIResponses,
+				Request: &dto.OpenAIResponsesRequest{}, TokenQuotaPreConsumed: 1_000_000}
+			require.ErrorIs(t, ValidateResellerOutboundHardCap(info, body), model.ErrResellerTokenQuotaInsufficient)
+			info.TokenQuotaPreConsumed = 1_050_000
+			require.NoError(t, ValidateResellerOutboundHardCap(info, body))
+			unknown := []byte(`{"model":"unknown",` + field + `}`)
+			_, err := resellerResponsesInputTokenQuota(unknown, 10, "gpt-5.6-sol")
+			require.ErrorIs(t, err, errResellerRequestHardCapUnsupported)
+		})
+	}
+	for _, body := range []string{
+		`{"input":[{"type":"input_file"}]}`,
+		`{"input":[{"id":"hidden_message"}]}`,
+	} {
+		quota, err := resellerResponsesInputTokenQuota([]byte(body), 10, "gpt-5.6-sol")
+		require.NoError(t, err)
+		assert.Equal(t, 1_050_000, quota)
+		_, err = resellerResponsesInputTokenQuota([]byte(body), 10, "unknown")
+		require.ErrorIs(t, err, errResellerRequestHardCapUnsupported)
+	}
+	_, err := resellerResponsesInputTokenQuota([]byte(`{"tools":[{"type":"web_search"}]}`), 10, "gpt-5.6-sol")
+	require.ErrorIs(t, err, errResellerRequestHardCapUnsupported)
+}
+
+func TestResellerTariffResponsesHistoryUsesApproximateReservation(t *testing.T) {
+	body := []byte(`{"model":"gpt-6-astra","previous_response_id":"resp_saved"}`)
+	info := &relaycommon.RelayInfo{
+		TokenKey:                   "rsl_tariff-hidden",
+		RelayFormat:                relaytypes.RelayFormatOpenAIResponses,
+		Request:                    &dto.OpenAIResponsesRequest{},
+		TokenQuotaPreConsumed:      2_000_000,
+		ResellerTariffBilling:      true,
+		ResellerBaseCostPerMillion: "0.05",
+		PriceData: types.PriceData{
+			ModelRatio: .1, CompletionRatio: 5,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+	}
+	info.SetEstimatePromptTokens(64_000)
+
+	inputQuota, err := resellerResponsesTariffInputTokenQuota(body, 64_000, "gpt-6-astra")
+	require.NoError(t, err)
+	assert.Less(t, inputQuota, 1_050_000)
+	require.NoError(t, ValidateResellerOutboundHardCap(info, body))
+}
+
+func TestResellerResponsesExplicitCodexHistoryFitsOneMillionTokenKey(t *testing.T) {
+	input := `[
+		{"type":"reasoning","id":"reasoning_1","encrypted_content":"opaque-state","summary":[]},
+		{"type":"configuration_update","reasoning":{"effort":"high"}},
+		{"type":"local_shell_call","call_id":"local_1","action":{"type":"exec","command":["rg","needle"]}},
+		{"type":"local_shell_call_output","id":"local_1","output":"{\"stdout\":\"match\"}"},
+		{"type":"shell_call","call_id":"shell_1","action":{"commands":["go test ./service"]}},
+		{"type":"shell_call_output","call_id":"shell_1","output":[{"stdout":"ok","stderr":"","outcome":{"type":"exit","exit_code":0}}]},
+		{"type":"apply_patch_call","call_id":"patch_1","operation":{"type":"update_file","path":"service/reseller_quota.go","diff":"@@"}},
+		{"type":"apply_patch_call_output","call_id":"patch_1","status":"completed","output":"Done"},
+		{"type":"computer_call","call_id":"computer_1","action":{"type":"screenshot"}},
+		{"type":"mcp_approval_response","approval_request_id":"approval_1","approve":true},
+		{"type":"program_output","id":"program_1","call_id":"call_1","result":"done","status":"completed"}
+	]`
+	body := []byte(`{"model":"gpt-6-astra","input":` + input + `}`)
+	info := &relaycommon.RelayInfo{TokenKey: "rsl_explicit_history", RelayFormat: relaytypes.RelayFormatOpenAIResponses,
+		Request: &dto.OpenAIResponsesRequest{}, TokenQuotaPreConsumed: 1_000_000}
+	require.NoError(t, ValidateResellerOutboundHardCap(info, body))
+	quota, err := resellerResponsesInputTokenQuota(body, 10, "gpt-6-astra")
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, quota, len(body))
+	assert.Less(t, quota, 1_000_000-relayconstant.CodexMaxOutputTokens)
+}
+
+func TestResellerResponsesMediaRequiresContextReservation(t *testing.T) {
+	for _, input := range []string{
+		`[{"role":"user","content":[{"type":"input_text","text":"Describe this screenshot"},{"type":"input_image","image_url":"data:image/png;base64,cG5n","detail":"auto"}]}]`,
+		`[{"role":"user","content":[{"type":"input_image","image_url":"https://example.com/image.png"}]}]`,
+		`[{"role":"user","content":[{"type":"input_image","file_id":"file_image"}]}]`,
+		`[{"role":"user","content":[{"type":"input_file","file_id":"file_document"}]}]`,
+		`[{"role":"user","content":[{"type":"input_file","file_url":"https://example.com/document.pdf"}]}]`,
+		`[{"role":"user","content":[{"type":"input_file","file_data":"data:application/pdf;base64,cGRm","filename":"report.pdf"}]}]`,
+		`[{"type":"function_call_output","call_id":"call_1","output":[{"type":"input_image","image_url":"data:image/png;base64,cG5n"}]}]`,
+		`[{"type":"custom_tool_call_output","call_id":"call_1","output":[{"type":"input_file","file_id":"file_result"}]}]`,
+		`[{"type":"computer_call_output","call_id":"call_1","output":{"type":"computer_screenshot","image_url":"data:image/png;base64,cG5n"}}]`,
+	} {
+		t.Run(input, func(t *testing.T) {
+			body := []byte(`{"model":"gpt-6-astra","input":` + input + `}`)
+			info := &relaycommon.RelayInfo{TokenKey: "rsl_media", RelayFormat: relaytypes.RelayFormatOpenAIResponses,
+				Request: &dto.OpenAIResponsesRequest{}, TokenQuotaPreConsumed: 1_000_000}
+			require.ErrorIs(t, ValidateResellerOutboundHardCap(info, body), model.ErrResellerTokenQuotaInsufficient)
+			info.TokenQuotaPreConsumed = 1_050_000
+			require.NoError(t, ValidateResellerOutboundHardCap(info, body))
+			quota, err := resellerResponsesInputTokenQuota(body, 10, "gpt-6-astra")
+			require.NoError(t, err)
+			assert.Equal(t, 1_050_000, quota)
+			unknownModel := []byte(`{"model":"unknown","input":` + input + `}`)
+			_, err = resellerResponsesInputTokenQuota(unknownModel, 10, "gpt-6-astra")
+			require.ErrorIs(t, err, errResellerRequestHardCapUnsupported)
+		})
+	}
+	for _, input := range []string{
+		`[{"role":"user","content":[{"type":"input_image"}]}]`,
+		`[{"role":"user","content":[{"type":"input_file","file_id":123}]}]`,
+		`[{"type":"computer_call_output","output":{"type":"computer_screenshot"}}]`,
+		`[{"role":"user","content":[{"type":"unknown_media","url":"https://example.com"}]}]`,
+	} {
+		body := []byte(`{"model":"gpt-6-astra","input":` + input + `}`)
+		quota, err := resellerResponsesInputTokenQuota(body, 10, "gpt-6-astra")
+		require.NoError(t, err)
+		assert.Equal(t, 1_050_000, quota)
+		info := &relaycommon.RelayInfo{TokenKey: "rsl_opaque_history", RelayFormat: relaytypes.RelayFormatOpenAIResponses,
+			Request: &dto.OpenAIResponsesRequest{}, TokenQuotaPreConsumed: 50_000_000}
+		require.NoError(t, ValidateResellerOutboundHardCap(info, body))
+		_, err = resellerResponsesInputTokenQuota([]byte(`{"model":"unknown","input":`+input+`}`), 10, "gpt-6-astra")
+		require.ErrorIs(t, err, errResellerRequestHardCapUnsupported)
+	}
+}
+
+func TestResellerResponsesClientToolSearchReservation(t *testing.T) {
+	for _, field := range []string{
+		`"tools":[{"type":"tool_search","execution":"client"},{"type":"namespace","name":"fs","tools":[{"type":"function","name":"read","parameters":{"type":"object","properties":{"type":{"type":"string"},"input_image":{"type":"string"}}}}]}]`,
+		`"input":[{"type":"tool_search_call","execution":"client","call_id":"search_1","arguments":{"paths":["fs"]}},{"type":"tool_search_output","execution":"client","call_id":"search_1","tools":[{"type":"namespace","name":"fs","tools":[{"type":"custom","name":"read"}]}]}]`,
+		`"input":[{"type":"additional_tools","role":"developer","tools":[{"type":"function","name":"read","parameters":{"type":"object"}}]}]`,
+	} {
+		body := []byte(`{"model":"gpt-6-astra",` + field + `}`)
+		quota, err := resellerResponsesInputTokenQuota(body, 10, "gpt-6-astra")
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, quota, len(body))
+		assert.Less(t, quota, 1_050_000)
+	}
+	for _, tool := range []string{
+		`{"type":"web_search"}`,
+		`{"type":"tool_search"}`,
+		`{"type":"tool_search","execution":"server"}`,
+		`{"type":"namespace","name":"hidden","tools":[{"type":"web_search"}]}`,
+	} {
+		for _, field := range []string{
+			`"tools":[` + tool + `]`,
+			`"input":[{"type":"tool_search_output","execution":"client","tools":[` + tool + `]}]`,
+			`"input":[{"type":"additional_tools","role":"developer","tools":[` + tool + `]}]`,
+		} {
+			body := []byte(`{"model":"gpt-6-astra",` + field + `}`)
+			_, err := resellerResponsesInputTokenQuota(body, 10, "gpt-6-astra")
+			require.ErrorIs(t, err, errResellerRequestHardCapUnsupported)
+		}
+	}
+}
+
+func TestAuthoritativeResellerUsageRejectsInvalidCounters(t *testing.T) {
+	for _, usage := range []*dto.Usage{
+		{PromptTokens: -1, CompletionTokens: 10},
+		{PromptTokens: 100, CompletionTokens: -1},
+		{PromptTokens: 100, CompletionTokens: 10, PromptTokensDetails: dto.InputTokenDetails{CachedTokens: 101}},
+		{PromptTokens: 100, CompletionTokens: 10, InputTokensDetails: &dto.InputTokenDetails{CachedTokens: -1}},
+	} {
+		_, _, authoritative := authoritativeTextTokenQuota(usage, false, 1)
+		assert.False(t, authoritative)
+	}
 }
 
 func TestResellerCodexResponsesChecksFinalUpstreamModel(t *testing.T) {
@@ -395,7 +586,7 @@ func TestResellerOpenAIResponsesKeepsExplicitOutputLimit(t *testing.T) {
 	assert.Equal(t, 512, quota)
 }
 
-func TestEstimateRequestTokenCountsResellerWhenGlobalCountingDisabled(t *testing.T) {
+func TestEstimateRequestTokenRespectsPanelCountingSettingForReseller(t *testing.T) {
 	previous := constant.CountToken
 	constant.CountToken = false
 	defer func() { constant.CountToken = previous }()
@@ -407,7 +598,7 @@ func TestEstimateRequestTokenCountsResellerWhenGlobalCountingDisabled(t *testing
 
 	resellerTokens, err := EstimateRequestToken(ctx, meta, reseller)
 	require.NoError(t, err)
-	assert.Greater(t, resellerTokens, 0)
+	assert.Zero(t, resellerTokens)
 	ordinaryTokens, err := EstimateRequestToken(ctx, meta, ordinary)
 	require.NoError(t, err)
 	assert.Zero(t, ordinaryTokens)

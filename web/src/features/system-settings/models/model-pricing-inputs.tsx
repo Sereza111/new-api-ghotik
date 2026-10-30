@@ -40,6 +40,7 @@ export function PriceInput(props: {
   value: string
   placeholder?: string
   disabled?: boolean
+  ariaLabel?: string
   onChange: (value: string) => void
 }) {
   return (

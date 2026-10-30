@@ -19,9 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 package service
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -30,6 +33,7 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 )
@@ -37,7 +41,14 @@ import (
 var (
 	errResellerOutputTokenLimitRequired  = errors.New("finite reseller token keys require an explicit non-zero output token limit")
 	errResellerRequestHardCapUnsupported = errors.New("finite reseller token key cannot enforce a hard cap for this request")
+	errResellerFixedPriceRequired        = errors.New("reseller image generation requires a positive fixed model price")
 )
+
+// Responses/Codex requests without an explicit output limit are common. The
+// upstream ceiling remains the trusted absolute bound for legacy raw-token
+// keys, while reseller tariff reservations use a practical estimate so a small
+// prepaid package is not blocked by a theoretical 128k-token response.
+const resellerTariffDefaultOutputReservation = 8_192
 
 func isResellerBilling(relayInfo *relaycommon.RelayInfo) bool {
 	return relayInfo != nil &&
@@ -65,6 +76,230 @@ func resellerTokenQuota(parts ...int) (int, *common.QuotaClamp) {
 		}
 	}
 	return common.QuotaFromDecimalChecked(total)
+}
+
+func isResellerImageRequest(relayInfo *relaycommon.RelayInfo) bool {
+	return isResellerBilling(relayInfo) && relayInfo.RelayFormat == relaytypes.RelayFormatOpenAIImage
+}
+
+// resellerFixedPriceTokenQuota converts the ordinary monetary quota charged
+// for a fixed-price request into the raw token units sold to the reseller. A
+// key bought at $0.05/1M therefore spends 200k tokens for a $0.01 image and
+// 400k tokens for a $0.02 image.
+func resellerFixedPriceTokenQuota(monetaryQuota int, baseCostPerMillion string) (int, *common.QuotaClamp, error) {
+	if monetaryQuota <= 0 {
+		return 0, nil, errResellerFixedPriceRequired
+	}
+	return resellerTariffTokenQuota(monetaryQuota, baseCostPerMillion)
+}
+
+// resellerTariffTokenQuota uses the same final monetary quota as the panel.
+// Zero is a valid configured free tariff; negative or invalid costs never credit
+// a package. Round up only the currency-to-package conversion, preserving the
+// panel's own monetary rounding and preventing fractional undercharging.
+func resellerTariffTokenQuota(monetaryQuota int, baseCostPerMillion string) (int, *common.QuotaClamp, error) {
+	if monetaryQuota < 0 {
+		return 0, nil, errors.New("negative reseller monetary quota")
+	}
+	baseCost, err := decimal.NewFromString(strings.TrimSpace(baseCostPerMillion))
+	if err != nil || !baseCost.IsPositive() {
+		return 0, nil, errors.New("invalid reseller base cost")
+	}
+	if common.QuotaPerUnit <= 0 || math.IsNaN(common.QuotaPerUnit) || math.IsInf(common.QuotaPerUnit, 0) {
+		return 0, nil, errors.New("invalid quota conversion rate")
+	}
+	quotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+	if !quotaPerUnit.IsPositive() {
+		return 0, nil, fmt.Errorf("%w: invalid quota conversion rate", errResellerFixedPriceRequired)
+	}
+
+	tokenQuotaDecimal := decimal.NewFromInt(int64(monetaryQuota)).
+		Mul(decimal.NewFromInt(1_000_000)).
+		Div(quotaPerUnit).
+		Div(baseCost)
+	tokenQuota, clamp := common.QuotaFromDecimalChecked(tokenQuotaDecimal.Ceil())
+	return tokenQuota, clamp, nil
+}
+
+// resellerTariffSession exposes the same monetary billing interface as an
+// ordinary panel key. Only the funding boundary converts USD quota into the
+// immutable units purchased with this reseller package.
+type resellerTariffSession struct {
+	session             *BillingSession
+	monetaryReservation int
+	mu                  sync.Mutex
+}
+
+func (s *resellerTariffSession) packageQuota(monetaryQuota int) (int, error) {
+	quota, clamp, err := resellerTariffTokenQuota(monetaryQuota, s.session.relayInfo.ResellerBaseCostPerMillion)
+	noteQuotaClamp(s.session.relayInfo, clamp)
+	if err != nil {
+		return 0, err
+	}
+	if clamp != nil {
+		return 0, clamp
+	}
+	return quota, nil
+}
+
+func (s *resellerTariffSession) Settle(monetaryQuota int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	quota, clamp, err := resellerTariffTokenQuota(monetaryQuota, s.session.relayInfo.ResellerBaseCostPerMillion)
+	noteQuotaClamp(s.session.relayInfo, clamp)
+	if err != nil {
+		return err
+	}
+	// A delivered response settles its saturated charge against the remaining
+	// allocation. Pre-consume/Reserve reject saturation before sending upstream.
+	s.session.relayInfo.TokenQuotaActual = &quota
+	err = s.session.Settle(quota)
+	s.session.relayInfo.FinalPreConsumedQuota = s.monetaryReservation
+	return err
+}
+
+func (s *resellerTariffSession) Reserve(monetaryQuota int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	quota, err := s.packageQuota(monetaryQuota)
+	if err != nil {
+		return err
+	}
+	err = s.session.Reserve(quota)
+	if err == nil && monetaryQuota > s.monetaryReservation {
+		s.monetaryReservation = monetaryQuota
+	}
+	s.session.relayInfo.FinalPreConsumedQuota = s.monetaryReservation
+	return err
+}
+
+func (s *resellerTariffSession) GetPreConsumedQuota() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.monetaryReservation
+}
+
+func (s *resellerTariffSession) Refund(ctx *gin.Context) { s.session.Refund(ctx) }
+func (s *resellerTariffSession) NeedsRefund() bool       { return s.session.NeedsRefund() }
+
+// resellerMaximumTariffQuota reserves package units at the most expensive
+// permitted input category and the output rate. Cache reads/writes can overlap
+// in provider usage; their combined cost must fit too. Request overrides are
+// checked again immediately before relay using the final PriceData.
+func resellerMaximumTariffQuota(info *relaycommon.RelayInfo, input, output, contextLimit int) (int, *common.QuotaClamp, error) {
+	if input < 0 || output < 0 {
+		return 0, nil, errResellerRequestHardCapUnsupported
+	}
+	if info.TieredBillingSnapshot != nil {
+		return 0, nil, fmt.Errorf("%w: expression pricing has no verified maximum charge", errResellerRequestHardCapUnsupported)
+	}
+	p := info.PriceData
+	ratios := []float64{p.GroupRatioInfo.GroupRatio}
+	if p.UsePrice {
+		ratios = append(ratios, p.ModelPrice)
+	} else {
+		// ModelPrice=-1 is the normal sentinel for per-token tariffs.
+		ratios = append(ratios, p.ModelRatio, p.CompletionRatio, p.CacheRatio,
+			p.CacheCreationRatio, p.CacheCreation5mRatio, p.CacheCreation1hRatio,
+			p.ImageRatio, p.AudioRatio, p.AudioCompletionRatio)
+	}
+	for _, ratio := range ratios {
+		if ratio < 0 || math.IsNaN(ratio) || math.IsInf(ratio, 0) {
+			return 0, nil, errors.New("invalid reseller tariff ratio")
+		}
+	}
+	var monetary decimal.Decimal
+	if p.UsePrice {
+		monetary = decimal.NewFromFloat(p.ModelPrice).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
+	} else {
+		// The panel prices actual input categories independently: uncached input,
+		// cache reads, cache writes and images are not all charged for the same
+		// token. Before upstream usage is known, reserve the ordinary input rate;
+		// calculateTextQuotaSummary applies the exact category split at settlement.
+		inputRate := decimal.NewFromFloat(p.ModelRatio)
+		if info.AudioUsage {
+			// Gemini audio has a separate per-million price. Include it only for an
+			// explicitly audio request, otherwise every text call is inflated.
+			audioPrice := operation_setting.GetGeminiInputAudioPricePerMillionTokens(info.OriginModelName)
+			if audioPrice < 0 || math.IsNaN(audioPrice) || math.IsInf(audioPrice, 0) {
+				return 0, nil, errors.New("invalid reseller audio tariff")
+			}
+			audioRate := decimal.NewFromFloat(audioPrice).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).Div(decimal.NewFromInt(1_000_000))
+			if audioRate.GreaterThan(inputRate) {
+				inputRate = audioRate
+			}
+		}
+		outputRate := decimal.NewFromFloat(p.ModelRatio).Mul(decimal.NewFromFloat(p.CompletionRatio))
+		monetary = inputRate.Mul(decimal.NewFromInt(int64(input))).Add(outputRate.Mul(decimal.NewFromInt(int64(output))))
+		if contextLimit > 0 {
+			// Either category can occupy the combined context window. Use its
+			// higher rate instead of subtracting output from hidden input history.
+			contextRate := decimal.Max(inputRate, outputRate)
+			monetary = decimal.Min(monetary, contextRate.Mul(decimal.NewFromInt(int64(contextLimit))))
+		}
+	}
+	monetary = p.ApplyOtherRatiosToDecimal(monetary.Mul(decimal.NewFromFloat(p.GroupRatioInfo.GroupRatio)))
+	quota, clamp := common.QuotaFromDecimalChecked(monetary.Ceil())
+	if clamp != nil {
+		return quota, clamp, nil
+	}
+	return resellerTariffTokenQuota(quota, info.ResellerBaseCostPerMillion)
+}
+
+// Paid built-in tools need a provider-enforced call limit in addition to the
+// token limit. Client-side function tools do not incur these surcharges.
+func resellerToolTariffQuota(info *relaycommon.RelayInfo, format relaytypes.RelayFormat, body []byte) (int, *common.QuotaClamp, error) {
+	var request struct {
+		MaxToolCalls *uint `json:"max_tool_calls"`
+		Tools        []struct {
+			Type         string                 `json:"type"`
+			MaxUses      *uint                  `json:"max_uses"`
+			GoogleSearch map[string]interface{} `json:"googleSearch"`
+		} `json:"tools"`
+	}
+	if err := common.Unmarshal(body, &request); err != nil {
+		return 0, nil, err
+	}
+	toolCost := decimal.Zero
+	for _, tool := range request.Tools {
+		name := tool.Type
+		if strings.HasPrefix(name, "web_search_") && name != dto.BuildInToolWebSearchPreview {
+			name = dto.BuildInToolWebSearch
+		}
+		if tool.GoogleSearch != nil {
+			name = dto.BuildInToolGoogleSearch
+		}
+		price := operation_setting.GetToolPriceForModel(name, info.OriginModelName)
+		if price <= 0 {
+			continue
+		}
+		if math.IsNaN(price) || math.IsInf(price, 0) {
+			return 0, nil, errors.New("invalid reseller tool tariff")
+		}
+		limit := tool.MaxUses
+		if format == relaytypes.RelayFormatOpenAIResponses {
+			limit = request.MaxToolCalls
+		}
+		if name == dto.BuildInToolGoogleSearch {
+			limit = common.GetPointer(uint(1)) // New API bills this once per request.
+		}
+		if limit == nil || *limit > uint(common.MaxQuota) {
+			return 0, nil, fmt.Errorf("%w: paid tool %s requires a bounded call limit", errResellerRequestHardCapUnsupported, name)
+		}
+		toolCost = toolCost.Add(decimal.NewFromFloat(price).Mul(decimal.NewFromInt(int64(*limit))).Div(decimal.NewFromInt(1000)))
+	}
+	if strings.HasSuffix(info.OriginModelName, "search-preview") && format != relaytypes.RelayFormatOpenAIResponses {
+		price := operation_setting.GetToolPriceForModel(dto.BuildInToolWebSearchPreview, info.OriginModelName)
+		if price > 0 && !math.IsNaN(price) && !math.IsInf(price, 0) {
+			toolCost = toolCost.Add(decimal.NewFromFloat(price).Div(decimal.NewFromInt(1000)))
+		}
+	}
+	monetary := toolCost.Mul(decimal.NewFromFloat(common.QuotaPerUnit)).Mul(decimal.NewFromFloat(info.PriceData.GroupRatioInfo.GroupRatio))
+	quota, clamp := common.QuotaFromDecimalChecked(monetary.Ceil())
+	if clamp != nil {
+		return quota, clamp, nil
+	}
+	return resellerTariffTokenQuota(quota, info.ResellerBaseCostPerMillion)
 }
 
 func resellerOutputTokenQuota(limit uint, candidates *int) (int, error) {
@@ -195,6 +430,9 @@ func resellerRequestMaximumTokenQuota(relayInfo *relaycommon.RelayInfo) (int, *c
 	}
 	if !requiresOutput && promptQuota == 0 {
 		return 0, nil, fmt.Errorf("%w: input token count is empty or cannot be measured", errResellerRequestHardCapUnsupported)
+	}
+	if relayInfo.ResellerTariffBilling {
+		return resellerMaximumTariffQuota(relayInfo, promptQuota, outputQuota, 0)
 	}
 	quota, clamp := resellerTokenQuota(promptQuota, outputQuota)
 	return quota, clamp, nil
@@ -398,6 +636,15 @@ func resellerGenericInputMeta(jsonData []byte) (*relaytypes.TokenCountMeta, erro
 }
 
 func resellerOutboundPromptTokenQuota(c *gin.Context, relayInfo *relaycommon.RelayInfo, format relaytypes.RelayFormat, jsonData []byte, requiresOutput bool) (int, error) {
+	if format == relaytypes.RelayFormatOpenAIResponses && isResellerBilling(relayInfo) && !relayInfo.TokenUnlimited {
+		// A heuristic text estimate is not a hard reservation, even when every
+		// tool result was extracted. Validate hidden-context features and use
+		// the final UTF-8 payload as a conservative input bound instead.
+		if relayInfo.ResellerTariffBilling {
+			return resellerResponsesTariffInputTokenQuota(jsonData, relayInfo.GetEstimatePromptTokens(), relayInfo.GetUpstreamModelName())
+		}
+		return resellerResponsesInputTokenQuota(jsonData, relayInfo.GetEstimatePromptTokens(), relayInfo.GetUpstreamModelName())
+	}
 	request, err := resellerOutboundRequest(format, jsonData, requiresOutput)
 	var meta *relaytypes.TokenCountMeta
 	if err == nil {
@@ -439,6 +686,241 @@ func resellerOutboundPromptTokenQuota(c *gin.Context, relayInfo *relaycommon.Rel
 	return tokens, nil
 }
 
+// resellerResponsesInputIsBounded only walks actual input items/content. Tool
+// arguments and results remain literal text; property names in a function's
+// JSON schema must not be mistaken for provider-side history references.
+func resellerResponsesInputIsBounded(value any, allowHidden bool) bool {
+	switch input := value.(type) {
+	case nil, string:
+		return true
+	case []any:
+		for _, item := range input {
+			if !resellerResponsesInputIsBounded(item, allowHidden) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		if encrypted, exists := input["encrypted_content"]; exists && encrypted != nil {
+			if _, ok := encrypted.(string); !ok {
+				return false
+			}
+		}
+		inputType, _ := input["type"].(string)
+		switch inputType {
+		case "", "message":
+			content, exists := input["content"]
+			return exists && content != nil && resellerResponsesInputIsBounded(content, allowHidden)
+		case "input_text", "output_text", "summary_text", "reasoning_text", "text":
+			_, ok := input["text"].(string)
+			return ok
+		case "refusal":
+			_, ok := input["refusal"].(string)
+			return ok
+		case "function_call", "custom_tool_call":
+			field := "arguments"
+			if inputType == "custom_tool_call" {
+				field = "input"
+			}
+			_, nameOK := input["name"].(string)
+			_, textOK := input[field].(string)
+			return nameOK && textOK
+		case "function_call_output", "custom_tool_call_output", "computer_call_output":
+			output, exists := input["output"]
+			return exists && output != nil && resellerResponsesInputIsBounded(output, allowHidden)
+		case "local_shell_call", "local_shell_call_output", "shell_call", "shell_call_output",
+			"apply_patch_call", "apply_patch_call_output", "computer_call", "program_output",
+			"configuration_update", "compaction_trigger", "mcp_approval_response":
+			// These client/tool-history items contain their complete payload in the
+			// request. The serialized-body reservation below bounds their tokens.
+			return true
+		case "input_image", "input_audio", "input_video", "computer_screenshot":
+			// Images can expand to more tokens than their URL or encoded bytes.
+			// Use the model context reservation, as for opaque saved history.
+			imageURL, _ := input["image_url"].(string)
+			if inputType == "input_audio" {
+				imageURL, _ = input["data"].(string)
+			}
+			if inputType == "input_video" {
+				imageURL, _ = input["video_url"].(string)
+			}
+			fileID, _ := input["file_id"].(string)
+			return allowHidden && (imageURL != "" || fileID != "")
+		case "input_file":
+			fileID, _ := input["file_id"].(string)
+			fileURL, _ := input["file_url"].(string)
+			fileData, _ := input["file_data"].(string)
+			return allowHidden && (fileID != "" || fileURL != "" || fileData != "")
+		case "tool_search_call":
+			_, hasArguments := input["arguments"]
+			return input["execution"] == "client" && hasArguments
+		case "tool_search_output", "additional_tools":
+			// These history items can introduce executable definitions just like
+			// the top-level tools array. Inspect definitions, not schema fields.
+			tools, exists := input["tools"]
+			return exists && tools != nil && resellerResponsesToolsAreClientExecuted(tools)
+		case "reasoning":
+			encrypted, _ := input["encrypted_content"].(string)
+			if input["id"] != nil && input["id"] != "" && encrypted == "" && !allowHidden {
+				return false
+			}
+			return resellerResponsesInputIsBounded(input["summary"], allowHidden) && resellerResponsesInputIsBounded(input["content"], allowHidden)
+		case "compaction":
+			encrypted, _ := input["encrypted_content"].(string)
+			return encrypted != "" || allowHidden
+		case "item_reference", "file_search_call", "web_search_call", "image_generation_call",
+			"code_interpreter_call", "mcp_list_tools", "mcp_approval_request", "mcp_call":
+			return allowHidden
+		}
+	}
+	return false
+}
+
+func resellerResponsesToolsAreClientExecuted(value any) bool {
+	if value == nil {
+		return true
+	}
+	declarations, ok := value.([]any)
+	if !ok {
+		return false
+	}
+	for _, declaration := range declarations {
+		tool, ok := declaration.(map[string]any)
+		if !ok {
+			return false
+		}
+		switch tool["type"] {
+		case "function", "custom":
+		case "namespace":
+			nested, exists := tool["tools"]
+			if !exists || nested == nil || !resellerResponsesToolsAreClientExecuted(nested) {
+				return false
+			}
+		case "tool_search":
+			if tool["execution"] != "client" {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func resellerResponsesInputContainsHostedTools(value any) bool {
+	switch input := value.(type) {
+	case []any:
+		for _, item := range input {
+			if resellerResponsesInputContainsHostedTools(item) {
+				return true
+			}
+		}
+	case map[string]any:
+		inputType, _ := input["type"].(string)
+		if inputType == "tool_search_output" || inputType == "additional_tools" {
+			if tools, exists := input["tools"]; exists && !resellerResponsesToolsAreClientExecuted(tools) {
+				return true
+			}
+		}
+		for _, item := range input {
+			if resellerResponsesInputContainsHostedTools(item) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func resellerResponsesInputTokenQuota(jsonData []byte, estimatedTokens int, upstreamModel string) (int, error) {
+	return resellerResponsesInputTokenQuotaMode(jsonData, estimatedTokens, upstreamModel, false)
+}
+
+// resellerResponsesTariffInputTokenQuota keeps unsupported model shapes behind
+// the verified context-limit check, while avoiding a full context-window
+// reservation for normal reseller tariff requests. Final usage settlement is
+// still authoritative and caps the package at its remaining balance.
+func resellerResponsesTariffInputTokenQuota(jsonData []byte, estimatedTokens int, upstreamModel string) (int, error) {
+	return resellerResponsesInputTokenQuotaMode(jsonData, estimatedTokens, upstreamModel, true)
+}
+
+func resellerResponsesInputTokenQuotaMode(jsonData []byte, estimatedTokens int, upstreamModel string, approximateHiddenInput bool) (int, error) {
+	var request map[string]any
+	if err := common.Unmarshal(jsonData, &request); err != nil {
+		return 0, err
+	}
+	if request == nil {
+		return 0, fmt.Errorf("%w: Responses request must be an object", errResellerRequestHardCapUnsupported)
+	}
+	if name, ok := request["model"].(string); ok && strings.TrimSpace(name) != "" {
+		upstreamModel = strings.TrimSpace(name)
+	}
+	contextLimit, hasContextLimit := relayconstant.CodexModelContextTokenLimit(upstreamModel)
+	hasHiddenInput := false
+	for _, field := range []string{"previous_response_id", "conversation"} {
+		if value, exists := request[field]; exists && value != nil && value != "" {
+			hasHiddenInput = true
+		}
+	}
+	if prompt, ok := request["prompt"].(map[string]any); ok && prompt["id"] != nil && prompt["id"] != "" {
+		hasHiddenInput = true
+	}
+	if !resellerResponsesInputIsBounded(request["input"], false) {
+		if !resellerResponsesInputIsBounded(request["input"], true) {
+			if resellerResponsesInputContainsHostedTools(request["input"]) {
+				return 0, fmt.Errorf("%w: hosted tools can add unbounded input; only client-executed tools and tool search are supported", errResellerRequestHardCapUnsupported)
+			}
+			if !hasContextLimit {
+				return 0, fmt.Errorf("%w: malformed or unsupported Responses input item requires a verified model context limit", errResellerRequestHardCapUnsupported)
+			}
+		}
+		// A known model's combined context ceiling safely bounds opaque provider
+		// history, including newly introduced client-side item types. The exact
+		// upstream usage still replaces this reservation after the response.
+		hasHiddenInput = true
+	}
+	if !resellerResponsesToolsAreClientExecuted(request["tools"]) {
+		return 0, fmt.Errorf("%w: hosted tools can add unbounded input; only client-executed tools and tool search are supported", errResellerRequestHardCapUnsupported)
+	}
+	if hasHiddenInput {
+		if !hasContextLimit {
+			return 0, fmt.Errorf("%w: hidden Responses history, images and files require a verified model context limit", errResellerRequestHardCapUnsupported)
+		}
+		if approximateHiddenInput {
+			structures := bytes.Count(jsonData, []byte{'{'}) + bytes.Count(jsonData, []byte{'['})
+			if len(jsonData) > common.MaxQuota || structures > (common.MaxQuota-256)/32 {
+				return 0, fmt.Errorf("%w: Responses input exceeds the reservation limit", errResellerRequestHardCapUnsupported)
+			}
+			bodyQuota, clamp := resellerTokenQuota(len(jsonData), 256+32*structures)
+			if clamp != nil {
+				return 0, clamp
+			}
+			approximate := max(estimatedTokens, common.PreConsumedQuota, bodyQuota)
+			if approximate > contextLimit {
+				approximate = contextLimit
+			}
+			return approximate, nil
+		}
+		return contextLimit, nil
+	}
+
+	// Byte-level tokenizers cannot produce more text tokens than UTF-8 input
+	// bytes. Reserve the entire serialized body, not only selected DTO fields,
+	// plus framing for each structural item and the request envelope. Counting
+	// delimiters inside literal tool output only makes this more conservative.
+	structures := bytes.Count(jsonData, []byte{'{'}) + bytes.Count(jsonData, []byte{'['})
+	if len(jsonData) > common.MaxQuota || structures > (common.MaxQuota-256)/32 {
+		return 0, fmt.Errorf("%w: Responses input exceeds the reservation limit", errResellerRequestHardCapUnsupported)
+	}
+	quota, clamp := resellerTokenQuota(len(jsonData), 256+32*structures)
+	if clamp != nil {
+		return 0, clamp
+	}
+	if estimatedTokens > quota {
+		quota = estimatedTokens
+	}
+	return quota, nil
+}
+
 func resellerOutboundOutputTokenQuota(relayInfo *relaycommon.RelayInfo, format relaytypes.RelayFormat, jsonData []byte) (int, error) {
 	switch format {
 	case relaytypes.RelayFormatOpenAI:
@@ -465,6 +947,15 @@ func resellerOutboundOutputTokenQuota(relayInfo *relaycommon.RelayInfo, format r
 		limit, ok := relayconstant.CodexModelOutputTokenLimit(modelName)
 		if !ok {
 			return 0, fmt.Errorf("%w: upstream model %q has no trusted output token limit", errResellerRequestHardCapUnsupported, modelName)
+		}
+		if relayInfo.ResellerTariffBilling {
+			reservation := resellerTariffDefaultOutputReservation
+			if estimated := relayInfo.GetEstimateCompletionTokens(); estimated > reservation {
+				reservation = estimated
+			}
+			if reservation < limit {
+				return reservation, nil
+			}
 		}
 		return limit, nil
 	case relaytypes.RelayFormatClaude:
@@ -506,7 +997,7 @@ func ValidateResellerOutboundHardCapWithContext(c *gin.Context, relayInfo *relay
 // final format. Pass-through handlers use the original request format because
 // a previous retry may have left conversion history on RelayInfo.
 func ValidateResellerOutboundHardCapForFormat(c *gin.Context, relayInfo *relaycommon.RelayInfo, finalFormat relaytypes.RelayFormat, jsonData []byte) error {
-	if !isResellerBilling(relayInfo) || relayInfo.TokenUnlimited {
+	if !isResellerBilling(relayInfo) || relayInfo.TokenUnlimited || relayInfo.ResellerTariffBilling {
 		return nil
 	}
 	_, requiresOutput, err := resellerRequestOutputTokenQuota(relayInfo)
@@ -534,6 +1025,46 @@ func ValidateResellerOutboundHardCapForFormat(c *gin.Context, relayInfo *relayco
 	noteQuotaClamp(relayInfo, clamp)
 	if clamp != nil {
 		return clamp
+	}
+	contextLimit := 0
+	if finalFormat == relaytypes.RelayFormatOpenAIResponses {
+		modelName := strings.TrimSpace(relayInfo.GetUpstreamModelName())
+		var request dto.OpenAIResponsesRequest
+		if err := common.Unmarshal(jsonData, &request); err != nil {
+			return err
+		}
+		if strings.TrimSpace(request.Model) != "" {
+			modelName = strings.TrimSpace(request.Model)
+		}
+		contextLimit, _ = relayconstant.CodexModelContextTokenLimit(modelName)
+		if contextLimit > 0 && maximumQuota > contextLimit {
+			// The published context window is the combined input/output ceiling,
+			// so adding the maximum output again would double-reserve it.
+			maximumQuota = contextLimit
+		}
+	}
+	if relayInfo.ResellerTariffBilling {
+		maximumQuota, clamp, err = resellerMaximumTariffQuota(relayInfo, promptQuota, outputQuota, contextLimit)
+		noteQuotaClamp(relayInfo, clamp)
+		if err != nil {
+			return err
+		}
+		if clamp != nil {
+			return clamp
+		}
+		toolQuota, toolClamp, toolErr := resellerToolTariffQuota(relayInfo, finalFormat, jsonData)
+		noteQuotaClamp(relayInfo, toolClamp)
+		if toolErr != nil {
+			return toolErr
+		}
+		if toolClamp != nil {
+			return toolClamp
+		}
+		maximumQuota, clamp = resellerTokenQuota(maximumQuota, toolQuota)
+		noteQuotaClamp(relayInfo, clamp)
+		if clamp != nil {
+			return clamp
+		}
 	}
 	if maximumQuota > relayInfo.TokenQuotaPreConsumed {
 		if relayInfo.Billing == nil {
@@ -575,6 +1106,29 @@ func authoritativeTextTokenQuota(usage *dto.Usage, locallyCounted bool, fallback
 		effectiveUsage = normalizedUsage
 	} else if !hasReportedTextTokenUsage(usage) && strings.TrimSpace(usage.UsageSource) == "" {
 		return 0, nil, false
+	}
+	// Provider usage is still untrusted input. Invalid counters must not turn
+	// a consumed request into a zero charge or release its reservation.
+	for _, count := range []int{effectiveUsage.PromptTokens, effectiveUsage.CompletionTokens,
+		effectiveUsage.TotalTokens, effectiveUsage.InputTokens, effectiveUsage.OutputTokens,
+		effectiveUsage.PromptCacheHitTokens, effectiveUsage.PromptTokensDetails.CachedTokens,
+		effectiveUsage.PromptTokensDetails.CacheCreationTokensTotal()} {
+		if count < 0 || count > common.MaxQuota {
+			return 0, nil, false
+		}
+	}
+	cache := max(effectiveUsage.PromptCacheHitTokens, effectiveUsage.PromptTokensDetails.CachedTokens)
+	if details := effectiveUsage.InputTokensDetails; details != nil {
+		if details.CachedTokens < 0 || details.CachedTokens > common.MaxQuota || details.CacheCreationTokensTotal() < 0 {
+			return 0, nil, false
+		}
+		cache = max(cache, details.CachedTokens)
+	}
+	if effectiveUsage.UsageSemantic != dto.BillingUsageSemanticAnthropic {
+		input := max(effectiveUsage.PromptTokens, effectiveUsage.InputTokens)
+		if cache > input {
+			return 0, nil, false
+		}
 	}
 
 	if !hasReportedTextTokenUsage(effectiveUsage) {

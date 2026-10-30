@@ -57,20 +57,69 @@ type PricingReferencePrice struct {
 	RequestUSD float64 `json:"request_usd,omitempty"`
 }
 
-var pricingReferencePrices = map[string]PricingReferencePrice{
-	"gpt-6-astra":   {InputUSD: 10, OutputUSD: 50},
-	"gpt-5.4":       {InputUSD: 2.5, OutputUSD: 15},
-	"gpt-5.4-mini":  {InputUSD: 0.75, OutputUSD: 4.5},
-	"gpt-5.5":       {InputUSD: 5, OutputUSD: 30},
-	"gpt-5.6-luna":  {InputUSD: 0.2, OutputUSD: 1.2},
-	"gpt-5.6-sol":   {InputUSD: 4, OutputUSD: 20},
-	"gpt-5.6-terra": {InputUSD: 2, OutputUSD: 12},
-	"gpt-image-2":   {RequestUSD: 1},
-	"grok-4.5":      {InputUSD: 2, OutputUSD: 6},
+var defaultPricingReferencePrices = map[string]PricingReferencePrice{
+	"gpt-6-astra":            {InputUSD: 10, OutputUSD: 50},
+	"gpt-5.4":                {InputUSD: 2.5, OutputUSD: 15},
+	"gpt-5.4-mini":           {InputUSD: 0.75, OutputUSD: 4.5},
+	"gpt-5.5":                {InputUSD: 5, OutputUSD: 30},
+	"gpt-5.6-luna":           {InputUSD: 0.2, OutputUSD: 1.2},
+	"gpt-5.6-sol":            {InputUSD: 4, OutputUSD: 20},
+	"gpt-5.6-terra":          {InputUSD: 2, OutputUSD: 12},
+	"gpt-image-2":            {RequestUSD: 1},
+	"gpt-image-2.5-flare":    {RequestUSD: 0.5},
+	"gpt-image-2.5-sunburst": {RequestUSD: 1},
+	"grok-4.5":               {InputUSD: 2, OutputUSD: 6},
+}
+
+var pricingReferencePriceMap = types.NewRWMap[string, PricingReferencePrice]()
+
+func init() {
+	pricingReferencePriceMap.AddAll(defaultPricingReferencePrices)
+}
+
+func PricingReferencePrice2JSONString() string {
+	return pricingReferencePriceMap.MarshalJSONString()
+}
+
+func ValidatePricingReferencePriceJSON(jsonStr string) error {
+	var prices map[string]PricingReferencePrice
+	if err := common.UnmarshalJsonStr(jsonStr, &prices); err != nil {
+		return err
+	}
+	if prices == nil {
+		return fmt.Errorf("model reference prices must be a JSON object")
+	}
+
+	for modelName, price := range prices {
+		if strings.TrimSpace(modelName) == "" {
+			return fmt.Errorf("model reference price contains an empty model name")
+		}
+		values := []float64{price.InputUSD, price.OutputUSD, price.RequestUSD}
+		for _, value := range values {
+			if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+				return fmt.Errorf("model reference price for %s must be finite and non-negative", modelName)
+			}
+		}
+		if price.InputUSD == 0 && price.OutputUSD == 0 && price.RequestUSD == 0 {
+			return fmt.Errorf("model reference price for %s must include at least one positive price", modelName)
+		}
+	}
+	return nil
+}
+
+func UpdatePricingReferencePriceByJSONString(jsonStr string) error {
+	if err := ValidatePricingReferencePriceJSON(jsonStr); err != nil {
+		return err
+	}
+	if err := types.LoadFromJsonString(pricingReferencePriceMap, jsonStr); err != nil {
+		return err
+	}
+	InvalidatePricingCache()
+	return nil
 }
 
 func getPricingReferencePrice(modelName string) *PricingReferencePrice {
-	referencePrice, ok := pricingReferencePrices[modelName]
+	referencePrice, ok := pricingReferencePriceMap.Get(modelName)
 	if !ok {
 		return nil
 	}

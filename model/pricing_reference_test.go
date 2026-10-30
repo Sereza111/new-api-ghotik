@@ -38,6 +38,20 @@ func TestGetPricingReferencePriceReturnsAstraStandardPrices(t *testing.T) {
 	assert.Zero(t, referencePrice.RequestUSD)
 }
 
+func TestGetPricingReferencePriceReturnsImageModelPrices(t *testing.T) {
+	for _, modelName := range []string{"gpt-image-2.5-flare", "gpt-image-2.5-sunburst"} {
+		referencePrice := getPricingReferencePrice(modelName)
+		require.NotNil(t, referencePrice)
+		if modelName == "gpt-image-2.5-flare" {
+			assert.Equal(t, 0.5, referencePrice.RequestUSD)
+		} else {
+			assert.Equal(t, 1.0, referencePrice.RequestUSD)
+		}
+		assert.Zero(t, referencePrice.InputUSD)
+		assert.Zero(t, referencePrice.OutputUSD)
+	}
+}
+
 func TestGetPricingReferencePriceReturnsIndependentCopy(t *testing.T) {
 	first := getPricingReferencePrice("gpt-5.6-sol")
 	require.NotNil(t, first)
@@ -50,4 +64,32 @@ func TestGetPricingReferencePriceReturnsIndependentCopy(t *testing.T) {
 
 func TestGetPricingReferencePriceOmitsUnknownModels(t *testing.T) {
 	assert.Nil(t, getPricingReferencePrice("custom-model"))
+}
+
+func TestPricingReferencePriceCanBeConfigured(t *testing.T) {
+	previous := PricingReferencePrice2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, UpdatePricingReferencePriceByJSONString(previous))
+	})
+
+	require.NoError(t, UpdatePricingReferencePriceByJSONString(`{
+		"gemini-3-flash":{"input_usd":0.5,"output_usd":3}
+	}`))
+
+	referencePrice := getPricingReferencePrice("gemini-3-flash")
+	require.NotNil(t, referencePrice)
+	assert.Equal(t, 0.5, referencePrice.InputUSD)
+	assert.Equal(t, 3.0, referencePrice.OutputUSD)
+	assert.Nil(t, getPricingReferencePrice("gpt-5.6-sol"))
+}
+
+func TestPricingReferencePriceRejectsInvalidEntries(t *testing.T) {
+	for _, jsonStr := range []string{
+		`null`,
+		`{"":{"input_usd":1}}`,
+		`{"model":{"input_usd":-1}}`,
+		`{"model":{}}`,
+	} {
+		assert.Error(t, ValidatePricingReferencePriceJSON(jsonStr))
+	}
 }

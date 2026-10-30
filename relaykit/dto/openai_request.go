@@ -1245,23 +1245,15 @@ type MediaInput struct {
 //     supported types: input_text, output_text, input_image, input_file
 //   - tool-call items contribute their name, arguments or input, and output as input_text
 func (r *OpenAIResponsesRequest) ParseInput() []MediaInput {
-	if r.Input == nil {
+	if len(r.Input) == 0 {
 		return nil
 	}
-
-	var mediaInputs []MediaInput
-
-	// Try string first
-	// if str, ok := kitutil.GetJsonType(r.Input); ok {
-	// 	inputs = append(inputs, MediaInput{Type: "input_text", Text: str})
-	// 	return inputs
-	// }
-	if kitutil.GetJsonType(r.Input) == "string" {
-		var str string
-		_ = kitutil.Unmarshal(r.Input, &str)
-		mediaInputs = append(mediaInputs, MediaInput{Type: "input_text", Text: str})
-		return mediaInputs
+	var input any
+	if err := kitutil.Unmarshal(r.Input, &input); err != nil {
+		return nil
 	}
+	return parseResponsesInputContent(input)
+}
 
 	// Try array of parts
 	if kitutil.GetJsonType(r.Input) == "array" {
@@ -1338,8 +1330,12 @@ func (r *OpenAIResponsesRequest) ParseInput() []MediaInput {
 					}
 				}
 			}
+			if inputType == "input_file" {
+				return []MediaInput{{Type: inputType, FileUrl: url}}
+			}
+			detail, _ := input["detail"].(string)
+			return []MediaInput{{Type: inputType, ImageUrl: url, Detail: detail}}
 		}
 	}
-
-	return mediaInputs
+	return nil
 }

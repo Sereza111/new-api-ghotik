@@ -57,6 +57,12 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 	}
 	session.fullBalanceHeld = fullBalanceHeld
 	relayInfo.Billing = session
+	if relayInfo.ResellerTariffBilling {
+		relayInfo.Billing = &resellerTariffSession{
+			session: session, monetaryReservation: monetaryPreConsumedQuota,
+		}
+		relayInfo.FinalPreConsumedQuota = monetaryPreConsumedQuota
+	}
 	return nil
 }
 

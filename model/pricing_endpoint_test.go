@@ -190,6 +190,21 @@ func TestPricingNativeChannelEndpointTypesUnchanged(t *testing.T) {
 	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeAnthropic, constant.EndpointTypeOpenAI}, byModel["claude-3-5-sonnet"])
 }
 
+func TestPricingImageModelsPreferImageGenerationEndpoint(t *testing.T) {
+	resetPricingEndpointTestTables(t)
+	insertPricingEndpointChannel(t, 204, constant.ChannelTypeOpenAI, dto.ChannelOtherSettings{})
+	insertPricingEndpointAbility(t, 204, "gpt-image-2.5-flare")
+	insertPricingEndpointAbility(t, 204, "gpt-image-2.5-sunburst")
+
+	byModel := pricingEndpointTypesByModel(t)
+	for _, modelName := range []string{"gpt-image-2.5-flare", "gpt-image-2.5-sunburst"} {
+		assert.Equal(t, []constant.EndpointType{
+			constant.EndpointTypeImageGeneration,
+			constant.EndpointTypeOpenAI,
+		}, byModel[modelName])
+	}
+}
+
 func TestInitChannelCacheInvalidatesPricingCache(t *testing.T) {
 	resetPricingEndpointTestTables(t)
 

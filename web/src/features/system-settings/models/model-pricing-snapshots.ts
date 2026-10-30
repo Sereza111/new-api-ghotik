@@ -20,6 +20,7 @@ import { splitBillingExprAndRequestRules } from '@/features/pricing/lib/billing-
 import { splitPluginBillingExprKey } from '@/features/pricing/lib/plugin-pricing'
 
 import { safeJsonParse } from '../utils/json-parser'
+import type { ReferencePriceData } from './model-pricing-core'
 import { formatPricingNumber } from './pricing-format'
 
 export type ModelPricingSnapshotInput = {
@@ -50,6 +51,7 @@ export type ModelPricingSnapshot = {
   billingMode?: string
   billingExpr?: string
   requestRuleExpr?: string
+  referencePrice?: ReferencePriceData
   hasConflict: boolean
 }
 
@@ -208,6 +210,13 @@ export const buildModelSnapshots = ({
     fallback: {},
     context: 'billing expression',
   })
+  const referencePriceMap = safeJsonParse<Record<string, ReferencePriceData>>(
+    referencePrice,
+    {
+      fallback: {},
+      context: 'model reference prices',
+    }
+  )
 
   const pluginExprMap = safeJsonParse<Record<string, string>>(
     pluginBillingExpr,
@@ -235,6 +244,7 @@ export const buildModelSnapshots = ({
     ...Object.keys(audioCompletionMap),
     ...Object.keys(billingModeMap),
     ...Object.keys(billingExprMap),
+    ...Object.keys(referencePriceMap),
   ])
 
   return [...modelNames].map((name) => {
@@ -258,6 +268,7 @@ export const buildModelSnapshots = ({
         billingMode: 'tiered_expr',
         billingExpr: pureExpr,
         requestRuleExpr,
+        referencePrice: referencePriceMap[name],
         price,
         ratio,
         cacheRatio: cache,
@@ -281,6 +292,7 @@ export const buildModelSnapshots = ({
       imageRatio: image,
       audioRatio: audio,
       audioCompletionRatio: audioCompletion,
+      referencePrice: referencePriceMap[name],
       billingMode: price !== '' ? 'per-request' : 'per-token',
       hasConflict:
         price !== '' &&

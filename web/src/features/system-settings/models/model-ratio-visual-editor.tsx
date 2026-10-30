@@ -383,6 +383,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
         billingExpr: editableModel.billingExpr,
         pluginBillingExpr: editableModel.pluginBillingExpr,
         requestRuleExpr: editableModel.requestRuleExpr,
+        referencePrice: editableModel.referencePrice,
       })
       setEditorOpen(true)
       if (isMobile) setSheetOpen(true)
@@ -453,6 +454,9 @@ const ModelRatioVisualEditorComponent = forwardRef<
         billingExpr,
         { fallback: {}, silent: true }
       )
+      const referencePriceMap = safeJsonParse<
+        Record<string, NonNullable<ModelRatioData['referencePrice']>>
+      >(referencePrice, { fallback: {}, silent: true })
 
       delete priceMap[name]
       delete ratioMap[name]
@@ -496,6 +500,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
       onChange(
         'billing_setting.billing_expr',
         JSON.stringify(billingExprMap, null, 2)
+      )
+      onChange(
+        'ModelReferencePrice',
+        JSON.stringify(referencePriceMap, null, 2)
       )
 
       if (editingModelNameRef.current === name) {

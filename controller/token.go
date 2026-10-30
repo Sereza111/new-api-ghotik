@@ -282,6 +282,10 @@ func GetTokenUsage(c *gin.Context) {
 	if expiredAt == -1 {
 		expiredAt = 0
 	}
+	billingBasis := token.EffectiveQuotaMode()
+	if model.IsResellerTokenKey(token.Key) {
+		billingBasis = "panel_tariff_v1"
+	}
 
 	data := gin.H{
 		"object":               "token_usage",

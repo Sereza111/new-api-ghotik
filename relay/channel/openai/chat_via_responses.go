@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -19,6 +20,33 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// resellerResponsesUsageForSettlement separates a completed upstream attempt
+// from a transport rejection for legacy raw-token packages. Tariff packages
+// use the ordinary panel usage fallback instead.
+func resellerResponsesUsageForSettlement(info *relaycommon.RelayInfo, upstream *dto.Usage, body []byte) *dto.Usage {
+	if info.ResellerTariffBilling || info.TokenUnlimited || (info.BillingSource != service.BillingSourceReseller && !model.IsResellerTokenKey(info.TokenKey)) {
+		return nil
+	}
+	if usage := responsesUsageForBilling(upstream, body); usage != nil {
+		return usage
+	}
+	return &dto.Usage{BillingUsage: &dto.BillingUsage{
+		Source: dto.BillingUsageSourceOAIResponses, Semantic: dto.BillingUsageSemanticOpenAI, Estimated: true,
+	}}
+}
+
+func finishResellerResponsesFailure(c *gin.Context, usage *dto.Usage, apiErr *types.NewAPIError, stream bool) (*dto.Usage, *types.NewAPIError) {
+	if usage == nil {
+		return nil, apiErr
+	}
+	if stream {
+		_ = helper.ObjectData(c, map[string]any{"error": apiErr.ToOpenAIError()})
+	} else {
+		c.JSON(apiErr.StatusCode, gin.H{"error": apiErr.ToOpenAIError()})
+	}
+	return usage, nil
+}
 
 func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
@@ -36,6 +64,12 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	if err := common.Unmarshal(body, &responsesResp); err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
+	resellerUsage := resellerResponsesUsageForSettlement(info, responsesResp.Usage, body)
+	isIncomplete := strings.EqualFold(strings.Trim(string(responsesResp.Status), "\" \t\r\n"), "incomplete")
+	if resellerUsage != nil && responsesResp.Object == "response" && !isIncomplete && relaycommon.IsNonBillableResponsesStatus(responsesResp.Status) {
+		service.IOCopyBytesGracefully(c, resp, body)
+		return resellerUsage, nil
+	}
 
 	if oaiError := responsesResp.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
@@ -44,11 +78,11 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	info.ObserveResponseModel(responsesResp.Model)
 	responseValue, usage, err := convertResponsesResponseForClient(c, info, &responsesResp)
 	if err != nil {
-		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+		return finishResellerResponsesFailure(c, resellerUsage, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError), false)
 	}
 	responseBody, err := common.Marshal(responseValue)
 	if err != nil {
-		return nil, types.NewOpenAIError(err, types.ErrorCodeJsonMarshalFailed, http.StatusInternalServerError)
+		return finishResellerResponsesFailure(c, resellerUsage, types.NewOpenAIError(err, types.ErrorCodeJsonMarshalFailed, http.StatusInternalServerError), false)
 	}
 
 	service.IOCopyBytesGracefully(c, resp, responseBody)
@@ -66,6 +100,7 @@ func OaiResponsesToChatBufferedStreamHandler(c *gin.Context, info *relaycommon.R
 	accumulator := relayconvert.NewResponsesBufferedAccumulator()
 	var finalResponse *dto.OpenAIResponsesResponse
 	var streamErr *types.NewAPIError
+	var resellerUsage *dto.Usage
 
 	scanner := helper.NewStreamScanner(resp.Body)
 	scanner.Split(bufio.ScanLines)
@@ -119,10 +154,10 @@ func OaiResponsesToChatBufferedStreamHandler(c *gin.Context, info *relaycommon.R
 		}
 	}
 	if streamErr != nil {
-		return nil, streamErr
+		return finishResellerResponsesFailure(c, resellerUsage, streamErr, false)
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+		return finishResellerResponsesFailure(c, resellerUsage, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError), false)
 	}
 	if finalResponse == nil {
 		finalResponse = &dto.OpenAIResponsesResponse{
@@ -136,11 +171,11 @@ func OaiResponsesToChatBufferedStreamHandler(c *gin.Context, info *relaycommon.R
 
 	responseValue, usage, err := convertResponsesResponseForClient(c, info, finalResponse)
 	if err != nil {
-		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+		return finishResellerResponsesFailure(c, resellerUsage, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError), false)
 	}
 	responseBody, err := common.Marshal(responseValue)
 	if err != nil {
-		return nil, types.NewOpenAIError(err, types.ErrorCodeJsonMarshalFailed, http.StatusInternalServerError)
+		return finishResellerResponsesFailure(c, resellerUsage, types.NewOpenAIError(err, types.ErrorCodeJsonMarshalFailed, http.StatusInternalServerError), false)
 	}
 
 	service.IOCopyBytesGracefully(c, resp, responseBody)
@@ -268,12 +303,31 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			stopStream(sr, streamErr)
 			return
 		}
+		if resellerUsage == nil {
+			resellerUsage = resellerResponsesUsageForSettlement(info, nil, nil)
+		}
 
 		var streamResp dto.ResponsesStreamResponse
 		if err := common.UnmarshalJsonStr(data, &streamResp); err != nil {
 			logger.LogError(c, common.LogText("failed to unmarshal responses stream event: %s", err.Error()))
 			sr.Error(err)
 			return
+		}
+		switch streamResp.Type {
+		case "response.completed", "response.done", "response.failed", "response.error", "response.incomplete", "response.cancelled", "response.canceled":
+			var reported *dto.Usage
+			if streamResp.Response != nil {
+				reported = streamResp.Response.Usage
+			}
+			resellerUsage = resellerResponsesUsageForSettlement(info, reported, []byte(data))
+			if resellerUsage != nil && streamResp.Type != "response.completed" && streamResp.Type != "response.done" && streamResp.Type != "response.incomplete" {
+				// Capture billing before the client write, which can fail after
+				// the upstream has already consumed the full request.
+				resellerTerminalForwarded = true
+				writeErr := helper.ResponseChunkData(c, streamResp, data)
+				sr.Stop(writeErr)
+				return
+			}
 		}
 
 		if streamResp.Response != nil {
@@ -308,6 +362,9 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		}
 	})
 
+	if resellerTerminalForwarded {
+		return resellerUsage, nil
+	}
 	if streamErr != nil {
 		if !upstreamFailed || state.UsageText() == "" {
 			return nil, streamErr
@@ -349,7 +406,11 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	}
 
 	usage := state.Usage()
-	if usage == nil || usage.TotalTokens == 0 {
+	if resellerUsage != nil {
+		usage = resellerUsage
+		state.SetUsage(usage)
+	}
+	if resellerUsage == nil && (usage == nil || usage.TotalTokens == 0) {
 		usage = service.ResponseText2Usage(c, state.UsageText(), info.UpstreamModelName, info.GetEstimatePromptTokens())
 		state.SetUsage(usage)
 	}
@@ -362,7 +423,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	}
 	finalResults, err := service.FinalizeStreamResponse(c, info, state)
 	if err != nil {
-		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+		return finishResellerResponsesFailure(c, resellerUsage, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError), true)
 	}
 	for _, result := range finalResults {
 		if !sendStreamResult(result) {

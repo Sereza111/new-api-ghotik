@@ -82,6 +82,10 @@ import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
 import { combineBillingExpr } from '@/features/pricing/lib/billing-expr'
 import { pluginExpressionsEqual } from '@/features/pricing/lib/plugin-pricing'
 import {
+  calculateDiscountPercent,
+  calculateReferencePriceFromDiscount,
+} from '@/features/pricing/lib/reference-price'
+import {
   createDefaultTaskVisualConfig,
   generateTaskExprFromConfig,
 } from '@/features/pricing/lib/task-expr'
@@ -92,6 +96,10 @@ import { cn } from '@/lib/utils'
 import { usePricingPreferencesStore } from '@/stores/pricing-preferences-store'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
+import {
+  SettingsControlGroup,
+  SettingsSwitchField,
+} from '../components/settings-form-layout'
 import {
   EMPTY_LANE_ENABLED,
   EMPTY_LANE_PRICES,
@@ -141,6 +149,18 @@ export type ModelPricingEditorPanelHandle = {
 }
 
 const DEFAULT_TOKEN_BILLING_EXPR = 'tier("base", p * 0 + c * 0)'
+
+type ReferencePriceDraft = {
+  input: string
+  output: string
+  request: string
+}
+
+const EMPTY_REFERENCE_PRICE_DRAFT: ReferencePriceDraft = {
+  input: '',
+  output: '',
+  request: '',
+}
 
 export const ModelPricingSheet = forwardRef<
   ModelPricingEditorPanelHandle,
@@ -354,6 +374,24 @@ export const ModelPricingEditorPanel = forwardRef<
     (!billingExpr || billingExpr === DEFAULT_TOKEN_BILLING_EXPR)
       ? defaultTaskBillingExpr
       : billingExpr
+  const selectedPricingModel = useMemo(
+    () =>
+      pricingModels.find(
+        (model) => model.model_name === watchedValues.name.trim()
+      ),
+    [pricingModels, watchedValues.name]
+  )
+  const currentInputPrice = toNumberOrNull(promptPrice)
+  const configuredOutputPrice =
+    laneEnabled.completion && hasValue(lanePrices.completion)
+      ? toNumberOrNull(lanePrices.completion)
+      : null
+  const currentOutputPrice =
+    configuredOutputPrice ??
+    (currentInputPrice === null
+      ? null
+      : currentInputPrice * (selectedPricingModel?.completion_ratio ?? 1))
+  const currentRequestPrice = toNumberOrNull(watchedValues.price)
 
   useEffect(() => {
     conversionGeneration.current += 1
@@ -363,6 +401,7 @@ export const ModelPricingEditorPanel = forwardRef<
     setWasConverted(false)
     setConversionPreview(null)
     const nextLaneState = createInitialLaneState(editData)
+    let nextPricingMode: PricingMode = 'per-token'
 
     if (editData) {
       form.reset({
@@ -395,6 +434,33 @@ export const ModelPricingEditorPanel = forwardRef<
       setBillingExpr(DEFAULT_TOKEN_BILLING_EXPR)
       setRequestRuleExpr('')
     }
+
+    const currentDiscountPrice =
+      nextPricingMode === 'per-request'
+        ? toNumberOrNull(editData?.price)
+        : toNumberOrNull(nextLaneState.promptPrice)
+    const configuredReferencePrice =
+      nextPricingMode === 'per-request'
+        ? editData?.referencePrice?.request_usd
+        : editData?.referencePrice?.input_usd
+    const configuredDiscount =
+      currentDiscountPrice === null
+        ? null
+        : calculateDiscountPercent(
+            configuredReferencePrice ?? null,
+            currentDiscountPrice
+          )
+
+    setDiscountEnabled(
+      nextPricingMode !== 'tiered_expr' && configuredReferencePrice != null
+    )
+    setDiscountPercent(configuredDiscount?.toString() ?? '')
+    setReferencePriceDraft({
+      input: formatPricingNumber(editData?.referencePrice?.input_usd),
+      output: formatPricingNumber(editData?.referencePrice?.output_usd),
+      request: formatPricingNumber(editData?.referencePrice?.request_usd),
+    })
+    setDiscountError(null)
 
     setPromptPrice(nextLaneState.promptPrice)
     setLanePrices(nextLaneState.prices)
@@ -495,6 +561,14 @@ export const ModelPricingEditorPanel = forwardRef<
   const handlePromptPriceChange = (value: string) => {
     setPromptPrice(value)
     syncLaneRatios(value, lanePrices, laneEnabled)
+    const nextDiscount = calculateDiscountPercent(
+      toNumberOrNull(referencePriceDraft.input),
+      toNumberOrNull(value) ?? Number.NaN
+    )
+    if (discountEnabled && nextDiscount !== null) {
+      setDiscountPercent(nextDiscount.toString())
+      setDiscountError(null)
+    }
   }
 
   const handleLanePriceChange = (lane: LaneKey, value: string) => {
@@ -518,6 +592,17 @@ export const ModelPricingEditorPanel = forwardRef<
           nextLanePrices
         )
       )
+    }
+
+    if (lane === 'completion' && discountEnabled) {
+      const nextDiscount = calculateDiscountPercent(
+        toNumberOrNull(referencePriceDraft.output),
+        toNumberOrNull(value) ?? Number.NaN
+      )
+      if (nextDiscount !== null) {
+        setDiscountPercent(nextDiscount.toString())
+        setDiscountError(null)
+      }
     }
   }
 
@@ -639,6 +724,46 @@ export const ModelPricingEditorPanel = forwardRef<
   }, [editData, laneEnabled, lanePrices, pricingMode, promptPrice, t])
 
   const validatePricingValues = useCallback(() => {
+    if (discountEnabled && pricingMode !== 'tiered_expr') {
+      const discount = toNumberOrNull(discountPercent)
+      if (
+        discountPercent &&
+        (discount === null || discount <= 0 || discount >= 100)
+      ) {
+        setDiscountError(
+          t('Enter a discount greater than 0 and less than 100.')
+        )
+        return false
+      }
+      if (!referencePrice) {
+        setDiscountError(t('Enter valid regular prices.'))
+        return false
+      }
+      if (pricingMode === 'per-request') {
+        if (currentRequestPrice === null) {
+          setDiscountError(t('Set a valid price before enabling the discount.'))
+          return false
+        }
+        if ((referencePrice.request_usd ?? 0) <= currentRequestPrice) {
+          setDiscountError(
+            t('Regular prices must be greater than the final prices.')
+          )
+          return false
+        }
+      } else if (currentInputPrice === null || currentOutputPrice === null) {
+        setDiscountError(t('Set a valid price before enabling the discount.'))
+        return false
+      } else if (
+        (referencePrice.input_usd ?? 0) <= currentInputPrice ||
+        (referencePrice.output_usd ?? 0) <= currentOutputPrice
+      ) {
+        setDiscountError(
+          t('Regular prices must be greater than the final prices.')
+        )
+        return false
+      }
+    }
+
     if (
       pricingMode === 'per-token' &&
       ((toNumberOrNull(promptPrice) === 0 &&
@@ -682,7 +807,20 @@ export const ModelPricingEditorPanel = forwardRef<
     }
 
     return true
-  }, [form, laneEnabled, lanePrices, pricingMode, promptPrice, t])
+  }, [
+    discountEnabled,
+    discountPercent,
+    currentInputPrice,
+    currentOutputPrice,
+    currentRequestPrice,
+    form,
+    laneEnabled,
+    lanePrices,
+    pricingMode,
+    promptPrice,
+    referencePrice,
+    t,
+  ])
 
   const buildSubmitData = useCallback(
     (values: ModelPricingFormValues) => {
@@ -702,6 +840,7 @@ export const ModelPricingEditorPanel = forwardRef<
         imageRatio: values.imageRatio || '',
         audioRatio: values.audioRatio || '',
         audioCompletionRatio: values.audioCompletionRatio || '',
+        referencePrice,
       }
 
       if (pricingMode === 'tiered_expr') {

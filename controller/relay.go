@@ -299,7 +299,7 @@ func CountClaudeTokens(c *gin.Context) {
 
 func relayUsesRawTokenQuota(relayInfo *relaycommon.RelayInfo) bool {
 	return relayInfo != nil &&
-		(model.IsResellerTokenKey(relayInfo.TokenKey) || relayInfo.TokenQuotaMode == model.TokenQuotaModeTokens)
+		!model.IsResellerTokenKey(relayInfo.TokenKey) && relayInfo.TokenQuotaMode == model.TokenQuotaModeTokens
 }
 
 func relaySupportsRawTokenAccounting(relayInfo *relaycommon.RelayInfo) bool {
@@ -318,6 +318,10 @@ func relaySupportsRawTokenAccounting(relayInfo *relaycommon.RelayInfo) bool {
 	case types.RelayFormatOpenAI:
 		return relayInfo.RelayMode == relayconstant.RelayModeChatCompletions ||
 			relayInfo.RelayMode == relayconstant.RelayModeCompletions
+	case types.RelayFormatOpenAIImage:
+		// Reseller image requests are settled from their configured fixed USD
+		// price after it is converted to the key's purchased token units.
+		return model.IsResellerTokenKey(relayInfo.TokenKey)
 	default:
 		return false
 	}
@@ -700,14 +704,10 @@ func executeTaskSubmissionWith(
 	task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 	task.PrivateData.TokenId = relayInfo.TokenId
 	task.PrivateData.NodeName = common.NodeName
-	task.PrivateData.BillingContext = &model.TaskBillingContext{
-		ModelPrice:      relayInfo.PriceData.ModelPrice,
-		GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
-		ModelRatio:      relayInfo.PriceData.ModelRatio,
-		OtherRatios:     relayInfo.PriceData.OtherRatios(),
-		OriginModelName: relayInfo.OriginModelName,
-		PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
-		TieredSnapshot:  relayInfo.TieredBillingSnapshot,
+	var billingContextErr error
+	task.PrivateData.BillingContext, billingContextErr = service.TaskBillingContextForSubmission(relayInfo, result.Quota)
+	if billingContextErr != nil {
+		return nil, service.TaskErrorWrapperLocal(billingContextErr, "task_billing_snapshot_failed", http.StatusBadRequest)
 	}
 	task.Quota = result.Quota
 	task.Data = result.TaskData

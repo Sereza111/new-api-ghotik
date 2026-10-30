@@ -169,6 +169,13 @@ type TaskBillingContext struct {
 	OriginModelName string                       `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
 	PerCallBilling  bool                         `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
 	TieredSnapshot  *billingexpr.BillingSnapshot `json:"tiered_snapshot,omitempty"`
+	// Immutable prepaid funding snapshot. Task.Quota remains panel monetary
+	// quota; these fields preserve the conversion and original reservation for
+	// idempotent completion/refund even after a restart or a settings change.
+	ResellerBaseCostPerMillion string `json:"reseller_base_cost_per_million,omitempty"`
+	ResellerReservedQuota      int    `json:"reseller_reserved_quota,omitempty"`
+	ResellerSettled            bool   `json:"reseller_settled,omitempty"`
+	ResellerChargedQuota       int    `json:"reseller_charged_quota,omitempty"`
 }
 
 // ResultRetrievable reports whether retrieval surfaces (native query routes,

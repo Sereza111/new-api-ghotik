@@ -29,6 +29,7 @@ import { ResellerPricingSection } from './reseller-pricing-section'
 
 const getModelDefaults = (settings: BillingSettings) => ({
   ModelPrice: settings.ModelPrice,
+  ModelReferencePrice: settings.ModelReferencePrice,
   ModelRatio: settings.ModelRatio,
   CacheRatio: settings.CacheRatio,
   CreateCacheRatio: settings.CreateCacheRatio,

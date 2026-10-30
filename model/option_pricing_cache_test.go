@@ -23,35 +23,44 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestUpdatingModelRatioInvalidatesPricingCache(t *testing.T) {
-	common.OptionMapRWMutex.Lock()
-	optionMapWasNil := common.OptionMap == nil
-	if optionMapWasNil {
-		common.OptionMap = make(map[string]string)
+func TestUpdatingPricingOptionsInvalidatesPricingCache(t *testing.T) {
+	testCases := map[string]string{
+		"ModelRatio":          ratio_setting.ModelRatio2JSONString(),
+		"ModelReferencePrice": PricingReferencePrice2JSONString(),
 	}
-	previousValue, hadPreviousValue := common.OptionMap["ModelRatio"]
-	common.OptionMapRWMutex.Unlock()
-	t.Cleanup(func() {
-		common.OptionMapRWMutex.Lock()
-		defer common.OptionMapRWMutex.Unlock()
-		if optionMapWasNil {
-			common.OptionMap = nil
-		} else if hadPreviousValue {
-			common.OptionMap["ModelRatio"] = previousValue
-		} else {
-			delete(common.OptionMap, "ModelRatio")
-		}
-	})
 
-	updatePricingLock.Lock()
-	pricingMap = []Pricing{{ModelName: "stale-model"}}
-	lastGetPricingTime = time.Now()
-	updatePricingLock.Unlock()
+	for key, value := range testCases {
+		t.Run(key, func(t *testing.T) {
+			common.OptionMapRWMutex.Lock()
+			optionMapWasNil := common.OptionMap == nil
+			if optionMapWasNil {
+				common.OptionMap = make(map[string]string)
+			}
+			previousValue, hadPreviousValue := common.OptionMap[key]
+			common.OptionMapRWMutex.Unlock()
+			t.Cleanup(func() {
+				common.OptionMapRWMutex.Lock()
+				defer common.OptionMapRWMutex.Unlock()
+				if optionMapWasNil {
+					common.OptionMap = nil
+				} else if hadPreviousValue {
+					common.OptionMap[key] = previousValue
+				} else {
+					delete(common.OptionMap, key)
+				}
+			})
 
-	require.NoError(t, updateOptionMap("ModelRatio", ratio_setting.ModelRatio2JSONString()))
+			updatePricingLock.Lock()
+			pricingMap = []Pricing{{ModelName: "stale-model"}}
+			lastGetPricingTime = time.Now()
+			updatePricingLock.Unlock()
 
-	updatePricingLock.Lock()
-	defer updatePricingLock.Unlock()
-	assert.Empty(t, pricingMap)
-	assert.True(t, lastGetPricingTime.IsZero())
+			require.NoError(t, updateOptionMap(key, value))
+
+			updatePricingLock.Lock()
+			defer updatePricingLock.Unlock()
+			assert.Empty(t, pricingMap)
+			assert.True(t, lastGetPricingTime.IsZero())
+		})
+	}
 }

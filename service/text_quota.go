@@ -439,17 +439,29 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	}
 	settlementQuota := summary.Quota
 	rawTokenQuota := relayInfo.TokenQuotaPreConsumed
-	if usesRawTokenQuota(relayInfo) {
-		if authoritativeQuota, clamp, ok := authoritativeTextTokenQuota(
+	if usesRawTokenQuota(relayInfo) && !relayInfo.ResellerTariffBilling {
+		if isResellerImageRequest(relayInfo) {
+			imageQuota, clamp, err := resellerFixedPriceTokenQuota(
+				summary.Quota,
+				relayInfo.ResellerBaseCostPerMillion,
+			)
+			noteQuotaClamp(relayInfo, clamp)
+			if err != nil {
+				// The upstream response has already been delivered. Keep the complete
+				// reservation rather than turning an invalid conversion into a free image.
+				logger.LogError(ctx, "failed to settle reseller image quota: "+err.Error())
+			} else {
+				rawTokenQuota = imageQuota
+				relayInfo.TokenQuotaActual = &rawTokenQuota
+			}
+		} else if authoritativeQuota, clamp, ok := authoritativeTextTokenQuota(
 			originUsage,
 			common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens),
 			relayInfo.GetEstimatePromptTokens(),
 		); ok {
 			rawTokenQuota = authoritativeQuota
 			noteQuotaClamp(relayInfo, clamp)
-			if !isResellerBilling(relayInfo) {
-				relayInfo.TokenQuotaActual = &rawTokenQuota
-			}
+			relayInfo.TokenQuotaActual = &rawTokenQuota
 		}
 		if isResellerBilling(relayInfo) {
 			settlementQuota = rawTokenQuota
@@ -559,7 +571,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 
 	}
 	if isResellerBilling(relayInfo) {
-		other["reseller_token_quota"] = settlementQuota
+		appendResellerSettlementInfo(other, relayInfo)
 	} else if usesRawTokenQuota(relayInfo) {
 		other["token_quota_mode"] = model.TokenQuotaModeTokens
 		other["raw_token_quota"] = rawTokenQuota

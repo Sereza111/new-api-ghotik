@@ -87,6 +87,30 @@ func calculateAudioQuota(info QuotaInfo) (int, *common.QuotaClamp) {
 
 func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.RealtimeUsage) error {
 	prepaidReseller := isResellerBilling(relayInfo)
+	if prepaidReseller && relayInfo.ResellerTariffBilling {
+		if relayInfo.Billing == nil {
+			return errors.New("reseller billing session is missing")
+		}
+		if relayInfo.UsePrice {
+			return nil
+		}
+		quota, clamp := calculateAudioQuota(QuotaInfo{
+			InputDetails:  TokenDetails{TextTokens: usage.InputTokenDetails.TextTokens, AudioTokens: usage.InputTokenDetails.AudioTokens},
+			OutputDetails: TokenDetails{TextTokens: usage.OutputTokenDetails.TextTokens, AudioTokens: usage.OutputTokenDetails.AudioTokens},
+			ModelName:     relayInfo.OriginModelName, ModelRatio: relayInfo.PriceData.ModelRatio,
+			GroupRatio: relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+		})
+		noteQuotaClamp(relayInfo, clamp)
+		if clamp != nil {
+			return clamp
+		}
+		target, clamp := resellerTokenQuota(relayInfo.Billing.GetPreConsumedQuota(), quota)
+		noteQuotaClamp(relayInfo, clamp)
+		if clamp != nil {
+			return clamp
+		}
+		return relayInfo.Billing.Reserve(target)
+	}
 	if usesRawTokenQuota(relayInfo) {
 		if prepaidReseller {
 			relayInfo.BillingSource = BillingSourceReseller
@@ -257,13 +281,11 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 	}
 	settlementQuota := quota
 	rawTokenQuota := relayInfo.TokenQuotaPreConsumed
-	if usesRawTokenQuota(relayInfo) {
+	if usesRawTokenQuota(relayInfo) && !relayInfo.ResellerTariffBilling {
 		if hasReportedRealtimeTokenUsage(originUsage) {
 			rawTokenQuota, clamp = resellerRealtimeTokenQuota(usage)
 			noteQuotaClamp(relayInfo, clamp)
-			if !isResellerBilling(relayInfo) {
-				relayInfo.TokenQuotaActual = &rawTokenQuota
-			}
+			relayInfo.TokenQuotaActual = &rawTokenQuota
 		}
 		if isResellerBilling(relayInfo) {
 			settlementQuota = rawTokenQuota
@@ -313,7 +335,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
 	if isResellerBilling(relayInfo) {
-		other["reseller_token_quota"] = settlementQuota
+		appendResellerSettlementInfo(other, relayInfo)
 	} else if usesRawTokenQuota(relayInfo) {
 		other["token_quota_mode"] = model.TokenQuotaModeTokens
 		other["raw_token_quota"] = rawTokenQuota
@@ -420,7 +442,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	}
 	settlementQuota := quota
 	rawTokenQuota := relayInfo.TokenQuotaPreConsumed
-	if usesRawTokenQuota(relayInfo) {
+	if usesRawTokenQuota(relayInfo) && !relayInfo.ResellerTariffBilling {
 		if authoritativeQuota, authoritativeClamp, ok := authoritativeTextTokenQuota(
 			originUsage,
 			common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens),
@@ -429,9 +451,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 			rawTokenQuota = authoritativeQuota
 			clamp = authoritativeClamp
 			noteQuotaClamp(relayInfo, clamp)
-			if !isResellerBilling(relayInfo) {
-				relayInfo.TokenQuotaActual = &rawTokenQuota
-			}
+			relayInfo.TokenQuotaActual = &rawTokenQuota
 		}
 		if isResellerBilling(relayInfo) {
 			settlementQuota = rawTokenQuota
@@ -481,7 +501,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
 	if isResellerBilling(relayInfo) {
-		other["reseller_token_quota"] = settlementQuota
+		appendResellerSettlementInfo(other, relayInfo)
 	} else if usesRawTokenQuota(relayInfo) {
 		other["token_quota_mode"] = model.TokenQuotaModeTokens
 		other["raw_token_quota"] = rawTokenQuota

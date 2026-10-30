@@ -19,6 +19,51 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+// responsesUsageForBilling keeps provider counters separate from local estimates.
+// Presence matters: an explicit zero is billable usage, whereas an empty usage
+// object cannot prove that a request consumed no tokens.
+func responsesUsageForBilling(upstream *dto.Usage, responseBody []byte) *dto.Usage {
+	if upstream == nil {
+		return nil
+	}
+	type reportedCounters struct {
+		InputTokens  *int `json:"input_tokens"`
+		OutputTokens *int `json:"output_tokens"`
+	}
+	var envelope struct {
+		Usage    *reportedCounters `json:"usage"`
+		Response *struct {
+			Usage *reportedCounters `json:"usage"`
+		} `json:"response"`
+	}
+	decodeErr := common.Unmarshal(responseBody, &envelope)
+	reported := envelope.Usage
+	if envelope.Response != nil {
+		reported = envelope.Response.Usage
+	}
+	estimated := decodeErr != nil || reported == nil || reported.InputTokens == nil || reported.OutputTokens == nil
+
+	usage := *upstream
+	usage.BillingUsage = nil
+	usage.PromptTokens = upstream.InputTokens
+	usage.CompletionTokens = upstream.OutputTokens
+	if upstream.InputTokensDetails != nil {
+		details := *upstream.InputTokensDetails
+		usage.InputTokensDetails = &details
+		usage.PromptTokensDetails = details
+	}
+	usage.UsageSource = dto.BillingUsageSourceOAIResponses
+	usage.UsageSemantic = dto.BillingUsageSemanticOpenAI
+	billingUsage := usage
+	usage.BillingUsage = &dto.BillingUsage{
+		Source:      dto.BillingUsageSourceOAIResponses,
+		Semantic:    dto.BillingUsageSemanticOpenAI,
+		Estimated:   estimated,
+		OpenAIUsage: &billingUsage,
+	}
+	return &usage
+}
+
 func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
 
@@ -32,7 +77,11 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
-	if oaiError := responsesResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
+	// A terminal Response object can contain both an error and billable usage.
+	// Forward that outcome and settle it; treating it as a transport rejection
+	// would retry the request and refund work the upstream already performed.
+	isTerminalResponse := responsesResponse.Object == "response" && relaycommon.IsNonBillableResponsesStatus(responsesResponse.Status)
+	if oaiError := responsesResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" && !isTerminalResponse {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 

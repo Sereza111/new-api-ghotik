@@ -249,6 +249,7 @@ export type ModelSettings = {
   'grok.violation_deduction_enabled': boolean
   'grok.violation_deduction_amount': number
   ModelPrice: string
+  ModelReferencePrice: string
   ModelRatio: string
   CacheRatio: string
   CreateCacheRatio: string
@@ -294,6 +295,7 @@ export type BillingSettings = {
   'reseller_setting.subscription_discount_percent': number
   'reseller_setting.subscription_duration_days': number
   ModelPrice: string
+  ModelReferencePrice: string
   ModelRatio: string
   CacheRatio: string
   CreateCacheRatio: string

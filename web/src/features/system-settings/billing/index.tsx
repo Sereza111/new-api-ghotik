@@ -45,6 +45,7 @@ const defaultBillingSettings: BillingSettings = {
   'reseller_setting.subscription_discount_percent': 0,
   'reseller_setting.subscription_duration_days': 30,
   ModelPrice: '',
+  ModelReferencePrice: '{}',
   ModelRatio: '',
   CacheRatio: '',
   CreateCacheRatio: '',
