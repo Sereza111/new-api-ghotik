@@ -31,6 +31,7 @@ func SetUpLogger(server *gin.Engine) {
 		path := param.Path
 		if queryStart := strings.IndexByte(path, '?'); queryStart >= 0 {
 			path = path[:queryStart]
+
 		}
 		return fmt.Sprintf("[GIN] %s | %s | %s | %3d | %13v | %15s | %7s %s\n",
 			param.TimeStamp.Format("2006/01/02 - 15:04:05"),

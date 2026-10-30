@@ -52,6 +52,8 @@ describe('Telegram channel bonus settings', () => {
             'oidc.token_endpoint': '',
             'oidc.user_info_endpoint': '',
             TelegramOAuthEnabled: true,
+            'telegram.client_id': '',
+            'telegram.client_secret': '',
             TelegramBotToken: '',
             TelegramBotName: 'VL_API_bot',
             TelegramChannelBonusEnabled: true,

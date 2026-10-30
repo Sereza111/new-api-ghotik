@@ -70,6 +70,8 @@ const AUTH_SECTIONS = [
           TelegramChannelBonusEnabled: settings.TelegramChannelBonusEnabled,
           TelegramChannelBonusChannel: settings.TelegramChannelBonusChannel,
           TelegramChannelBonusAmountUSD: settings.TelegramChannelBonusAmountUSD,
+          'telegram.client_id': settings['telegram.client_id'],
+          'telegram.client_secret': settings['telegram.client_secret'],
           LinuxDOOAuthEnabled: settings.LinuxDOOAuthEnabled,
           LinuxDOClientId: settings.LinuxDOClientId,
           LinuxDOClientSecret: settings.LinuxDOClientSecret,

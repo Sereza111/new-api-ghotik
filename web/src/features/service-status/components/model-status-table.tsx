@@ -75,7 +75,9 @@ function ModelStatusRow(props: {
   const modelIconKey = props.model.icon || props.model.vendor_icon
   const modelIcon = modelIconKey ? getLobeIcon(modelIconKey, 16) : null
   const rates =
-    props.metric?.recent_success_rates?.filter(Number.isFinite) ?? []
+    props.metric?.recent_success_series
+      ?.map((point) => point.success_rate)
+      .filter(Number.isFinite) ?? []
 
   return (
     <div className='grid grid-cols-[minmax(240px,1fr)_110px_130px_130px_180px] items-center gap-4 border-b px-4 py-3 last:border-b-0'>

@@ -20,16 +20,18 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
-import { beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
-import { resetModelRatios, updateSystemOption } from '../../api'
+import { api } from '@/lib/api'
+import { useAuthStore } from '@/stores/auth-store'
+
+import { fetchUpstreamRatios, getUpstreamChannels } from '../../api'
 import { RatioSettingsCard } from '../ratio-settings-card'
 import { UpstreamRatioSync } from '../upstream-ratio-sync'
 
 vi.mock('../../api', () => ({
   fetchUpstreamRatios: vi.fn(),
   getUpstreamChannels: vi.fn(),
-  resetModelRatios: vi.fn(),
   updateResellerCommercialSettings: vi.fn(),
   updateSystemOption: vi.fn(),
 }))
@@ -62,30 +64,47 @@ vi.mock('../model-ratio-form', () => ({
 
 vi.mock('../upstream-ratio-sync-table', () => ({
   UpstreamRatioSyncTable: (props: {
-    onSelectValue: (
-      model: string,
-      ratioType: 'model_ratio',
-      value: number,
-      sourceName: string
+    prices: Record<string, unknown>
+    toolbar?: ReactNode
+    onSelectPrices: (
+      selections: Array<{ model: string; source: string }>
     ) => void
   }) => (
-    <button
-      type='button'
-      onClick={() =>
-        props.onSelectValue('gpt-test', 'model_ratio', 2, 'upstream')
-      }
-    >
-      Select upstream price
-    </button>
+    <>
+      {props.toolbar}
+      {Object.keys(props.prices).length ? (
+        <button
+          type='button'
+          onClick={() =>
+            props.onSelectPrices([{ model: 'gpt-test', source: 'upstream' }])
+          }
+        >
+          Select upstream price
+        </button>
+      ) : null}
+    </>
   ),
 }))
 
 vi.mock('../channel-selector-dialog', () => ({
-  ChannelSelectorDialog: () => null,
+  ChannelSelectorDialog: (props: {
+    open: boolean
+    onConfirm: (ids: number[]) => void
+  }) =>
+    props.open ? (
+      <button type='button' onClick={() => props.onConfirm([1])}>
+        Confirm price source
+      </button>
+    ) : null,
 }))
 
 vi.mock('../conflict-confirm-dialog', () => ({
-  ConflictConfirmDialog: () => null,
+  ConflictConfirmDialog: (props: { open: boolean; onConfirm: () => void }) =>
+    props.open ? (
+      <button type='button' onClick={props.onConfirm}>
+        Confirm price sync
+      </button>
+    ) : null,
 }))
 
 const emptyModelRatios = {
@@ -101,6 +120,22 @@ const emptyModelRatios = {
   'billing_setting.billing_expr': '{}',
 }
 
+const pricingBaseline = {
+  entries: [
+    {
+      model_name: 'gpt-test',
+      version: 'version-1',
+      configured: {},
+      effective: { model_ratio: 1 },
+    },
+  ],
+  options: {
+    ...emptyModelRatios,
+    ModelRatio: '{"gpt-test":1}',
+  },
+  empty_version: 'empty-version',
+}
+
 function renderWithQueryClient(ui: ReactNode) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -109,35 +144,68 @@ function renderWithQueryClient(ui: ReactNode) {
     },
   })
   queryClient.setQueryData(['pricing'], { data: [{ model_name: 'stale' }] })
-
   render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
-
   return queryClient
 }
 
 describe('model pricing cache invalidation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(updateSystemOption).mockResolvedValue({
+    useAuthStore.getState().auth.setUser({ role: 100 } as never)
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: { success: true, data: pricingBaseline },
+    })
+    vi.spyOn(api, 'patch').mockResolvedValue({
+      data: { success: true, message: '' },
+    })
+    vi.mocked(getUpstreamChannels).mockResolvedValue({
       success: true,
       message: '',
+      data: [
+        {
+          id: 1,
+          name: 'upstream',
+          base_url: 'https://upstream.example',
+          status: 1,
+        },
+      ],
     })
-    vi.mocked(resetModelRatios).mockResolvedValue({
+    vi.mocked(fetchUpstreamRatios).mockResolvedValue({
       success: true,
       message: '',
+      data: {
+        differences: {},
+        prices: {
+          'gpt-test': {
+            current: { model_ratio: 1 },
+            upstreams: { upstream: { model_ratio: 2 } },
+          },
+        },
+        test_results: [{ name: 'upstream', status: 'success' }],
+      },
     })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    useAuthStore.setState(useAuthStore.getInitialState(), true)
   })
 
   test('invalidates pricing after applying an upstream price sync', async () => {
     const user = userEvent.setup()
-    const queryClient = renderWithQueryClient(
-      <UpstreamRatioSync modelRatios={emptyModelRatios} />
-    )
+    const queryClient = renderWithQueryClient(<UpstreamRatioSync />)
 
     await user.click(
-      screen.getByRole('button', { name: 'Select upstream price' })
+      screen.getByRole('button', { name: 'Select price sources' })
+    )
+    await user.click(
+      await screen.findByRole('button', { name: 'Confirm price source' })
+    )
+    await user.click(
+      await screen.findByRole('button', { name: 'Select upstream price' })
     )
     await user.click(screen.getByRole('button', { name: 'Apply Sync' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm price sync' }))
 
     await waitFor(() => {
       expect(queryClient.getQueryState(['pricing'])?.isInvalidated).toBe(true)
@@ -169,7 +237,9 @@ describe('model pricing cache invalidation', () => {
       />
     )
 
-    await user.click(screen.getByRole('button', { name: 'Reset model ratios' }))
+    await user.click(
+      await screen.findByRole('button', { name: 'Reset model ratios' })
+    )
     await user.click(screen.getByRole('button', { name: 'Confirm reset' }))
 
     await waitFor(() => {
