@@ -169,6 +169,36 @@ describe('authentication session coordination', () => {
     expect(transientCount).toBe(1)
   })
 
+  test('an origin-policy rejection preserves the session for a configuration retry', async () => {
+    let transientCount = 0
+    let clearCount = 0
+    const runtime: AuthRefreshRuntime = {
+      request: async () => ({
+        status: 403,
+        data: { code: 'AUTH_ORIGIN_FORBIDDEN' },
+      }),
+      getExpectedSID: () => bundle.session.sid,
+      parseBundle: () => null,
+      acceptBundle: () => undefined,
+      clear: () => {
+        clearCount += 1
+      },
+      markTransient: () => {
+        transientCount += 1
+      },
+      wait: async () => undefined,
+    }
+
+    const outcome = await createRefreshRunner(runtime)()
+
+    expect(outcome).toEqual({
+      kind: 'transient_error',
+      error: { code: 'AUTH_ORIGIN_FORBIDDEN' },
+    })
+    expect(clearCount).toBe(0)
+    expect(transientCount).toBe(1)
+  })
+
   test('an exhausted refresh race clears the unusable local session', async () => {
     const requestedDelays: number[] = []
     const clears: Array<[boolean, string | undefined]> = []

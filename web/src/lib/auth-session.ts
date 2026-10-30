@@ -255,6 +255,17 @@ export function createRefreshRunner(
       return { kind: 'anonymous' }
     }
 
+    // An origin-policy rejection means the deployment is misconfigured, not
+    // that the refresh credential is invalid. Preserve the local session so a
+    // corrected proxy/environment configuration can recover it on retry.
+    if (response.status === 403 && code === 'AUTH_ORIGIN_FORBIDDEN') {
+      runtime.markTransient()
+      return {
+        kind: 'transient_error',
+        error: response.data,
+      }
+    }
+
     if (!response.status || response.status >= 500 || response.status === 429) {
       runtime.markTransient()
       return {
