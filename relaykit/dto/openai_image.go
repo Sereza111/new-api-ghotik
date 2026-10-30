@@ -16,33 +16,33 @@ import (
 // wrapped-negative n overflows quota calculation into a negative charge.
 const MaxImageN = 128
 
-const defaultImageSizePriceRatio = 1.5
+const defaultImageSizePriceTier = "2K"
 
-// ImageSizePriceRatio maps an image resolution to the 1K/2K/4K price tiers.
-// The boolean is false when size cannot be classified.
-func ImageSizePriceRatio(size string) (float64, bool) {
+// ImageSizePriceTier maps an image resolution to the canonical 1K/2K/4K
+// billing tiers used by image-generation providers.
+func ImageSizePriceTier(size string) (string, bool) {
 	normalized := strings.ToLower(strings.TrimSpace(size))
 	switch normalized {
 	case "1k":
-		return 1, true
+		return "1K", true
 	case "2k":
-		return 1.5, true
+		return "2K", true
 	case "4k":
-		return 2, true
+		return "4K", true
 	}
 
 	normalized = strings.ReplaceAll(normalized, "\u00d7", "x")
 	dimensions := strings.Split(normalized, "x")
 	if len(dimensions) != 2 {
-		return 0, false
+		return "", false
 	}
 	width, err := strconv.Atoi(strings.TrimSpace(dimensions[0]))
 	if err != nil || width <= 0 {
-		return 0, false
+		return "", false
 	}
 	height, err := strconv.Atoi(strings.TrimSpace(dimensions[1]))
 	if err != nil || height <= 0 {
-		return 0, false
+		return "", false
 	}
 	maxEdge := width
 	if height > maxEdge {
@@ -50,21 +50,53 @@ func ImageSizePriceRatio(size string) (float64, bool) {
 	}
 	switch {
 	case maxEdge <= 1024:
-		return 1, true
+		return "1K", true
 	case maxEdge <= 2048:
-		return 1.5, true
+		return "2K", true
 	default:
+		return "4K", true
+	}
+}
+
+// ImageRequestSizePriceTier uses the provider-compatible 2K fallback for an
+// automatic, empty or unrecognized request size.
+func ImageRequestSizePriceTier(size string) string {
+	if tier, ok := ImageSizePriceTier(size); ok {
+		return tier
+	}
+	return defaultImageSizePriceTier
+}
+
+// ImageSizePriceRatio maps an image resolution to the 1K/2K/4K price tiers.
+// The boolean is false when size cannot be classified.
+func ImageSizePriceRatio(size string) (float64, bool) {
+	tier, ok := ImageSizePriceTier(size)
+	if !ok {
+		return 0, false
+	}
+	switch tier {
+	case "1K":
+		return 1, true
+	case "2K":
+		return 1.5, true
+	case "4K":
 		return 2, true
+	default:
+		return 0, false
 	}
 }
 
 // ImageRequestSizePriceRatio uses the conservative 2K tier when a request
 // leaves the size automatic or supplies an unrecognized value.
 func ImageRequestSizePriceRatio(size string) float64 {
-	if ratio, ok := ImageSizePriceRatio(size); ok {
-		return ratio
+	switch ImageRequestSizePriceTier(size) {
+	case "1K":
+		return 1
+	case "4K":
+		return 2
+	default:
+		return 1.5
 	}
-	return defaultImageSizePriceRatio
 }
 
 // ImageBillingParameters contains only the provider scalars parsed by request

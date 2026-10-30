@@ -248,25 +248,28 @@ func TestOpenAIImageResolutionPricing(t *testing.T) {
 	tests := []struct {
 		name      string
 		size      string
+		wantTier  string
 		wantRatio float64
 	}{
-		{name: "named 1K", size: "1K", wantRatio: 1},
-		{name: "one kilopixel dimensions", size: "1024x1024", wantRatio: 1},
-		{name: "named 2K", size: "2K", wantRatio: 1.5},
-		{name: "two kilopixel dimensions", size: "2048x1152", wantRatio: 1.5},
-		{name: "named 4K", size: "4K", wantRatio: 2},
-		{name: "four kilopixel dimensions", size: "3840x2160", wantRatio: 2},
-		{name: "just above 1K", size: "1025x1024", wantRatio: 1.5},
-		{name: "just above 2K", size: "2049x1024", wantRatio: 2},
-		{name: "automatic size", size: "auto", wantRatio: 1.5},
-		{name: "empty size", size: "", wantRatio: 1.5},
-		{name: "malformed size", size: "large", wantRatio: 1.5},
+		{name: "named 1K", size: "1K", wantTier: "1K", wantRatio: 1},
+		{name: "one kilopixel dimensions", size: "1024x1024", wantTier: "1K", wantRatio: 1},
+		{name: "named 2K", size: "2K", wantTier: "2K", wantRatio: 1.5},
+		{name: "two kilopixel dimensions", size: "2048x1152", wantTier: "2K", wantRatio: 1.5},
+		{name: "unicode dimensions", size: "2048\u00d71152", wantTier: "2K", wantRatio: 1.5},
+		{name: "named 4K", size: "4K", wantTier: "4K", wantRatio: 2},
+		{name: "four kilopixel dimensions", size: "3840x2160", wantTier: "4K", wantRatio: 2},
+		{name: "just above 1K", size: "1025x1024", wantTier: "2K", wantRatio: 1.5},
+		{name: "just above 2K", size: "2049x1024", wantTier: "4K", wantRatio: 2},
+		{name: "automatic size", size: "auto", wantTier: "2K", wantRatio: 1.5},
+		{name: "empty size", size: "", wantTier: "2K", wantRatio: 1.5},
+		{name: "malformed size", size: "large", wantTier: "2K", wantRatio: 1.5},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := &dto.ImageRequest{Model: "gpt-image-2.5-sunburst", Prompt: "draw a cat", Size: tt.size}
 			meta := req.GetTokenCountMeta()
+			require.Equal(t, tt.wantTier, dto.ImageRequestSizePriceTier(tt.size))
 			require.Equal(t, tt.wantRatio, meta.BillingRatios["image_size"])
 			require.Equal(t, 1.0, meta.BillingRatios["n"])
 		})
