@@ -75,9 +75,8 @@ export async function previewModelPricingConversion(request: {
 }): Promise<ModelPricingConversion> {
   const response = await api.post('/api/option/model_pricing/convert', request)
   if (!response.data.success) {
-    throw createServerError(
-      response.data,
-      t('Failed to prepare pricing conversion')
+    throw new Error(
+      response.data.message || t('Failed to prepare pricing conversion')
     )
   }
   return response.data.data
@@ -93,7 +92,7 @@ export async function previewModelPricing(request: {
 }> {
   const response = await api.post('/api/option/model_pricing/preview', request)
   if (!response.data.success) {
-    throw createServerError(response.data, t('Failed to load model pricing'))
+    throw new Error(response.data.message || t('Failed to load model pricing'))
   }
   return {
     effective: response.data.data.effective,

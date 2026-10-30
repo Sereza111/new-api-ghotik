@@ -172,7 +172,7 @@ func PreviewModelPricing(name string, draft PricingValues) (PricingValues, error
 	if err := ValidateModelPricing(name, draft); err != nil {
 		return nil, err
 	}
-	values, _, _, err := readModelPricingMaps(DB)
+	values, err := readModelPricingMaps(DB)
 	if err != nil {
 		return nil, err
 	}
