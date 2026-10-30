@@ -22,6 +22,7 @@ import type { PricingModel } from '../../types'
 import {
   calculateDiscountPercent,
   calculateReferencePriceFromDiscount,
+  getDynamicTokenDiscountPercent,
   getReferencePriceUSD,
 } from '../reference-price'
 
@@ -52,5 +53,14 @@ describe('reference model pricing', () => {
     expect(calculateReferencePriceFromDiscount(0.1, 80)).toBeCloseTo(0.5)
     expect(calculateReferencePriceFromDiscount(0.1, 0)).toBeNull()
     expect(calculateReferencePriceFromDiscount(0.1, 100)).toBeNull()
+  })
+
+  test('calculates the discount for dynamic token pricing', () => {
+    expect(getDynamicTokenDiscountPercent(model, 0.1)).toBe(98)
+    expect(
+      getDynamicTokenDiscountPercent(model, 0.1, {
+        groupRatioMultiplier: 2,
+      })
+    ).toBe(95)
   })
 })
