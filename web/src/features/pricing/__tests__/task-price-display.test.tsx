@@ -44,9 +44,29 @@ it('shows an explicit free request price alongside token prices with distinct un
       matchedTierLabel='free'
     />
   )
-  expect(screen.getAllByText('$0/request').length).toBeGreaterThan(0)
+  expect(
+    screen.getAllByText(/0(?:[.,]0+)?\s*\$\/request/).length
+  ).toBeGreaterThan(0)
   expect(screen.getAllByText('Input / 1M token').length).toBeGreaterThan(0)
   expect(screen.getAllByText('Price per request').length).toBeGreaterThan(0)
+})
+
+it('shows per-image size tiers with readable conditions and a fallback', () => {
+  render(
+    <DynamicPricingBreakdown billingExpr='(param("size") == "1K" ? tier("1K", fixed(0.00402)) : param("size") == "2K" ? tier("2K", fixed(0.00603)) : tier("4K", fixed(0.00804))) * image_count' />
+  )
+  expect(screen.getAllByText('Output image size = 1K').length).toBeGreaterThan(
+    0
+  )
+  expect(screen.getAllByText('Output image size = 2K').length).toBeGreaterThan(
+    0
+  )
+  expect(screen.getAllByText('Other cases').length).toBeGreaterThan(0)
+  for (const price of ['00402', '00603', '00804']) {
+    expect(
+      screen.getAllByText(new RegExp(`0[.,]${price}.*\\/image`)).length
+    ).toBeGreaterThan(0)
+  }
 })
 
 it('renders weekday and hour conditions as time windows instead of expression source', () => {
@@ -126,8 +146,8 @@ it('shows one standard task price and a localized group price without duplicate 
   expect(screen.queryByText('Tiered price table')).not.toBeInTheDocument()
   expect(screen.queryByText('Dynamic Pricing')).not.toBeInTheDocument()
   expect(screen.queryByText('music')).not.toBeInTheDocument()
-  expect(screen.getByText('$0.22')).toBeVisible()
-  expect(screen.getByText('$0.44')).toBeVisible()
+  expect(screen.getByText(/0[.,]22\s*\$/)).toBeVisible()
+  expect(screen.getByText(/0[.,]44\s*\$/)).toBeVisible()
   await act(() => i18next.changeLanguage('zhCN'))
   expect(screen.getAllByText('生成歌曲单价', { exact: false })).toHaveLength(2)
   await act(() => i18next.changeLanguage('fr'))
@@ -297,6 +317,6 @@ it('uses the same recharge conversion and token unit in task condition prices', 
       }}
     />
   )
-  expect(screen.getAllByText('$5/1M token')).toHaveLength(2)
-  expect(screen.getAllByText('$3/1M token')).toHaveLength(2)
+  expect(screen.getAllByText(/5\s*\$\/1M token/)).toHaveLength(2)
+  expect(screen.getAllByText(/3\s*\$\/1M token/)).toHaveLength(2)
 })

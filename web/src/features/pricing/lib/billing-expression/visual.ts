@@ -28,7 +28,7 @@ import {
 type Origin = { id: string; origin?: ExpressionNode }
 export type VisualComparison = Origin & {
   kind: 'comparison'
-  probe: 'p' | 'c' | 'len' | TimeFunction
+  probe: 'p' | 'c' | 'len' | 'image_size' | TimeFunction
   timezone: string
   operator: '<' | '<=' | '>' | '>=' | '==' | '!='
   value: string
@@ -57,13 +57,18 @@ export type VisualPricingNode =
       yes: VisualPricingNode
       no: VisualPricingNode
     })
-export type VisualBillingDocument = { source: string; root: VisualPricingNode }
+export type VisualBillingDocument = {
+  source: string
+  root: VisualPricingNode
+  imageCount?: boolean
+}
 export type VisualBillingIssue = { id: string; message: string }
 export type VisualBillingSerialization =
   | { ok: true; source: string }
   | { ok: false; issues: VisualBillingIssue[] }
 
 const COMPARISONS = new Set(['<', '<=', '>', '>=', '==', '!='])
+const IMAGE_SIZES = new Set(['1K', '2K', '4K'])
 const TIME_DOMAINS: Record<TimeFunction, [number, number]> = {
   hour: [0, 23],
   minute: [0, 59],
@@ -105,11 +110,29 @@ function readVisualCondition(node: ExpressionNode): VisualCondition | null {
   if (
     node.kind !== 'binary' ||
     !COMPARISONS.has(node.operator) ||
-    node.right.kind !== 'literal' ||
-    typeof node.right.value !== 'number'
+    node.right.kind !== 'literal'
   ) {
     return null
   }
+  if (
+    ['==', '!='].includes(node.operator) &&
+    node.left.kind === 'call' &&
+    node.left.name === 'param' &&
+    node.left.args[0]?.kind === 'literal' &&
+    node.left.args[0].value === 'size' &&
+    typeof node.right.value === 'string' &&
+    IMAGE_SIZES.has(node.right.value)
+  ) {
+    return {
+      ...identity,
+      kind: 'comparison',
+      probe: 'image_size',
+      timezone: '',
+      operator: node.operator as VisualComparison['operator'],
+      value: node.right.value,
+    }
+  }
+  if (typeof node.right.value !== 'number') return null
   let probe: VisualComparison['probe']
   let timezone = ''
   if (
@@ -134,6 +157,17 @@ function readVisualCondition(node: ExpressionNode): VisualCondition | null {
     operator: node.operator as VisualComparison['operator'],
     value: String(node.right.value),
   }
+}
+
+function imageCountPricingRoot(node: ExpressionNode): ExpressionNode | null {
+  if (node.kind !== 'binary' || node.operator !== '*') return null
+  if (node.right.kind === 'variable' && node.right.name === 'image_count') {
+    return node.left
+  }
+  if (node.left.kind === 'variable' && node.left.name === 'image_count') {
+    return node.right
+  }
+  return null
 }
 
 function readVisualPricing(node: ExpressionNode): VisualPricingNode | null {
@@ -206,9 +240,14 @@ export function parseVisualBillingDocument(
 ): VisualBillingDocument | null {
   const compiled = compileBillingExpression(source)
   if (compiled.status !== 'ready') return null
-  const root = readVisualPricing(compiled.ast)
+  const pricing = imageCountPricingRoot(compiled.ast) ?? compiled.ast
+  const root = readVisualPricing(pricing)
   if (!root) return null
-  const document = { source, root }
+  const document = {
+    source,
+    root,
+    ...(pricing !== compiled.ast ? { imageCount: true } : {}),
+  }
   return serializeVisualBillingDocument(document).ok ? document : null
 }
 
@@ -280,6 +319,38 @@ function writeVisualCondition(
       }
     }
     return `(${children.map((child) => `(${child})`).join(` ${operator} `)})`
+  }
+  if (node.probe === 'image_size') {
+    const value = node.value.toUpperCase()
+    if (!['==', '!='].includes(node.operator) || !IMAGE_SIZES.has(value)) {
+      issues.push({ id: node.id, message: 'Enter a valid condition value.' })
+    }
+    const probe = 'param("size")'
+    const valueText = JSON.stringify(value)
+    const origin = node.origin
+    if (
+      origin?.kind === 'binary' &&
+      origin.operator === node.operator &&
+      origin.left.kind === 'call' &&
+      origin.left.name === 'param' &&
+      origin.left.args[0]?.kind === 'literal' &&
+      origin.left.args[0].value === 'size'
+    ) {
+      return patchSource(source, origin, [
+        {
+          node: origin.left,
+          text: source.slice(origin.left.start, origin.left.end),
+        },
+        {
+          node: origin.right,
+          text:
+            origin.right.kind === 'literal' && origin.right.value === value
+              ? source.slice(origin.right.start, origin.right.end)
+              : valueText,
+        },
+      ])
+    }
+    return `(${probe} ${node.operator} ${valueText})`
   }
   const value = parseNonNegativeNumber(node.value)
   let valid = value !== null
@@ -465,7 +536,14 @@ export function serializeVisualBillingDocument(
   document: VisualBillingDocument
 ): VisualBillingSerialization {
   const issues: VisualBillingIssue[] = []
-  const body = writeVisualPricing(document.root, document.source, issues)
+  let body = writeVisualPricing(document.root, document.source, issues)
+  if (
+    document.imageCount &&
+    document.root.kind === 'branch' &&
+    document.root.origin?.kind !== 'conditional'
+  ) {
+    body = `(${body})`
+  }
   if (issues.length > 0) return { ok: false, issues }
   const original = compileBillingExpression(document.source)
   if (original.status !== 'ready') {
@@ -480,9 +558,29 @@ export function serializeVisualBillingDocument(
       ],
     }
   }
+  const pricingOrigin = document.imageCount
+    ? imageCountPricingRoot(original.ast)
+    : original.ast
+  if (!pricingOrigin) {
+    return {
+      ok: false,
+      issues: [
+        {
+          id: document.root.id,
+          message:
+            'This expression cannot be edited visually without losing information.',
+        },
+      ],
+    }
+  }
+  const replacement = document.imageCount
+    ? patchSource(document.source, original.ast, [
+        { node: pricingOrigin, text: body },
+      ])
+    : body
   const source =
     document.source.slice(0, original.ast.start) +
-    body +
+    replacement +
     document.source.slice(original.ast.end)
   if (compileBillingExpression(source).status !== 'ready') {
     return {

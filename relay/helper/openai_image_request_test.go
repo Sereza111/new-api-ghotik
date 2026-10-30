@@ -102,6 +102,8 @@ func TestGetAndValidOpenAIImageRequestMultipartStream(t *testing.T) {
 		billing, err := ResolveImageBillingRequestInput(c, &relaycommon.RelayInfo{Request: req}, billingexpr.RequestInput{})
 		require.NoError(t, err)
 		require.Equal(t, 1, *billing.ImageCount)
+		require.Equal(t, "2K", *billing.ImageSize)
+		require.JSONEq(t, `{"model":"gpt-image-1","n":1,"size":"2K","quality":"standard"}`, string(billing.Body))
 		require.NotContains(t, string(billing.Body), "fake image")
 		require.NotContains(t, string(billing.Body), "edit this image")
 	})
@@ -133,6 +135,7 @@ func TestImageBillingRequestUsesValidatedProviderCount(t *testing.T) {
 		{`{"model":"z-image","parameters":{"n":128}}`, constant.ChannelTypeAli, 128, false},
 		{`{"model":"z-image","n":0}`, constant.ChannelTypeAli, 1, false},
 		{`{"model":"gpt-image-2","n":2,"parameters":{"n":0}}`, constant.ChannelTypeOpenAI, 2, false},
+		{`{"model":"gpt-image-2","n":2,"size":"3840x2160"}`, constant.ChannelTypeOpenAI, 2, false},
 	} {
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewBufferString(tc.body))
@@ -147,6 +150,11 @@ func TestImageBillingRequestUsesValidatedProviderCount(t *testing.T) {
 		input, err := ResolveImageBillingRequestInput(c, &relaycommon.RelayInfo{Request: request}, billingexpr.RequestInput{})
 		require.NoError(t, err)
 		require.Equal(t, tc.count, *input.ImageCount)
+		if request.Size == "3840x2160" {
+			require.Equal(t, "4K", *input.ImageSize)
+		} else {
+			require.Equal(t, "2K", *input.ImageSize)
+		}
 		cost, _, err := billingexpr.RunExprWithRequest(`tier("image", fixed(0.04)) * image_count`, billingexpr.TokenParams{}, input)
 		require.NoError(t, err)
 		require.Equal(t, float64(tc.count)*40000, cost)
@@ -305,5 +313,9 @@ func TestOpenAIImageResolutionPricing(t *testing.T) {
 		meta := req.GetTokenCountMeta()
 		require.Equal(t, 2.0, meta.BillingRatios["image_size"])
 		require.Equal(t, 2.0, meta.BillingRatios["n"])
+		input, err := ResolveImageBillingRequestInput(c, &relaycommon.RelayInfo{Request: req}, billingexpr.RequestInput{})
+		require.NoError(t, err)
+		require.Equal(t, "4K", *input.ImageSize)
+		require.Contains(t, string(input.Body), `"size":"4K"`)
 	})
 }

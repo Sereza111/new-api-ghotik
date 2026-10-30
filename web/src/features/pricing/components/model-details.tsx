@@ -1146,6 +1146,11 @@ function GroupPricingSection(props: {
                               if (tier.conditionText) {
                                 return `${tier.label}: ${formatBillingCondition(tier.conditionText, t, i18n.language) ?? tier.conditionText}`
                               }
+                              if (dynamicTiers.length > 1) {
+                                return tier.label
+                                  ? `${tier.label}: ${t('Other cases')}`
+                                  : t('Other cases')
+                              }
                               return tier.label || t('Default')
                             },
                           },

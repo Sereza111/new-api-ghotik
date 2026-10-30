@@ -14,6 +14,9 @@ type RequestInput struct {
 	// ImageCount is a validated billing quantity, separate from the frozen
 	// request's n. Settlement can replace it with the actual returned count.
 	ImageCount *int
+	// ImageSize is the canonical 1K/2K/4K billing tier, separate from the
+	// provider request body. Outbound overrides and actual results can replace it.
+	ImageSize *string
 }
 
 // TokenParams holds all token dimensions passed into an Expr evaluation.
@@ -63,6 +66,7 @@ type TraceResult struct {
 // compiled program pointers.
 type BillingSnapshot struct {
 	EstimatedImageCount       *int           `json:"estimated_image_count,omitempty"`
+	EstimatedImageSize        *string        `json:"estimated_image_size,omitempty"`
 	BillingMode               string         `json:"billing_mode"`
 	ModelName                 string         `json:"model_name"`
 	ExprString                string         `json:"expr_string"`

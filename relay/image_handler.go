@@ -24,6 +24,7 @@ import (
 func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
 	info.BillingImageCount = nil
+	info.BillingImageSize = nil
 	info.ImageRequestCount = 0
 
 	imageReq, ok := info.Request.(*dto.ImageRequest)
@@ -51,6 +52,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
 	promptExtend := request.BillingParameters != nil && request.BillingParameters.PromptExtend != nil && *request.BillingParameters.PromptExtend
+	imageSize := request.Size
 
 	var requestBody io.Reader
 	var jsonData []byte
@@ -99,6 +101,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		// and pass-through bodies can change the quantity actually submitted.
 		var outbound struct {
 			N          *uint                       `json:"n"`
+			Size       string                      `json:"size"`
 			Parameters *dto.ImageBillingParameters `json:"parameters"`
 		}
 		if err := common.Unmarshal(jsonData, &outbound); err != nil {
@@ -113,6 +116,9 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
 		promptExtend = outbound.Parameters != nil && outbound.Parameters.PromptExtend != nil && *outbound.Parameters.PromptExtend
+		if outbound.Size != "" {
+			imageSize = outbound.Size
+		}
 		if info.ChannelType == constant.ChannelTypeAli {
 			// Always send the same explicit quantity that is reserved, including
 			// when an empty parameters object accompanies a top-level n.
@@ -129,7 +135,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		defer closer.Close()
 		requestBody = body
 	}
-	if billingErr := service.PrepareImageBillingForRequest(c, info, imageCount, promptExtend); billingErr != nil {
+	if billingErr := service.PrepareImageBillingForRequest(c, info, imageCount, imageSize, promptExtend); billingErr != nil {
 		return billingErr
 	}
 

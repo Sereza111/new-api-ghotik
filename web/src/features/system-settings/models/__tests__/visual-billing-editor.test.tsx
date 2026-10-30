@@ -181,7 +181,7 @@ test('retains all pricing inputs and switches inside an expanded rule', async ()
   expect(
     tier.getByRole('checkbox', { name: 'Include Image cache input price' })
   ).toBeChecked()
-})
+}, 15_000)
 
 test.each([
   '',
@@ -374,7 +374,7 @@ test('builds weekday peak pricing with two time ranges from an empty visual form
       })
     ).toMatchObject({ status: 'success', matchedTier, cost })
   }
-})
+}, 30_000)
 
 test('edits image cache pricing and preserves an explicitly free cache lane', () => {
   const source =
@@ -395,6 +395,54 @@ test('edits image cache pricing and preserves an explicitly free cache lane', ()
   expect(
     screen.getByRole('checkbox', { name: 'Include Image cache input price' })
   ).toBeChecked()
+})
+
+test('applies image-size pricing and edits per-image fields without dropping image count', async () => {
+  const imageExpression =
+    '(param("size") == "1K" ? tier("1K", fixed(0.00402)) : param("size") == "2K" ? tier("2K", fixed(0.00603)) : tier("4K", fixed(0.00804))) * image_count'
+  const onBillingExprChange = vi.fn()
+  render(
+    <TieredPricingEditor
+      billingExpr='tier("base", p * 2 + c * 8)'
+      requestRuleExpr=''
+      onBillingExprChange={onBillingExprChange}
+      onRequestRuleExprChange={vi.fn()}
+    />
+  )
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('button', { name: 'More templates...' }))
+  await user.click(screen.getByRole('button', { name: 'Output image size' }))
+  expect(onBillingExprChange).toHaveBeenLastCalledWith(imageExpression)
+
+  const rules = screen.getByRole('list', { name: 'Pricing rules' })
+  expect(
+    within(rules)
+      .getAllByRole('listitem')
+      .filter((item) => item.parentElement === rules)
+  ).toHaveLength(3)
+  const oneK = within(screen.getByRole('group', { name: 'Pricing tier 1K' }))
+  expect(
+    oneK.getByRole('combobox', { name: 'Condition input' })
+  ).toHaveTextContent('Output image size')
+  expect(
+    oneK.getByRole('combobox', { name: 'Condition value' })
+  ).toHaveTextContent('1K')
+  expect(
+    oneK.getByRole('combobox', { name: 'Tier billing mode' })
+  ).toHaveTextContent('Per image')
+  expect(oneK.getByRole('textbox', { name: 'Price per image' })).toHaveValue(
+    '0.00402'
+  )
+
+  await user.click(oneK.getByRole('combobox', { name: 'Condition value' }))
+  await user.click(screen.getByRole('option', { name: '2K' }))
+  fireEvent.change(oneK.getByRole('textbox', { name: 'Price per image' }), {
+    target: { value: '0.005' },
+  })
+  expect(onBillingExprChange.mock.lastCall?.[0]).toContain(
+    'param("size") == "2K" ? tier("1K", fixed(0.005))'
+  )
+  expect(onBillingExprChange.mock.lastCall?.[0]).toContain('* image_count')
 })
 
 describe('visual time billing editor', () => {

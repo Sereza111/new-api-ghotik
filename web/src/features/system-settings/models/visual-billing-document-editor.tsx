@@ -54,6 +54,7 @@ type PricingNodeProps = {
   source: string
   currency: PricingCurrency
   issues: VisualBillingIssue[]
+  imageCount?: boolean
   onChange: (node: VisualPricingNode) => void
 }
 
@@ -108,6 +109,7 @@ function PricingTierFields(
       </div>
       <TierPriceFields
         currency={props.currency}
+        imageCount={props.imageCount}
         billingUnit={node.billingUnit}
         fixedPrice={node.fixedPrice}
         onBillingUnitChange={(billingUnit) =>
@@ -250,10 +252,13 @@ function PricingRuleCard(
               <span className='flex flex-wrap gap-x-4 gap-y-1 text-xs tabular-nums'>
                 {tier.billingUnit === 'request' ? (
                   <span>
-                    {t('Price per request')}:{' '}
+                    {t(
+                      props.imageCount ? 'Price per image' : 'Price per request'
+                    )}
+                    :{' '}
                     {formatPricingAmount(tier.fixedPrice, props.currency) ||
                       '—'}
-                    /{t('request')}
+                    /{t(props.imageCount ? 'image' : 'request')}
                   </span>
                 ) : (
                   <>
@@ -395,6 +400,7 @@ export function VisualBillingDocumentEditor(props: {
         source={props.document.source}
         currency={props.currency}
         issues={props.issues}
+        imageCount={props.document.imageCount}
         onChange={(root) => props.onChange({ ...props.document, root })}
       />
     </div>

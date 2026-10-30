@@ -101,14 +101,30 @@ function conditionRows(
   return rows
 }
 
+function conditionValueForProbe(
+  comparison: VisualComparison,
+  probe: VisualComparison['probe']
+): string {
+  if (probe === 'image_size') {
+    return ['1K', '2K', '4K'].includes(comparison.value)
+      ? comparison.value
+      : '1K'
+  }
+  if (comparison.probe === 'image_size') return ''
+  return comparison.value
+}
+
 function ComparisonOperator(props: {
+  probe: VisualComparison['probe']
   value: VisualComparison['operator']
   onChange: (value: VisualComparison['operator']) => void
 }) {
   const { t } = useTranslation()
+  const operators =
+    props.probe === 'image_size' ? (['==', '!='] as const) : OPERATORS
   return (
     <Select
-      items={OPERATORS.map((value) => ({ value, label: value }))}
+      items={operators.map((value) => ({ value, label: value }))}
       value={props.value}
       onValueChange={(value) => value && props.onChange(value)}
     >
@@ -120,7 +136,7 @@ function ComparisonOperator(props: {
         <SelectValue />
       </SelectTrigger>
       <SelectContent alignItemWithTrigger={false}>
-        {OPERATORS.map((operator) => (
+        {operators.map((operator) => (
           <SelectItem key={operator} value={operator}>
             {operator}
           </SelectItem>
@@ -252,6 +268,7 @@ function ConditionFields(props: ConditionProps) {
       <div className='flex min-w-0 flex-1 flex-wrap items-center gap-2'>
         <BillingTimeProbeFields
           includeTokens
+          includeImageSize
           probe={comparison.probe}
           timezone={comparison.timezone}
           invalidTimezone={errors.some(
@@ -259,11 +276,31 @@ function ConditionFields(props: ConditionProps) {
           )}
           onChange={(probe, timezone) => {
             if (node.kind === 'comparison') {
-              props.onChange({ ...node, probe, timezone })
+              props.onChange({
+                ...node,
+                probe,
+                timezone,
+                operator:
+                  probe === 'image_size' &&
+                  !['==', '!='].includes(node.operator)
+                    ? '=='
+                    : node.operator,
+                value: conditionValueForProbe(node, probe),
+              })
             } else if (range && (node.kind === 'all' || node.kind === 'any')) {
               props.onChange({
                 ...node,
-                children: range.map((bound) => ({ ...bound, probe, timezone })),
+                children: range.map((bound) => ({
+                  ...bound,
+                  probe,
+                  timezone,
+                  operator:
+                    probe === 'image_size' &&
+                    !['==', '!='].includes(bound.operator)
+                      ? '=='
+                      : bound.operator,
+                  value: conditionValueForProbe(bound, probe),
+                })),
               })
             }
           }}
@@ -271,6 +308,7 @@ function ConditionFields(props: ConditionProps) {
         {node.kind === 'comparison' && (
           <>
             <ComparisonOperator
+              probe={node.probe}
               value={node.operator}
               onChange={(operator) => props.onChange({ ...node, operator })}
             />
@@ -301,6 +339,7 @@ function ConditionFields(props: ConditionProps) {
             )}
             startOperator={
               <ComparisonOperator
+                probe={range[0].probe}
                 value={range[0].operator}
                 onChange={(operator) =>
                   props.onChange({
@@ -312,6 +351,7 @@ function ConditionFields(props: ConditionProps) {
             }
             endOperator={
               <ComparisonOperator
+                probe={range[1].probe}
                 value={range[1].operator}
                 onChange={(operator) =>
                   props.onChange({

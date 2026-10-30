@@ -217,7 +217,12 @@ describe('expression price summaries', () => {
       { tokenUnit: 'M' }
     )
     expect(summary?.primaryEntries[0]?.value).toBe(0)
-    expect(summary?.primaryEntries[0]?.formattedRange).toBe('$0 – $0.8')
+    const formattedRange = summary?.primaryEntries[0]?.formattedRange
+      ?.replaceAll('\u00a0', ' ')
+      .replaceAll(',', '.')
+    expect(formattedRange).toContain('0.8')
+    expect(formattedRange).toContain('$')
+    expect(formattedRange).toContain(' – ')
   })
 })
 

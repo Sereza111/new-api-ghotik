@@ -509,30 +509,35 @@ func TestOpenaiImageHandlerSettlesResolutionFromResponse(t *testing.T) {
 		body          string
 		requestRatio  float64
 		wantSizeRatio float64
+		wantTier      string
 	}{
 		{
 			name:          "verified base64 output can lower estimate",
 			body:          `{"data":[{"b64_json":"` + encodedPNG(t, 1024, 1) + `"}]}`,
 			requestRatio:  2,
 			wantSizeRatio: 1,
+			wantTier:      "1K",
 		},
 		{
 			name:          "largest verified output tier wins",
 			body:          `{"data":[{"b64_json":"` + encodedPNG(t, 1024, 1) + `"},{"b64_json":"` + encodedPNG(t, 2048, 1) + `"}]}`,
 			requestRatio:  1,
 			wantSizeRatio: 1.5,
+			wantTier:      "2K",
 		},
 		{
 			name:          "unverified metadata cannot lower estimate",
 			body:          `{"data":[{"url":"https://example.com/image.png","size":"1024x1024"}]}`,
 			requestRatio:  2,
 			wantSizeRatio: 2,
+			wantTier:      "4K",
 		},
 		{
 			name:          "unverified metadata can raise estimate",
 			body:          `{"data":[{"url":"https://example.com/image.png","output_size":"3840x2160"}]}`,
 			requestRatio:  1,
 			wantSizeRatio: 2,
+			wantTier:      "4K",
 		},
 	}
 
@@ -542,11 +547,14 @@ func TestOpenaiImageHandlerSettlesResolutionFromResponse(t *testing.T) {
 			info.PriceData.UsePrice = true
 			info.PriceData.AddOtherRatio("n", 1)
 			info.PriceData.AddOtherRatio("image_size", tt.requestRatio)
+			requestTier := map[float64]string{1: "1K", 1.5: "2K", 2: "4K"}[tt.requestRatio]
+			info.TieredBillingSnapshot = &billingexpr.BillingSnapshot{EstimatedImageSize: &requestTier}
 
 			_, err := OpenaiImageHandler(c, info, resp)
 
 			require.Nil(t, err)
 			require.Equal(t, tt.wantSizeRatio, info.PriceData.OtherRatios()["image_size"])
+			require.Equal(t, tt.wantTier, info.RequestedImageSize())
 		})
 	}
 }

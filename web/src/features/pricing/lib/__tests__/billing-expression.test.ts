@@ -98,6 +98,8 @@ test('evaluates and round-trips separate image cache prices including an explici
 export const peakCondition =
   'weekday("Asia/Shanghai") >= 1 && weekday("Asia/Shanghai") <= 5 && ((hour("Asia/Shanghai") >= 9 && hour("Asia/Shanghai") < 12) || (hour("Asia/Shanghai") >= 14 && hour("Asia/Shanghai") < 18))'
 export const deepSeekExpression = `${peakCondition} ? tier("peak", p * 3 + cr * 0.10 + c * 9) : tier("off_peak", p * 1.5 + cr * 0.05 + c * 4.5)`
+const imageSizeExpression =
+  '(param("size") == "1K" ? tier("1K", fixed(0.00402)) : param("size") == "2K" ? tier("2K", fixed(0.00603)) : tier("4K", fixed(0.00804))) * image_count'
 
 afterEach(() => vi.useRealTimers())
 
@@ -127,6 +129,41 @@ describe('local billing expression evaluation', () => {
       ok: true,
       source,
     })
+  })
+  test('parses public image-size tiers with per-image prices and a readable fallback', () => {
+    const compiled = compileBillingExpression(imageSizeExpression)
+    assert(compiled.status === 'ready')
+    expect(readTokenTierChain(compiled.ast, compiled.source)).toEqual([
+      {
+        label: '1K',
+        conditions: [],
+        prices: {},
+        billingUnit: 'request',
+        fixedPrice: 0.00402,
+        conditionText: 'param("size") == "1K"',
+        imageCount: true,
+      },
+      {
+        label: '2K',
+        conditions: [],
+        prices: {},
+        billingUnit: 'request',
+        fixedPrice: 0.00603,
+        conditionText: 'param("size") == "2K"',
+        imageCount: true,
+      },
+      {
+        label: '4K',
+        conditions: [],
+        prices: {},
+        billingUnit: 'request',
+        fixedPrice: 0.00804,
+        imageCount: true,
+      },
+    ])
+    expect(
+      formatBillingCondition('param("size") == "2K"', (key: string) => key)
+    ).toBe('Output image size = 2K')
   })
   test('localizes peak and complement conditions without exposing source code', async () => {
     const translations = createInstance()
@@ -320,6 +357,40 @@ describe('local billing expression evaluation', () => {
 })
 
 describe('visual billing document', () => {
+  test('edits image-size prices without dropping the image count multiplier', () => {
+    const document = parseVisualBillingDocument(imageSizeExpression)
+    assert(document)
+    expect(document.imageCount).toBe(true)
+    if (document.root.kind !== 'branch' || document.root.yes.kind !== 'tier') {
+      throw new Error('Expected image-size pricing branches')
+    }
+    expect(document.root.condition).toMatchObject({
+      kind: 'comparison',
+      probe: 'image_size',
+      operator: '==',
+      value: '1K',
+    })
+    document.root.yes.fixedPrice = '0.005'
+    const result = serializeVisualBillingDocument(document)
+    expect(result).toEqual({
+      ok: true,
+      source: imageSizeExpression.replace('0.00402', '0.005'),
+    })
+    if (!result.ok) return
+    const evaluated = evaluateBillingExpression(result.source, {
+      imageCount: 3,
+      request: { body: { size: '1K' } },
+    })
+    expect(evaluated).toMatchObject({
+      status: 'success',
+      matchedTier: '1K',
+      billingUnit: 'request',
+    })
+    if (evaluated.status === 'success') {
+      expect(evaluated.cost).toBeCloseTo(15000)
+    }
+  })
+
   test.each([
     deepSeekExpression,
     `v1:  (hour('Asia/Shanghai') >= 9 ? tier('peak', cr * 0 + p * 3e0 + c * 9) : tier('off', c * 4.5 + p * 1.5))  `,

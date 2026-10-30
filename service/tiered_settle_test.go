@@ -311,6 +311,71 @@ func TestTryTieredSettle_NoRequestInput_FallsBackToDefault(t *testing.T) {
 	}
 }
 
+func TestImageBillingCombinesOutboundAndActualCountWithCanonicalSize(t *testing.T) {
+	const expr = `param("size") == "1K" ? tier("1K", fixed(0.01)) * image_count : param("size") == "4K" ? tier("4K", fixed(0.04)) * image_count : tier("2K", fixed(0.02)) * image_count`
+	requestedCount := 1
+	requestedSize := "1K"
+	billing := &recordingBillingSettler{preConsumedQuota: 5_000}
+	info := &relaycommon.RelayInfo{
+		Billing:     billing,
+		ChannelMeta: &relaycommon.ChannelMeta{},
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			BillingMode:               "tiered_expr",
+			ExprString:                expr,
+			ExprHash:                  billingexpr.ExprHashString(expr),
+			GroupRatio:                1,
+			EstimatedImageCount:       &requestedCount,
+			EstimatedImageSize:        &requestedSize,
+			EstimatedQuotaBeforeGroup: 5_000,
+			EstimatedQuotaAfterGroup:  5_000,
+			QuotaPerUnit:              testQuotaPerUnit,
+		},
+		BillingRequestInput: &billingexpr.RequestInput{
+			Body:       []byte(`{"size":"1K","n":1}`),
+			ImageCount: &requestedCount,
+			ImageSize:  &requestedSize,
+		},
+		PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}},
+	}
+
+	require.Nil(t, PrepareImageBillingForRequest(nil, info, 3, "4K", false))
+	assert.Equal(t, []int{60_000}, billing.reserveTargets)
+	assert.Equal(t, 3, *info.TieredBillingSnapshot.EstimatedImageCount)
+	assert.Equal(t, "4K", *info.TieredBillingSnapshot.EstimatedImageSize)
+	assert.Equal(t, "1K", *info.BillingRequestInput.ImageSize, "frozen ingress input must not be mutated")
+	assert.Empty(t, info.PriceData.OtherRatios(), "expression pricing must not add legacy ratios")
+
+	actualCount := 2
+	actualSize := "1K"
+	info.BillingImageCount = &actualCount
+	info.BillingImageSize = &actualSize
+	ok, quota, result := TryTieredSettle(info, billingexpr.TokenParams{})
+	require.True(t, ok)
+	require.NotNil(t, result)
+	assert.Equal(t, 10_000, quota)
+	assert.Equal(t, "1K", result.MatchedTier)
+}
+
+func TestPrepareImageBillingForRequestPreservesLegacyResolutionRatio(t *testing.T) {
+	billing := &recordingBillingSettler{preConsumedQuota: 50_000}
+	info := &relaycommon.RelayInfo{
+		Billing:     billing,
+		ChannelMeta: &relaycommon.ChannelMeta{},
+		PriceData: types.PriceData{
+			UsePrice:       true,
+			ModelPrice:     0.1,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+	}
+	info.PriceData.AddOtherRatio("n", 1)
+	info.PriceData.AddOtherRatio("image_size", 1)
+
+	require.Nil(t, PrepareImageBillingForRequest(nil, info, 2, "4K", false))
+	assert.Equal(t, []int{200_000}, billing.reserveTargets)
+	assert.Equal(t, 2.0, info.PriceData.OtherRatios()["n"])
+	assert.Equal(t, 2.0, info.PriceData.OtherRatios()["image_size"])
+}
+
 // ---------------------------------------------------------------------------
 // Group ratio tests
 // ---------------------------------------------------------------------------

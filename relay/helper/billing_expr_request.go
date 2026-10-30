@@ -55,7 +55,8 @@ func ResolveImageBillingRequestInput(c *gin.Context, info *relaycommon.RelayInfo
 	if err != nil {
 		return input, err
 	}
-	body := map[string]any{"model": request.Model, "n": topLevelCount, "size": request.Size, "quality": request.Quality}
+	imageSize := dto.ImageRequestSizePriceTier(request.Size)
+	body := map[string]any{"model": request.Model, "n": topLevelCount, "size": imageSize, "quality": request.Quality}
 	if request.BillingParameters != nil {
 		body["parameters"] = request.BillingParameters
 	}
@@ -65,6 +66,7 @@ func ResolveImageBillingRequestInput(c *gin.Context, info *relaycommon.RelayInfo
 	}
 	input.Body = encoded
 	input.ImageCount = &count
+	input.ImageSize = &imageSize
 	return input, nil
 }
 
@@ -102,6 +104,10 @@ func cloneRequestInput(src billingexpr.RequestInput) billingexpr.RequestInput {
 	if src.ImageCount != nil {
 		count := *src.ImageCount
 		input.ImageCount = &count
+	}
+	if src.ImageSize != nil {
+		size := *src.ImageSize
+		input.ImageSize = &size
 	}
 	if len(src.Body) > 0 {
 		input.Body = append([]byte(nil), src.Body...)

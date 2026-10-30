@@ -17,24 +17,30 @@ import (
 
 // PrepareImageBillingForRequest reserves the effective outbound image quantity
 // before each attempt, including channel retries and parameter overrides. The
-// client request body stays frozen; only the independent quantity is refreshed.
-func PrepareImageBillingForRequest(c *gin.Context, info *relaycommon.RelayInfo, count int, promptExtend bool) *types.NewAPIError {
+// client request body stays frozen; independent billing inputs are refreshed.
+func PrepareImageBillingForRequest(c *gin.Context, info *relaycommon.RelayInfo, count int, size string, promptExtend bool) *types.NewAPIError {
 	if count < 1 || count > dto.MaxImageN {
 		return types.NewErrorWithStatusCode(fmt.Errorf("image_count must be an integer between 1 and %d", dto.MaxImageN), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
 	info.ImageRequestCount = count
+	imageSize := dto.ImageRequestSizePriceTier(size)
 	var quota int
 	var err error
 	if snap := info.TieredBillingSnapshot; snap != nil && snap.BillingMode == "tiered_expr" {
-		// Token-only image expressions must not acquire a quantity multiplier.
-		if snap.EstimatedImageCount == nil {
+		// Token-only image expressions must not acquire image request inputs.
+		if snap.EstimatedImageCount == nil && snap.EstimatedImageSize == nil {
 			return nil
 		}
 		request := billingexpr.RequestInput{}
 		if info.BillingRequestInput != nil {
 			request = *info.BillingRequestInput
 		}
-		request.ImageCount = &count
+		if snap.EstimatedImageCount != nil {
+			request.ImageCount = &count
+		}
+		if snap.EstimatedImageSize != nil {
+			request.ImageSize = &imageSize
+		}
 		cost, trace, runErr := billingexpr.RunExprByHashWithRequest(snap.ExprString, snap.ExprHash, billingexpr.TokenParams{
 			P: float64(snap.EstimatedPromptTokens), C: float64(snap.EstimatedCompletionTokens), Len: float64(snap.EstimatedPromptTokens),
 		}, request)
@@ -45,6 +51,10 @@ func PrepareImageBillingForRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 		quota, err = billingexpr.QuotaRoundStrict(beforeGroup * info.PriceData.GroupRatioInfo.GroupRatio)
 		if err == nil {
 			snap.EstimatedImageCount = trace.ImageCount
+			if request.ImageSize != nil {
+				sizeCopy := *request.ImageSize
+				snap.EstimatedImageSize = &sizeCopy
+			}
 			snap.EstimatedQuotaBeforeGroup = beforeGroup
 			snap.EstimatedQuotaAfterGroup = quota
 			snap.EstimatedTier = trace.MatchedTier
@@ -60,6 +70,9 @@ func PrepareImageBillingForRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 		// Overwrite per-attempt ratios so a failed Ali attempt cannot leak its
 		// quantity or prompt-extension surcharge into another channel.
 		info.PriceData.AddOtherRatio("n", float64(quantity))
+		if info.PriceData.HasOtherRatio("image_size") {
+			info.PriceData.AddOtherRatio("image_size", dto.ImageRequestSizePriceRatio(imageSize))
+		}
 		extensionRatio := 1.0
 		if info.ChannelType == constant.ChannelTypeAli && strings.Contains(info.UpstreamModelName, "z-image") && promptExtend {
 			extensionRatio = common.ZImagePromptExtendMultiplier

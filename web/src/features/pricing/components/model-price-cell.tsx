@@ -27,12 +27,18 @@ import {
   getDynamicDisplayGroupRatio,
   getDynamicPriceUnitLabelKey,
   getDynamicPricingSummary,
+  formatDynamicUnitPrice,
   isUnconfiguredTaskUsageModel,
 } from '../lib/dynamic-price'
 import { isTokenBasedModel } from '../lib/model-helpers'
-import { formatPrice, formatRequestPrice, stripTrailingZeros } from '../lib/price'
+import {
+  formatPrice,
+  formatRequestPrice,
+  stripTrailingZeros,
+} from '../lib/price'
 import {
   formatReferencePrice,
+  getDynamicTokenDiscountPercent,
   getRequestDiscountPercent,
   getTokenDiscountPercent,
 } from '../lib/reference-price'
@@ -60,15 +66,16 @@ export function ModelPriceCell(props: {
   const tokenUnit = options.tokenUnit ?? DEFAULT_TOKEN_UNIT
   const tokenUnitLabel = tokenUnit === 'K' ? '1K' : '1M'
   const billingTime = useBillingTime(props.model.billing_expr)
+  const dynamicGroupRatio = getDynamicDisplayGroupRatio(
+    props.model,
+    options.selectedGroup
+  )
   const dynamic = getDynamicPricingSummary(props.model, {
     ...options,
     now: billingTime === undefined ? undefined : new Date(billingTime),
     tokenUnit,
     showCurrencySymbol: false,
-    groupRatioMultiplier: getDynamicDisplayGroupRatio(
-      props.model,
-      options.selectedGroup
-    ),
+    groupRatioMultiplier: dynamicGroupRatio,
   })
   let metrics: Array<{ label: string; value: string }>
   let caption = t('{{currency}} / {{unit}} tokens', {
@@ -94,6 +101,67 @@ export function ModelPriceCell(props: {
     const hasRequestPrice = dynamic.primaryEntries.some(
       (entry) => entry.unit === 'request' || entry.unit === 'image'
     )
+    const inputEntry = dynamic.primaryEntries.find(
+      (entry) => entry.field === 'inputPrice'
+    )
+    const outputEntry = dynamic.primaryEntries.find(
+      (entry) => entry.field === 'outputPrice'
+    )
+    const referenceInputPrice = formatReferencePrice(
+      props.model,
+      'input',
+      tokenUnit
+    )
+    const referenceOutputPrice = formatReferencePrice(
+      props.model,
+      'output',
+      tokenUnit
+    )
+    if (
+      !dynamic.isTaskUsage &&
+      !hasRequestPrice &&
+      inputEntry &&
+      outputEntry &&
+      referenceInputPrice &&
+      referenceOutputPrice
+    ) {
+      const currentPrices = [inputEntry, outputEntry].map((entry) =>
+        stripTrailingZeros(
+          formatDynamicUnitPrice(entry.value, {
+            ...options,
+            tokenUnit,
+            groupRatioMultiplier: dynamicGroupRatio,
+          })
+        )
+      )
+      const comparisonCaption = [
+        `/ ${tokenUnitLabel} tokens`,
+        dynamic.isTimePricing ? t('Current period price') : null,
+        dynamic.tierCount > 1
+          ? t('{{count}} tiers', { count: dynamic.tierCount })
+          : null,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+
+      return (
+        <PriceComparison
+          currentPrices={currentPrices}
+          referencePrices={[referenceInputPrice, referenceOutputPrice]}
+          discountPercent={getDynamicTokenDiscountPercent(
+            props.model,
+            inputEntry.value,
+            {
+              showRechargePrice: options.showRechargePrice,
+              priceRate: options.priceRate,
+              usdExchangeRate: options.usdExchangeRate,
+              groupRatioMultiplier: dynamicGroupRatio,
+            }
+          )}
+          unit={comparisonCaption}
+        />
+      )
+    }
     metrics = dynamic.primaryEntries
       .slice(0, hasRequestPrice ? 3 : 2)
       .map((entry) => {
@@ -187,16 +255,12 @@ export function ModelPriceCell(props: {
         <PriceComparison
           currentPrices={[inputPrice, outputPrice]}
           referencePrices={referencePrices}
-          discountPercent={getTokenDiscountPercent(
-            props.model,
-            'input',
-            {
-              showRechargePrice: options.showRechargePrice,
-              priceRate: options.priceRate,
-              usdExchangeRate: options.usdExchangeRate,
-              selectedGroup: options.selectedGroup,
-            }
-          )}
+          discountPercent={getTokenDiscountPercent(props.model, 'input', {
+            showRechargePrice: options.showRechargePrice,
+            priceRate: options.priceRate,
+            usdExchangeRate: options.usdExchangeRate,
+            selectedGroup: options.selectedGroup,
+          })}
           unit={`/ ${tokenUnitLabel} tokens`}
         />
       )

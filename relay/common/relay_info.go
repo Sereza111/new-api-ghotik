@@ -189,6 +189,7 @@ type RelayInfo struct {
 	TieredBillingSnapshot *billingexpr.BillingSnapshot
 	BillingRequestInput   *billingexpr.RequestInput
 	BillingImageCount     *int
+	BillingImageSize      *string
 	// ImageRequestCount is the effective quantity sent on the current attempt;
 	// ImageQuotaBeforeGroup is the frozen legacy estimate before request ratios.
 	ImageRequestCount     int
@@ -247,6 +248,37 @@ func (info *RelayInfo) RequestedImageCount() int {
 		return int(count)
 	}
 	return 1
+}
+
+// UpdateImageSize records a canonical actual output tier for expression
+// billing. Verified image bytes may lower the request-time estimate; metadata
+// is allowed only to raise it because provider metadata is not authoritative.
+func (info *RelayInfo) UpdateImageSize(size string, exact bool) {
+	if info == nil || info.TieredBillingSnapshot == nil || info.TieredBillingSnapshot.EstimatedImageSize == nil {
+		return
+	}
+	tier, ok := dto.ImageSizePriceTier(size)
+	if !ok {
+		return
+	}
+	currentRatio, _ := dto.ImageSizePriceRatio(info.RequestedImageSize())
+	candidateRatio, _ := dto.ImageSizePriceRatio(tier)
+	if exact || candidateRatio > currentRatio {
+		info.BillingImageSize = &tier
+	}
+}
+
+func (info *RelayInfo) RequestedImageSize() string {
+	if info == nil {
+		return ""
+	}
+	if info.BillingImageSize != nil {
+		return *info.BillingImageSize
+	}
+	if info.TieredBillingSnapshot != nil && info.TieredBillingSnapshot.EstimatedImageSize != nil {
+		return *info.TieredBillingSnapshot.EstimatedImageSize
+	}
+	return ""
 }
 
 func (info *RelayInfo) InitChannelMeta(c *gin.Context) {

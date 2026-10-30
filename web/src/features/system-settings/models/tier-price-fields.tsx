@@ -111,6 +111,7 @@ function PriceField({
 
 type TierPriceFieldsProps = {
   billingUnit?: 'token' | 'request'
+  imageCount?: boolean
   fixedPrice?: string
   onBillingUnitChange?: (unit: 'token' | 'request') => void
   onFixedPriceChange?: (value: string) => void
@@ -162,7 +163,10 @@ export function TierPriceFields(props: TierPriceFieldsProps) {
     <Select
       items={[
         { value: 'token', label: t('Per token') },
-        { value: 'request', label: t('Per-call') },
+        {
+          value: 'request',
+          label: t(props.imageCount ? 'Per image' : 'Per-call'),
+        },
       ]}
       value={props.billingUnit ?? 'token'}
       onValueChange={(value) => {
@@ -181,7 +185,9 @@ export function TierPriceFields(props: TierPriceFieldsProps) {
       <SelectContent alignItemWithTrigger={false}>
         <SelectGroup>
           <SelectItem value='token'>{t('Per token')}</SelectItem>
-          <SelectItem value='request'>{t('Per-call')}</SelectItem>
+          <SelectItem value='request'>
+            {t(props.imageCount ? 'Per image' : 'Per-call')}
+          </SelectItem>
         </SelectGroup>
       </SelectContent>
     </Select>
@@ -192,10 +198,10 @@ export function TierPriceFields(props: TierPriceFieldsProps) {
         {billingControl}
         <PriceField
           currency={props.currency}
-          label={t('Price per request')}
+          label={t(props.imageCount ? 'Price per image' : 'Price per request')}
           value={props.fixedPrice ?? ''}
           onChange={(value) => props.onFixedPriceChange?.(value)}
-          hint={`${props.currency.symbol}/${t('request')}`}
+          hint={`${props.currency.symbol}/${t(props.imageCount ? 'image' : 'request')}`}
           invalid={props.invalidVariables?.includes('fixed')}
         />
       </>
