@@ -21,6 +21,7 @@ import { describe, expect, test } from 'vitest'
 import type { PricingModel } from '../../types'
 import {
   calculateDiscountPercent,
+  getDynamicTokenDiscountPercent,
   getReferencePriceUSD,
 } from '../reference-price'
 
@@ -45,5 +46,14 @@ describe('reference model pricing', () => {
   test('omits a discount when the current price is not lower', () => {
     expect(calculateDiscountPercent(4, 4)).toBeNull()
     expect(calculateDiscountPercent(null, 0.1)).toBeNull()
+  })
+
+  test('calculates the discount for dynamic token pricing', () => {
+    expect(getDynamicTokenDiscountPercent(model, 0.1)).toBe(98)
+    expect(
+      getDynamicTokenDiscountPercent(model, 0.1, {
+        groupRatioMultiplier: 2,
+      })
+    ).toBe(95)
   })
 })

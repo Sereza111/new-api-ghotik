@@ -33,6 +33,7 @@ export type CurrentPriceOptions = {
   priceRate?: number
   usdExchangeRate?: number
   selectedGroup?: string
+  groupRatioMultiplier?: number
 }
 
 export function getReferencePriceUSD(
@@ -119,5 +120,27 @@ export function getRequestDiscountPercent(
   return calculateDiscountPercent(
     getReferencePriceUSD(model, 'request'),
     currentPrice
+  )
+}
+
+export function getDynamicTokenDiscountPercent(
+  model: PricingModel,
+  currentPricePerMillion: number,
+  options: Pick<
+    CurrentPriceOptions,
+    | 'showRechargePrice'
+    | 'priceRate'
+    | 'usdExchangeRate'
+    | 'groupRatioMultiplier'
+  > = {}
+): number | null {
+  const groupRatio = options.groupRatioMultiplier ?? 1
+  const rechargeMultiplier = options.showRechargePrice
+    ? (options.priceRate ?? 1) / (options.usdExchangeRate ?? 1)
+    : 1
+
+  return calculateDiscountPercent(
+    getReferencePriceUSD(model, 'input'),
+    currentPricePerMillion * groupRatio * rechargeMultiplier
   )
 }

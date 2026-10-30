@@ -30,7 +30,6 @@ import { getLobeIcon } from '@/lib/lobe-icon'
 import { DEFAULT_TOKEN_UNIT } from '../constants'
 import {
   getDynamicDisplayGroupRatio,
-  getDynamicPriceUnitLabelKey,
   getDynamicPricingSummary,
   isUnconfiguredTaskUsageModel,
 } from '../lib/dynamic-price'
@@ -42,6 +41,7 @@ import {
 } from '../lib/price'
 import {
   formatReferencePrice,
+  getDynamicTokenDiscountPercent,
   getRequestDiscountPercent,
   getTokenDiscountPercent,
 } from '../lib/reference-price'
@@ -120,15 +120,16 @@ export function usePricingColumns(
       ),
       cell: ({ row }) => {
         const model = row.original
+        const dynamicGroupRatio = getDynamicDisplayGroupRatio(
+          model,
+          selectedGroup
+        )
         const dynamicSummary = getDynamicPricingSummary(model, {
           tokenUnit,
           showRechargePrice,
           priceRate,
           usdExchangeRate,
-          groupRatioMultiplier: getDynamicDisplayGroupRatio(
-            model,
-            selectedGroup
-          ),
+          groupRatioMultiplier: dynamicGroupRatio,
         })
 
         if (dynamicSummary) {
@@ -157,33 +158,48 @@ export function usePricingColumns(
             )
           }
 
+          const dynamicCurrentPrices = primaryEntries.map((entry) =>
+            stripTrailingZeros(entry.formattedRange ?? entry.formatted)
+          )
+          const dynamicReferencePrices = [
+            formatReferencePrice(model, 'input', tokenUnit),
+            formatReferencePrice(model, 'output', tokenUnit),
+          ]
+          const hasDynamicReferencePrices = dynamicReferencePrices.every(
+            (price) => price != null
+          )
+          const inputEntry = primaryEntries.find(
+            (entry) => entry.field === 'inputPrice'
+          )
+          const dynamicUnit = [
+            !dynamicSummary.isTaskUsage && `/ ${tokenUnitLabel} tokens`,
+            dynamicSummary.isTaskUsage && dynamicSummary.tier?.label,
+            dynamicSummary.tierCount > 1 &&
+              t('{{count}} tiers', { count: dynamicSummary.tierCount }),
+          ]
+            .filter(Boolean)
+            .join(' · ')
+
           return (
-            <div className='max-w-full min-w-0'>
-              <span className='font-mono text-sm tabular-nums'>
-                {primaryEntries.map((entry, index) => {
-                  const unitLabelKey = getDynamicPriceUnitLabelKey(entry)
-                  return (
-                    <span key={entry.key}>
-                      {index > 0 && (
-                        <span className='text-muted-foreground/40 mx-1'>/</span>
-                      )}
-                      {stripTrailingZeros(
-                        entry.formattedRange ?? entry.formatted
-                      )}
-                      {unitLabelKey && <>/{t(unitLabelKey)}</>}
-                    </span>
-                  )
-                })}
-              </span>
-              <div className='text-muted-foreground/50 text-[10px]'>
-                {!dynamicSummary.isTaskUsage && `/ ${tokenUnitLabel} tokens`}
-                {dynamicSummary.isTaskUsage && dynamicSummary.tier?.label}
-                {dynamicSummary.tierCount > 1 &&
-                  ` · ${t('{{count}} tiers', {
-                    count: dynamicSummary.tierCount,
-                  })}`}
-              </div>
-            </div>
+            <PriceComparison
+              currentPrices={dynamicCurrentPrices}
+              referencePrices={
+                hasDynamicReferencePrices
+                  ? (dynamicReferencePrices as string[])
+                  : undefined
+              }
+              discountPercent={
+                inputEntry
+                  ? getDynamicTokenDiscountPercent(model, inputEntry.value, {
+                      showRechargePrice,
+                      priceRate,
+                      usdExchangeRate,
+                      groupRatioMultiplier: dynamicGroupRatio,
+                    })
+                  : null
+              }
+              unit={dynamicUnit}
+            />
           )
         }
 
