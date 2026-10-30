@@ -1,7 +1,11 @@
 package openai
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"image"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +19,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func encodedPNG(t *testing.T, width, height int) string {
+	t.Helper()
+	var body bytes.Buffer
+	require.NoError(t, png.Encode(&body, image.NewNRGBA(image.Rect(0, 0, width, height))))
+	return base64.StdEncoding.EncodeToString(body.Bytes())
+}
 
 func newImageTestContext(t *testing.T, body, contentType string, isStream bool) (*gin.Context, *httptest.ResponseRecorder, *http.Response, *relaycommon.RelayInfo) {
 	t.Helper()
@@ -137,6 +148,32 @@ func TestOpenaiImageStreamHandlerUsesCompletedEventCount(t *testing.T) {
 	require.Nil(t, err)
 	require.Equal(t, 7, usage.TotalTokens)
 	require.Equal(t, 2.0, info.PriceData.OtherRatios()["n"])
+}
+
+func TestOpenaiImageStreamHandlerUsesVerifiedOutputResolution(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	body := strings.Join([]string{
+		`data: {"type":"image_generation.completed","b64_json":"` + encodedPNG(t, 1024, 1) + `"}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+	c, _, resp, info := newImageTestContext(t, body, "text/event-stream", true)
+	info.PriceData.UsePrice = true
+	info.PriceData.AddOtherRatio("n", 1)
+	info.PriceData.AddOtherRatio("image_size", 2)
+
+	_, err := OpenaiImageStreamHandler(c, info, resp)
+
+	require.Nil(t, err)
+	require.Equal(t, 1.0, info.PriceData.OtherRatios()["image_size"])
 }
 
 // blockingBody serves one SSE chunk, then blocks until Close (the scanner's
@@ -357,6 +394,58 @@ func TestOpenaiImageHandlerUsesPositiveActualCountForFixedPrice(t *testing.T) {
 			require.Nil(t, err)
 			require.Equal(t, tt.wantCount, info.PriceData.OtherRatios()["n"])
 			require.Equal(t, tt.body, recorder.Body.String())
+		})
+	}
+}
+
+func TestOpenaiImageHandlerSettlesResolutionFromResponse(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	tests := []struct {
+		name          string
+		body          string
+		requestRatio  float64
+		wantSizeRatio float64
+	}{
+		{
+			name:          "verified base64 output can lower estimate",
+			body:          `{"data":[{"b64_json":"` + encodedPNG(t, 1024, 1) + `"}]}`,
+			requestRatio:  2,
+			wantSizeRatio: 1,
+		},
+		{
+			name:          "largest verified output tier wins",
+			body:          `{"data":[{"b64_json":"` + encodedPNG(t, 1024, 1) + `"},{"b64_json":"` + encodedPNG(t, 2048, 1) + `"}]}`,
+			requestRatio:  1,
+			wantSizeRatio: 1.5,
+		},
+		{
+			name:          "unverified metadata cannot lower estimate",
+			body:          `{"data":[{"url":"https://example.com/image.png","size":"1024x1024"}]}`,
+			requestRatio:  2,
+			wantSizeRatio: 2,
+		},
+		{
+			name:          "unverified metadata can raise estimate",
+			body:          `{"data":[{"url":"https://example.com/image.png","output_size":"3840x2160"}]}`,
+			requestRatio:  1,
+			wantSizeRatio: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _, resp, info := newImageTestContext(t, tt.body, "application/json", false)
+			info.PriceData.UsePrice = true
+			info.PriceData.AddOtherRatio("n", 1)
+			info.PriceData.AddOtherRatio("image_size", tt.requestRatio)
+
+			_, err := OpenaiImageHandler(c, info, resp)
+
+			require.Nil(t, err)
+			require.Equal(t, tt.wantSizeRatio, info.PriceData.OtherRatios()["image_size"])
 		})
 	}
 }
