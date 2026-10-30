@@ -35,6 +35,15 @@ export interface QuotaDataItem {
   quota?: number
 }
 
+export interface UserUsageSummaryItem {
+  model_name: string
+  request_count: number
+  prompt_tokens: number
+  completion_tokens: number
+  cache_tokens: number
+  quota: number
+}
+
 export interface FlowQuotaDataItem {
   user_id?: number
   username?: string

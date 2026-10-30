@@ -112,6 +112,7 @@ const paymentSchema = z.object({
       isHttpOriginUrl,
       'Enter only a top-level callback domain, for example https://api.example.com, without any path.'
     ),
+  USDExchangeRate: z.coerce.number().positive(),
   PayMethods: z.string().superRefine((value, ctx) => {
     const error = getJsonError(value)
     if (error) {
@@ -161,6 +162,16 @@ const paymentSchema = z.object({
       })
     }
   }),
+  CryptoPayEnabled: z.boolean(),
+  CryptoPayAPIToken: z.string(),
+  CryptoPayTestnet: z.boolean(),
+  CryptoPayAcceptedAssets: z.string(),
+  CryptoPayUnitPrice: z.coerce.number().positive(),
+  CryptoPayMinTopUp: z.coerce.number().int().min(1),
+  PlategaEnabled: z.boolean(),
+  PlategaMerchantID: z.string(),
+  PlategaAPISecret: z.string(),
+  PlategaMinTopUp: z.coerce.number().int().min(1),
   WaffoEnabled: z.boolean(),
   WaffoApiKey: z.string(),
   WaffoPrivateKey: z.string(),
@@ -426,6 +437,7 @@ export function PaymentSettingsSection({
       Price: values.Price,
       MinTopUp: values.MinTopUp,
       CustomCallbackAddress: removeTrailingSlash(values.CustomCallbackAddress),
+      USDExchangeRate: values.USDExchangeRate,
       PayMethods: values.PayMethods.trim(),
       AmountOptions: values.AmountOptions.trim(),
       AmountDiscount: values.AmountDiscount.trim(),
@@ -439,6 +451,16 @@ export function PaymentSettingsSection({
       CreemWebhookSecret: values.CreemWebhookSecret.trim(),
       CreemTestMode: values.CreemTestMode,
       CreemProducts: values.CreemProducts.trim(),
+      CryptoPayEnabled: values.CryptoPayEnabled,
+      CryptoPayAPIToken: values.CryptoPayAPIToken.trim(),
+      CryptoPayTestnet: values.CryptoPayTestnet,
+      CryptoPayAcceptedAssets: values.CryptoPayAcceptedAssets.trim(),
+      CryptoPayUnitPrice: values.CryptoPayUnitPrice,
+      CryptoPayMinTopUp: values.CryptoPayMinTopUp,
+      PlategaEnabled: values.PlategaEnabled,
+      PlategaMerchantID: values.PlategaMerchantID.trim(),
+      PlategaAPISecret: values.PlategaAPISecret.trim(),
+      PlategaMinTopUp: values.PlategaMinTopUp,
       WaffoEnabled: values.WaffoEnabled,
       WaffoSandbox: values.WaffoSandbox,
       WaffoMerchantId: values.WaffoMerchantId.trim(),
@@ -470,6 +492,7 @@ export function PaymentSettingsSection({
       CustomCallbackAddress: removeTrailingSlash(
         initialRef.current.CustomCallbackAddress
       ),
+      USDExchangeRate: initialRef.current.USDExchangeRate,
       PayMethods: initialRef.current.PayMethods.trim(),
       AmountOptions: initialRef.current.AmountOptions.trim(),
       AmountDiscount: initialRef.current.AmountDiscount.trim(),
@@ -484,6 +507,17 @@ export function PaymentSettingsSection({
       CreemWebhookSecret: initialRef.current.CreemWebhookSecret.trim(),
       CreemTestMode: initialRef.current.CreemTestMode,
       CreemProducts: initialRef.current.CreemProducts.trim(),
+      CryptoPayEnabled: initialRef.current.CryptoPayEnabled,
+      CryptoPayAPIToken: initialRef.current.CryptoPayAPIToken.trim(),
+      CryptoPayTestnet: initialRef.current.CryptoPayTestnet,
+      CryptoPayAcceptedAssets:
+        initialRef.current.CryptoPayAcceptedAssets.trim(),
+      CryptoPayUnitPrice: initialRef.current.CryptoPayUnitPrice,
+      CryptoPayMinTopUp: initialRef.current.CryptoPayMinTopUp,
+      PlategaEnabled: initialRef.current.PlategaEnabled,
+      PlategaMerchantID: initialRef.current.PlategaMerchantID.trim(),
+      PlategaAPISecret: initialRef.current.PlategaAPISecret.trim(),
+      PlategaMinTopUp: initialRef.current.PlategaMinTopUp,
       WaffoEnabled: initialRef.current.WaffoEnabled,
       WaffoSandbox: initialRef.current.WaffoSandbox,
       WaffoMerchantId: initialRef.current.WaffoMerchantId.trim(),
@@ -534,6 +568,13 @@ export function PaymentSettingsSection({
       updates.push({
         key: 'CustomCallbackAddress',
         value: sanitized.CustomCallbackAddress,
+      })
+    }
+
+    if (sanitized.USDExchangeRate !== initial.USDExchangeRate) {
+      updates.push({
+        key: 'USDExchangeRate',
+        value: sanitized.USDExchangeRate,
       })
     }
 
@@ -629,6 +670,68 @@ export function PaymentSettingsSection({
       normalizeJsonForComparison(initial.CreemProducts)
     ) {
       updates.push({ key: 'CreemProducts', value: sanitized.CreemProducts })
+    }
+
+    if (sanitized.CryptoPayEnabled !== initial.CryptoPayEnabled) {
+      updates.push({
+        key: 'CryptoPayEnabled',
+        value: sanitized.CryptoPayEnabled,
+      })
+    }
+    if (sanitized.CryptoPayAPIToken) {
+      updates.push({
+        key: 'CryptoPayAPIToken',
+        value: sanitized.CryptoPayAPIToken,
+      })
+    }
+    if (sanitized.CryptoPayTestnet !== initial.CryptoPayTestnet) {
+      updates.push({
+        key: 'CryptoPayTestnet',
+        value: sanitized.CryptoPayTestnet,
+      })
+    }
+    if (sanitized.CryptoPayAcceptedAssets !== initial.CryptoPayAcceptedAssets) {
+      updates.push({
+        key: 'CryptoPayAcceptedAssets',
+        value: sanitized.CryptoPayAcceptedAssets,
+      })
+    }
+    if (sanitized.CryptoPayUnitPrice !== initial.CryptoPayUnitPrice) {
+      updates.push({
+        key: 'CryptoPayUnitPrice',
+        value: sanitized.CryptoPayUnitPrice,
+      })
+    }
+    if (sanitized.CryptoPayMinTopUp !== initial.CryptoPayMinTopUp) {
+      updates.push({
+        key: 'CryptoPayMinTopUp',
+        value: sanitized.CryptoPayMinTopUp,
+      })
+    }
+
+    if (sanitized.PlategaEnabled !== initial.PlategaEnabled) {
+      updates.push({
+        key: 'PlategaEnabled',
+        value: sanitized.PlategaEnabled,
+      })
+    }
+    if (sanitized.PlategaMerchantID !== initial.PlategaMerchantID) {
+      updates.push({
+        key: 'PlategaMerchantID',
+        value: sanitized.PlategaMerchantID,
+      })
+    }
+    if (sanitized.PlategaAPISecret) {
+      updates.push({
+        key: 'PlategaAPISecret',
+        value: sanitized.PlategaAPISecret,
+      })
+    }
+    if (sanitized.PlategaMinTopUp !== initial.PlategaMinTopUp) {
+      updates.push({
+        key: 'PlategaMinTopUp',
+        value: sanitized.PlategaMinTopUp,
+      })
     }
 
     if (sanitized.WaffoEnabled !== initial.WaffoEnabled) {
@@ -778,6 +881,10 @@ export function PaymentSettingsSection({
   }
 
   const currentFormValues = form.watch()
+  const plategaCallbackOrigin =
+    removeTrailingSlash(currentFormValues.CustomCallbackAddress) ||
+    window.location.origin
+  const plategaCallbackURL = `${plategaCallbackOrigin}/api/platega/webhook`
   const waffoValues: WaffoSettingsValues = {
     WaffoEnabled: currentFormValues.WaffoEnabled,
     WaffoApiKey: currentFormValues.WaffoApiKey,
@@ -882,9 +989,11 @@ export function PaymentSettingsSection({
           />
           <Tabs defaultValue='general' className='min-w-0'>
             <div className='overflow-x-auto pb-1'>
-              <TabsList className='grid min-w-[44rem] grid-cols-6'>
+              <TabsList className='grid min-w-[56rem] grid-cols-8'>
                 <TabsTrigger value='general'>{t('General')}</TabsTrigger>
                 <TabsTrigger value='epay'>Epay</TabsTrigger>
+                <TabsTrigger value='crypto-pay'>{t('Crypto Bot')}</TabsTrigger>
+                <TabsTrigger value='platega'>Platega</TabsTrigger>
                 <TabsTrigger value='stripe'>{t('Stripe')}</TabsTrigger>
                 <TabsTrigger value='creem'>Creem</TabsTrigger>
                 <TabsTrigger value='waffo-pancake'>Waffo Pancake</TabsTrigger>
@@ -1255,6 +1364,323 @@ export function PaymentSettingsSection({
                     )}
                   />
                 </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent
+              value='crypto-pay'
+              className={paymentTabContentClassName}
+            >
+              <div className='space-y-6'>
+                <div>
+                  <h3 className='text-lg font-medium'>{t('Crypto Bot')}</h3>
+                  <p className='text-muted-foreground text-sm'>
+                    {t(
+                      'Accept cryptocurrency payments through Telegram Crypto Bot.'
+                    )}
+                  </p>
+                </div>
+
+                <div className='bg-muted/40 rounded-md border p-4 text-sm'>
+                  <p className='font-medium'>{t('Webhook URL')}</p>
+                  <code className='mt-2 block break-all'>
+                    {'<ServerAddress>/api/crypto-pay/webhook'}
+                  </code>
+                  <p className='text-muted-foreground mt-2'>
+                    {t(
+                      'Configure this HTTPS URL in Crypto Bot under Crypto Pay, My Apps, Webhooks.'
+                    )}{' '}
+                    <a
+                      href='https://help.send.tg/en/articles/10279948-crypto-pay-api'
+                      target='_blank'
+                      rel='noreferrer'
+                      className='underline underline-offset-4'
+                    >
+                      {t('Crypto Pay API documentation')}
+                    </a>
+                  </p>
+                </div>
+
+                <div className='grid gap-6 md:grid-cols-2'>
+                  <FormField
+                    control={form.control}
+                    name='CryptoPayEnabled'
+                    render={({ field }) => (
+                      <SettingsSwitchItem>
+                        <SettingsSwitchContent>
+                          <FormLabel>
+                            {t('Enable Crypto Bot payments')}
+                          </FormLabel>
+                          <FormDescription>
+                            {t('Show Crypto Bot as a wallet top-up method.')}
+                          </FormDescription>
+                        </SettingsSwitchContent>
+                        <FormControl>
+                          <Switch
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                      </SettingsSwitchItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='CryptoPayTestnet'
+                    render={({ field }) => (
+                      <SettingsSwitchItem>
+                        <SettingsSwitchContent>
+                          <FormLabel>{t('Testnet')}</FormLabel>
+                          <FormDescription>
+                            {t('Use Crypto Pay testnet instead of mainnet.')}
+                          </FormDescription>
+                        </SettingsSwitchContent>
+                        <FormControl>
+                          <Switch
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                      </SettingsSwitchItem>
+                    )}
+                  />
+                </div>
+
+                <div className='grid gap-6 md:grid-cols-2'>
+                  <FormField
+                    control={form.control}
+                    name='CryptoPayAPIToken'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Crypto Pay API token')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='password'
+                            autoComplete='new-password'
+                            placeholder={t('Enter new token to update')}
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t('Leave blank unless rotating the token.')}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='CryptoPayAcceptedAssets'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Accepted assets')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder='USDT,TON,BTC,ETH,LTC,BNB,TRX,USDC'
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            'Comma-separated assets users may select when paying a USD invoice.'
+                          )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <div className='grid gap-6 md:grid-cols-2'>
+                  <FormField
+                    control={form.control}
+                    name='CryptoPayUnitPrice'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          {t('USD charged per USD of balance')}
+                        </FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            step='0.01'
+                            min={0.01}
+                            {...safeNumberFieldProps(field)}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t('Use 1 for a one-to-one balance top-up.')}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='CryptoPayMinTopUp'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Minimum top-up (USD)')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            step='1'
+                            min={1}
+                            {...safeNumberFieldProps(field)}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value='platega' className={paymentTabContentClassName}>
+              <div className='space-y-6'>
+                <div>
+                  <h3 className='text-lg font-medium'>Platega</h3>
+                  <p className='text-muted-foreground text-sm'>
+                    {t(
+                      'Accept payments through Platega using SBP, bank cards, and cryptocurrency.'
+                    )}
+                  </p>
+                </div>
+
+                <div className='bg-muted/40 rounded-md border p-4 text-sm'>
+                  <p className='font-medium'>{t('Callback URL')}</p>
+                  <code className='mt-2 block break-all'>
+                    {plategaCallbackURL}
+                  </code>
+                  <p className='text-muted-foreground mt-2'>
+                    {t(
+                      'Configure this URL as Callback URL in your Platega merchant settings.'
+                    )}{' '}
+                    <a
+                      href='https://docs.platega.io/'
+                      target='_blank'
+                      rel='noreferrer'
+                      className='underline underline-offset-4'
+                    >
+                      {t('Open Platega documentation')}
+                    </a>
+                  </p>
+                </div>
+
+                <FormField
+                  control={form.control}
+                  name='USDExchangeRate'
+                  render={({ field }) => (
+                    <FormItem className='max-w-md'>
+                      <FormLabel>{t('RUB per USD')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          step='0.01'
+                          min={0.01}
+                          {...safeNumberFieldProps(field)}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'For example, with a rate of 80, a 1 USD wallet top-up creates an 80 RUB payment before the payment provider fee.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='PlategaEnabled'
+                  render={({ field }) => (
+                    <SettingsSwitchItem>
+                      <SettingsSwitchContent>
+                        <FormLabel>{t('Enable Platega payments')}</FormLabel>
+                        <FormDescription>
+                          {t('Show Platega payment methods in the wallet.')}
+                        </FormDescription>
+                      </SettingsSwitchContent>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </SettingsSwitchItem>
+                  )}
+                />
+
+                <div className='grid gap-6 md:grid-cols-2'>
+                  <FormField
+                    control={form.control}
+                    name='PlategaMerchantID'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Merchant ID')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder={t('Enter your Platega merchant ID')}
+                            autoComplete='off'
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='PlategaAPISecret'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('API secret')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='password'
+                            placeholder={t('Enter new secret to update')}
+                            autoComplete='new-password'
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t('Leave blank unless rotating the secret')}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <FormField
+                  control={form.control}
+                  name='PlategaMinTopUp'
+                  render={({ field }) => (
+                    <FormItem className='max-w-md'>
+                      <FormLabel>{t('Minimum top-up (USD)')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          step='1'
+                          min={1}
+                          {...safeNumberFieldProps(field)}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Platega charges in RUB. The USD wallet amount is converted with the USD exchange rate from Currency and Display settings.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
             </TabsContent>
 

@@ -67,12 +67,19 @@ export function SystemBrand(props: SystemBrandProps) {
       >
         <div className='flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-md'>
           <img
-            src={logo}
-            alt={t('Logo')}
-            className='size-full rounded-md object-cover'
+            src='/service-mark.svg?v=2'
+            alt='VL'
+            className='size-6 object-contain'
           />
         </div>
-        <span className='max-w-[12rem] truncate'>{name}</span>
+        <span className='shrink-0 font-serif text-lg'>VL</span>
+        <span className='bg-border h-4 w-px shrink-0' aria-hidden='true' />
+        <div className='ring-border flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-sm ring-1'>
+          <img src={logo} alt={t('Logo')} className='size-full object-cover' />
+        </div>
+        <span className='text-muted-foreground max-w-[9rem] min-w-0 truncate font-sans text-xs'>
+          {name}
+        </span>
       </Link>
     )
   }

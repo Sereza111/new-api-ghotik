@@ -84,7 +84,7 @@ return 1`
 	},
 		token.Id, token.UserId, token.Status, token.Name,
 		token.CreatedTime, token.AccessedTime, token.ExpiredTime,
-		strconv.FormatBool(token.UnlimitedQuota), strconv.FormatBool(token.ModelLimitsEnabled),
+		strconv.FormatBool(token.UnlimitedQuota), token.EffectiveQuotaMode(), strconv.FormatBool(token.ModelLimitsEnabled),
 		token.ModelLimits, allowIps, token.Group, strconv.FormatBool(token.CrossGroupRetry),
 		token.AutoGroups, token.RemainQuota, token.UsedQuota,
 		strconv.FormatBool(token.AllowUserQuotaQuery),
@@ -103,6 +103,9 @@ func cacheGetTokenByKey(key string) (*Token, error) {
 	}
 	if token.Id <= 0 {
 		return nil, fmt.Errorf("token cache is incomplete")
+	}
+	if _, ok := NormalizeTokenQuotaMode(token.QuotaMode); !ok || token.QuotaMode == "" {
+		return nil, fmt.Errorf("token cache quota mode is missing or invalid")
 	}
 	token.Key = key
 	return &token, nil

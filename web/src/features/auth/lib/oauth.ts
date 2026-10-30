@@ -23,6 +23,7 @@ export {
   buildDiscordOAuthUrl,
   buildOIDCOAuthUrl,
   buildLinuxDOOAuthUrl,
+  buildTelegramOAuthUrl,
 } from '@/lib/oauth'
 
 // ============================================================================

@@ -22,6 +22,7 @@ import {
   createRootRouteWithContext,
   Outlet,
   redirect,
+  useLocation,
   useNavigate,
 } from '@tanstack/react-router'
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
@@ -42,11 +43,13 @@ import {
 } from '@/lib/auth-session'
 import { subscribeAuthSessionEvents } from '@/lib/auth-session-sync'
 import { resolveLegacyRoute } from '@/lib/legacy-route'
+import { applySeoMetadata } from '@/lib/seo'
 import { useAuthStore } from '@/stores/auth-store'
 
 function RootComponent() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const pathname = useLocation({ select: (location) => location.pathname })
 
   // Load system configuration (logo, system name, etc.) from backend
   useSystemConfig({ autoLoad: true })
@@ -57,6 +60,10 @@ function RootComponent() {
       saveAffiliateCode(aff)
     }
   }, [])
+
+  useEffect(() => {
+    applySeoMetadata(pathname)
+  }, [pathname])
 
   useEffect(
     () =>

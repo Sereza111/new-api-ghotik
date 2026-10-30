@@ -19,7 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import { t } from 'i18next'
 
 import { ERROR_MESSAGES, MESSAGE_ROLES, MESSAGE_STATUS } from '../../constants'
-import type { ChatCompletionResponse, Message } from '../../types'
+import type {
+  ChatCompletionResponse,
+  ImageGenerationResponse,
+  Message,
+} from '../../types'
 import { parseThinkTags } from './message-reasoning-utils'
 import {
   completeAssistantTiming,
@@ -208,6 +212,37 @@ export function applyChatCompletionResponse(
   }
 
   return applyChatCompletionChoice(message, choice)
+}
+
+export function applyImageGenerationResponse(
+  message: Message,
+  response: ImageGenerationResponse
+): Message | null {
+  const images = response.data.flatMap((image, index) => {
+    const src = image.b64_json
+      ? `data:image/png;base64,${image.b64_json}`
+      : image.url
+
+    return src
+      ? [
+          {
+            id: `${response.created ?? 'generated'}-${index}`,
+            src,
+            revisedPrompt: image.revised_prompt || undefined,
+          },
+        ]
+      : []
+  })
+
+  if (images.length === 0) {
+    return null
+  }
+
+  return completeAssistantTiming({
+    ...finalizeMessage(message),
+    images,
+    status: MESSAGE_STATUS.COMPLETE,
+  })
 }
 
 /**

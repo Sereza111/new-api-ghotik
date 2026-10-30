@@ -25,6 +25,7 @@ import { PaymentSettingsSection } from '../integrations/payment-settings-section
 import { RatioSettingsCard } from '../models/ratio-settings-card'
 import type { BillingSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
+import { ResellerPricingSection } from './reseller-pricing-section'
 
 const getModelDefaults = (settings: BillingSettings) => ({
   ModelPrice: settings.ModelPrice,
@@ -103,6 +104,26 @@ const BILLING_SECTIONS = [
     ),
   },
   {
+    id: 'reseller-pricing',
+    titleKey: 'Reseller pricing',
+    build: (settings: BillingSettings) => (
+      <ResellerPricingSection
+        defaultValues={{
+          reseller_setting: {
+            base_cost_per_million:
+              settings['reseller_setting.base_cost_per_million'],
+            endpoint: settings['reseller_setting.endpoint'],
+            subscription_price: settings['reseller_setting.subscription_price'],
+            subscription_discount_percent:
+              settings['reseller_setting.subscription_discount_percent'],
+            subscription_duration_days:
+              settings['reseller_setting.subscription_duration_days'],
+          },
+        }}
+      />
+    ),
+  },
+  {
     id: 'model-pricing',
     titleKey: 'Model Pricing',
     build: (settings: BillingSettings) => (
@@ -140,6 +161,7 @@ const BILLING_SECTIONS = [
           Price: settings.Price,
           MinTopUp: settings.MinTopUp,
           CustomCallbackAddress: settings.CustomCallbackAddress,
+          USDExchangeRate: settings.USDExchangeRate,
           PayMethods: settings.PayMethods,
           AmountOptions: settings['payment_setting.amount_options'],
           AmountDiscount: settings['payment_setting.amount_discount'],
@@ -153,6 +175,18 @@ const BILLING_SECTIONS = [
           CreemWebhookSecret: settings.CreemWebhookSecret,
           CreemTestMode: settings.CreemTestMode,
           CreemProducts: settings.CreemProducts,
+          CryptoPayEnabled: settings.CryptoPayEnabled ?? false,
+          CryptoPayAPIToken: settings.CryptoPayAPIToken ?? '',
+          CryptoPayTestnet: settings.CryptoPayTestnet ?? false,
+          CryptoPayAcceptedAssets:
+            settings.CryptoPayAcceptedAssets ??
+            'USDT,TON,BTC,ETH,LTC,BNB,TRX,USDC',
+          CryptoPayUnitPrice: settings.CryptoPayUnitPrice ?? 1,
+          CryptoPayMinTopUp: settings.CryptoPayMinTopUp ?? 1,
+          PlategaEnabled: settings.PlategaEnabled ?? false,
+          PlategaMerchantID: settings.PlategaMerchantID ?? '',
+          PlategaAPISecret: settings.PlategaAPISecret ?? '',
+          PlategaMinTopUp: settings.PlategaMinTopUp ?? 1,
         }}
         waffoDefaultValues={{
           WaffoEnabled: settings.WaffoEnabled ?? false,

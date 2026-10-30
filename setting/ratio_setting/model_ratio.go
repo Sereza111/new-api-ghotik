@@ -330,6 +330,7 @@ var defaultCompletionRatio = map[string]float64{
 	"gpt-4o-gizmo-*": 3,
 	"gpt-4-all":      2,
 	"gpt-image-1":    8,
+	"gpt-6-astra":    5,
 }
 
 // InitRatioSettings initializes all model related settings maps

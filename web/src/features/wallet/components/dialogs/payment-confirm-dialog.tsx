@@ -33,7 +33,13 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { formatLocalCurrencyAmount } from '@/lib/currency'
 
 import { DEFAULT_DISCOUNT_RATE } from '../../constants'
-import { formatCurrency, getPaymentIcon } from '../../lib'
+import {
+  formatPaymentAmount,
+  formatUsdAmount,
+  getPaymentIcon,
+  isCryptoPayPayment,
+  isPlategaPayment,
+} from '../../lib'
 import type { PaymentMethod } from '../../types'
 
 interface PaymentConfirmDialogProps {
@@ -65,6 +71,8 @@ export function PaymentConfirmDialog({
   const hasDiscount = discountRate > 0 && discountRate < 1 && paymentAmount > 0
   const originalAmount = hasDiscount ? paymentAmount / discountRate : 0
   const discountAmount = hasDiscount ? originalAmount - paymentAmount : 0
+  const isCryptoPay = isCryptoPayPayment(paymentMethod?.type || '')
+  const isPlatega = isPlategaPayment(paymentMethod?.type || '')
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -84,11 +92,13 @@ export function PaymentConfirmDialog({
               {t('Topup Amount')}
             </span>
             <span className='text-lg font-semibold'>
-              {formatLocalCurrencyAmount(topupAmount * usdExchangeRate, {
-                digitsLarge: 2,
-                digitsSmall: 2,
-                abbreviate: false,
-              })}
+              {isCryptoPay || isPlatega
+                ? formatUsdAmount(topupAmount)
+                : formatLocalCurrencyAmount(topupAmount * usdExchangeRate, {
+                    digitsLarge: 2,
+                    digitsSmall: 2,
+                    abbreviate: false,
+                  })}
             </span>
           </div>
 
@@ -101,11 +111,11 @@ export function PaymentConfirmDialog({
             ) : (
               <div className='flex items-baseline gap-2'>
                 <span className='text-2xl font-semibold'>
-                  {formatCurrency(paymentAmount)}
+                  {formatPaymentAmount(paymentAmount, paymentMethod?.type)}
                 </span>
                 {hasDiscount && (
                   <span className='text-muted-foreground text-sm line-through'>
-                    {formatCurrency(originalAmount)}
+                    {formatPaymentAmount(originalAmount, paymentMethod?.type)}
                   </span>
                 )}
               </div>
@@ -117,7 +127,7 @@ export function PaymentConfirmDialog({
               <div className='flex items-center justify-between text-sm'>
                 <span className='text-muted-foreground'>{t('You save')}</span>
                 <span className='font-semibold text-green-600'>
-                  {formatCurrency(discountAmount)}
+                  {formatPaymentAmount(discountAmount, paymentMethod?.type)}
                 </span>
               </div>
             </div>
@@ -135,7 +145,9 @@ export function PaymentConfirmDialog({
                   paymentMethod?.icon,
                   paymentMethod?.name
                 )}
-                <span className='font-medium'>{paymentMethod?.name}</span>
+                <span className='font-medium'>
+                  {paymentMethod?.name ? t(paymentMethod.name) : ''}
+                </span>
               </div>
             </div>
           </div>

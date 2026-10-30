@@ -29,6 +29,8 @@ import type {
   AmountResponse,
   PaymentResponse,
   StripePaymentResponse,
+  CryptoPayPaymentResponse,
+  PlategaPaymentResponse,
   AffiliateCodeResponse,
   AffiliateTransferResponse,
   BillingHistoryResponse,
@@ -95,6 +97,28 @@ export async function calculateStripeAmount(
 }
 
 /**
+ * Calculate payment amount for Telegram Crypto Bot.
+ */
+export async function calculateCryptoPayAmount(
+  request: AmountRequest
+): Promise<AmountResponse> {
+  const res = await api.post('/api/user/crypto-pay/amount', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/** Calculate the RUB amount for a Platega payment. */
+export async function calculatePlategaAmount(
+  request: AmountRequest
+): Promise<AmountResponse> {
+  const res = await api.post('/api/user/platega/amount', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/**
  * Calculate payment amount for Waffo payment
  */
 export async function calculateWaffoAmount(
@@ -128,6 +152,28 @@ export async function requestStripePayment(
   request: PaymentRequest
 ): Promise<StripePaymentResponse> {
   const res = await api.post('/api/user/stripe/pay', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/**
+ * Create a Telegram Crypto Bot invoice.
+ */
+export async function requestCryptoPayPayment(
+  request: PaymentRequest
+): Promise<CryptoPayPaymentResponse> {
+  const res = await api.post('/api/user/crypto-pay/pay', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/** Create a Platega hosted checkout. */
+export async function requestPlategaPayment(
+  request: PaymentRequest
+): Promise<PlategaPaymentResponse> {
+  const res = await api.post('/api/user/platega/pay', request, {
     skipBusinessError: true,
   } as Record<string, unknown>)
   return res.data

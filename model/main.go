@@ -342,6 +342,9 @@ func migrateDB() error {
 	err := DB.AutoMigrate(
 		&Channel{},
 		&Token{},
+		&ResellerKey{},
+		&ResellerSubscription{},
+		&ResellerQuotaOperation{},
 		&User{},
 		&UserSession{},
 		&AuthFlow{},
@@ -364,6 +367,7 @@ func migrateDB() error {
 		&TwoFA{},
 		&TwoFABackupCode{},
 		&Checkin{},
+		&TelegramChannelBonus{},
 		&SubscriptionOrder{},
 		&UserSubscription{},
 		&SubscriptionPreConsumeRecord{},

@@ -43,6 +43,7 @@ import { taskPriceLabel, taskUsageUnitLabel } from '../lib/task-price-display'
 import type { PricingModel, PriceType, TokenUnit } from '../types'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelPerfBadge, type ModelPerfBadgeData } from './model-perf-badge'
+import { PriceComparison } from './price-comparison'
 
 export interface ModelCardProps {
   model: PricingModel
@@ -247,6 +248,14 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
       </div>
     ))
   } else {
+    const currentPrice = formatRequestPrice(
+      props.model,
+      showRechargePrice,
+      priceRate,
+      usdExchangeRate,
+      props.selectedGroup
+    )
+    const referencePrice = formatReferencePrice(props.model, 'request')
     priceSummary = (
       <div className='col-span-full flex min-w-0 flex-col gap-1'>
         <span className='font-mono text-sm font-semibold tabular-nums'>

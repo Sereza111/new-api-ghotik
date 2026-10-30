@@ -103,7 +103,7 @@ func TestTryReserveQuotaWithoutRedis(t *testing.T) {
 	assert.Equal(t, 55, getTokenFromDB(t, token.Id).RemainQuota)
 }
 
-func TestRedisBatchReserveNeverFallsBackToStaleDatabaseBalance(t *testing.T) {
+func TestBatchWalletReserveIsDurableAndNeverQueued(t *testing.T) {
 	truncateTables(t)
 	resetBatchUpdateTestState(t)
 	useUserCacheMiniRedis(t)
@@ -113,7 +113,10 @@ func TestRedisBatchReserveNeverFallsBackToStaleDatabaseBalance(t *testing.T) {
 	reserved, err := TryReserveUserQuota(user.Id, 8)
 	require.NoError(t, err)
 	assert.True(t, reserved)
-	assert.Equal(t, 10, getUserQuotaFromDB(t, user.Id), "batch delta is not flushed yet")
+	assert.Equal(t, 2, getUserQuotaFromDB(t, user.Id), "wallet reserve must be durable before returning")
+	batchUpdateLocks[BatchUpdateTypeUserQuota].Lock()
+	assert.NotContains(t, batchUpdateStores[BatchUpdateTypeUserQuota], user.Id)
+	batchUpdateLocks[BatchUpdateTypeUserQuota].Unlock()
 
 	reserved, err = TryReserveUserQuota(user.Id, 3)
 	require.NoError(t, err)
@@ -147,6 +150,7 @@ func TestBatchUpdateAccumulatesTwoMaximumRequestCharges(t *testing.T) {
 	require.NoError(t, DecreaseUserQuota(user.Id, common.MaxQuota, false))
 	require.NoError(t, DecreaseUserQuota(user.Id, common.MaxQuota, false))
 
+	assert.Equal(t, 100, getUserQuotaFromDB(t, user.Id), "wallet charges remain synchronous in batch mode")
 	batchUpdate()
 	assert.Equal(t, 100, getUserQuotaFromDB(t, user.Id))
 }
@@ -170,7 +174,7 @@ func TestBatchUpdateAccumulatorSaturatesOverflow(t *testing.T) {
 	batchUpdateLocks[BatchUpdateTypeUserQuota].Unlock()
 }
 
-func TestReserveFallsBackToDatabaseWhenRedisIsUnavailable(t *testing.T) {
+func TestWalletReserveUsesDatabaseWhenRedisIsUnavailable(t *testing.T) {
 	truncateTables(t)
 	resetBatchUpdateTestState(t)
 	server := useUserCacheMiniRedis(t)
@@ -179,7 +183,8 @@ func TestReserveFallsBackToDatabaseWhenRedisIsUnavailable(t *testing.T) {
 	require.NoError(t, populateUserCache(user))
 	server.Close()
 
-	// Redis 故障时降级为数据库条件更新：服务保持可用且不会超扣。
+	// Redis is a non-authoritative cache; its failure cannot block or weaken the
+	// conditional SQL reserve.
 	reserved, err := TryReserveUserQuota(user.Id, 5)
 	require.NoError(t, err)
 	assert.True(t, reserved)
@@ -191,27 +196,33 @@ func TestReserveFallsBackToDatabaseWhenRedisIsUnavailable(t *testing.T) {
 	assert.Equal(t, 15, getUserQuotaFromDB(t, user.Id))
 }
 
-func TestSynchronousReserveCompensatesCacheWhenPersistenceFails(t *testing.T) {
+func TestWalletReserveIgnoresStaleRedisBalanceInNonBatchMode(t *testing.T) {
 	truncateTables(t)
 	resetBatchUpdateTestState(t)
 	useUserCacheMiniRedis(t)
 
-	user := createReserveTestUser(t, 10)
+	user := createReserveTestUser(t, 100)
 	require.NoError(t, populateUserCache(user))
-	require.NoError(t, DB.Delete(&user).Error)
+	// Simulate another writer changing SQL after the cache was populated.  A
+	// stale positive Redis snapshot must never authorize an overspend.
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Update("quota", 10).Error)
 
-	reserved, err := TryReserveUserQuota(user.Id, 6)
+	reserved, err := TryReserveUserQuota(user.Id, 20)
+	require.NoError(t, err)
 	assert.False(t, reserved)
-	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
-	cached, cacheErr := cacheGetUserBase(user.Id)
-	require.NoError(t, cacheErr)
-	assert.Equal(t, 10, cached.Quota)
+	assert.Equal(t, 10, getUserQuotaFromDB(t, user.Id))
+}
+
+func TestTokenReserveCompensatesCacheWhenPersistenceFails(t *testing.T) {
+	truncateTables(t)
+	resetBatchUpdateTestState(t)
+	useUserCacheMiniRedis(t)
 
 	token := createReserveTestToken(t, 12)
-	_, err = GetTokenByKey(token.Key, true)
+	_, err := GetTokenByKey(token.Key, true)
 	require.NoError(t, err)
 	require.NoError(t, DB.Delete(&token).Error)
-	reserved, err = TryReserveTokenQuota(token.Id, token.Key, 7, false)
+	reserved, err := TryReserveTokenQuota(token.Id, token.Key, 7, false)
 	assert.False(t, reserved)
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 	cachedToken, cacheErr := cacheGetTokenByKey(token.Key)

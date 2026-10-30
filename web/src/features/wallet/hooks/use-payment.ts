@@ -25,19 +25,26 @@ import { handleServerError } from '@/lib/handle-server-error'
 import {
   calculateAmount,
   calculateStripeAmount,
+  calculateCryptoPayAmount,
+  calculatePlategaAmount,
   calculateWaffoAmount,
   calculateWaffoPancakeAmount,
   requestPayment,
   requestStripePayment,
+  requestCryptoPayPayment,
+  requestPlategaPayment,
   isApiSuccess,
 } from '../api'
+import { PAYMENT_TYPES } from '../constants'
 import {
   isStripePayment,
+  isCryptoPayPayment,
+  isPlategaPayment,
   isWaffoPayment,
   isWaffoPancakePayment,
   submitPaymentForm,
 } from '../lib'
-import type { AmountRequest, AmountResponse } from '../types'
+import type { AmountRequest, AmountResponse, ApiResponse } from '../types'
 
 // ============================================================================
 // Payment Hook
@@ -48,6 +55,8 @@ type AmountCalculator = (request: AmountRequest) => Promise<AmountResponse>
 export interface PaymentAmountCalculators {
   regular: AmountCalculator
   stripe: AmountCalculator
+  cryptoPay: AmountCalculator
+  platega: AmountCalculator
   waffo: AmountCalculator
   waffoPancake: AmountCalculator
 }
@@ -55,8 +64,28 @@ export interface PaymentAmountCalculators {
 const defaultPaymentAmountCalculators: PaymentAmountCalculators = {
   regular: calculateAmount,
   stripe: calculateStripeAmount,
+  cryptoPay: calculateCryptoPayAmount,
+  platega: calculatePlategaAmount,
   waffo: calculateWaffoAmount,
   waffoPancake: calculateWaffoPancakeAmount,
+}
+
+const TOPUP_QUOTA_LIMIT_ERROR = 'top-up quota limit exceeded'
+
+export function getPaymentErrorMessage(response: ApiResponse): string {
+  if (response.data === TOPUP_QUOTA_LIMIT_ERROR) {
+    return i18next.t('Wallet balance is too high to accept this top-up')
+  }
+
+  if (typeof response.data === 'string' && response.data.trim()) {
+    return response.data
+  }
+
+  if (response.message && response.message !== 'error') {
+    return response.message
+  }
+
+  return i18next.t('Payment request failed')
 }
 
 export async function requestPaymentAmount(
@@ -67,6 +96,10 @@ export async function requestPaymentAmount(
   let calculator = calculators.regular
   if (isStripePayment(paymentType)) {
     calculator = calculators.stripe
+  } else if (isCryptoPayPayment(paymentType)) {
+    calculator = calculators.cryptoPay
+  } else if (isPlategaPayment(paymentType)) {
+    calculator = calculators.platega
   } else if (isWaffoPayment(paymentType)) {
     calculator = calculators.waffo
   } else if (isWaffoPancakePayment(paymentType)) {
@@ -74,11 +107,16 @@ export async function requestPaymentAmount(
   }
 
   const response = await calculator({ amount: topupAmount })
-  if (!isApiSuccess(response) || !response.data) {
-    return 0
+  if (!isApiSuccess(response)) {
+    throw new Error(getPaymentErrorMessage(response))
   }
 
-  return Number.parseFloat(response.data)
+  const calculatedAmount = Number.parseFloat(response.data || '')
+  if (!Number.isFinite(calculatedAmount) || calculatedAmount <= 0) {
+    throw new Error(i18next.t('Payment request failed'))
+  }
+
+  return calculatedAmount
 }
 
 export function usePayment() {
@@ -88,7 +126,11 @@ export function usePayment() {
 
   // Calculate payment amount
   const calculatePaymentAmount = useCallback(
-    async (topupAmount: number, paymentType: string) => {
+    async (
+      topupAmount: number,
+      paymentType: string,
+      notifyOnError = false
+    ): Promise<number | null> => {
       try {
         setCalculating(true)
         const calculatedAmount = await requestPaymentAmount(
@@ -97,9 +139,16 @@ export function usePayment() {
         )
         setAmount(calculatedAmount)
         return calculatedAmount
-      } catch {
+      } catch (error) {
         setAmount(0)
-        return 0
+        if (notifyOnError) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : i18next.t('Payment request failed')
+          toast.error(message)
+        }
+        return null
       } finally {
         setCalculating(false)
       }
@@ -114,32 +163,49 @@ export function usePayment() {
         setProcessing(true)
 
         const isStripe = isStripePayment(paymentType)
+        const isCryptoPay = isCryptoPayPayment(paymentType)
+        const isPlatega = isPlategaPayment(paymentType)
         const amount = Math.floor(topupAmount)
 
-        const response = isStripe
-          ? await requestStripePayment({
-              amount,
-              payment_method: 'stripe',
-            })
-          : await requestPayment({
-              amount,
-              payment_method: paymentType,
-            })
+        let response
+        if (isStripe) {
+          response = await requestStripePayment({
+            amount,
+            payment_method: 'stripe',
+          })
+        } else if (isCryptoPay) {
+          response = await requestCryptoPayPayment({
+            amount,
+            payment_method: PAYMENT_TYPES.CRYPTO_PAY,
+          })
+        } else if (isPlatega) {
+          response = await requestPlategaPayment({
+            amount,
+            payment_method: paymentType,
+          })
+        } else {
+          response = await requestPayment({
+            amount,
+            payment_method: paymentType,
+          })
+        }
 
         if (!isApiSuccess(response)) {
           handleServerError(response, i18next.t('Payment request failed'))
           return false
         }
 
-        // Handle Stripe payment
-        if (isStripe && response.data?.pay_link) {
-          window.open(response.data.pay_link as string, '_blank')
+        // Handle hosted checkout links.
+        const payLink = (response.data as { pay_link?: string } | undefined)
+          ?.pay_link
+        if ((isStripe || isCryptoPay || isPlatega) && payLink) {
+          window.open(payLink, '_blank', 'noopener,noreferrer')
           toast.success(i18next.t('Redirecting to payment page...'))
           return true
         }
 
         // Handle non-Stripe payment
-        if (!isStripe && response.data) {
+        if (!isStripe && !isCryptoPay && !isPlatega && response.data) {
           const url = (response as unknown as { url?: string }).url
           if (url) {
             submitPaymentForm(url, response.data)

@@ -581,6 +581,10 @@ func TokenAuth() func(c *gin.Context) {
 				common.SysLog(common.LogText("TokenAuth ValidateUserToken database error: %s", err.Error()))
 				abortWithOpenAiMessage(c, http.StatusInternalServerError,
 					common.TranslateMessage(c, i18n.MsgDatabaseError))
+			} else if errors.Is(err, model.ErrResellerTokenQuotaInsufficient) {
+				abortWithOpenAiMessage(c, http.StatusForbidden,
+					common.TranslateMessage(c, i18n.MsgQuotaInsufficient),
+					types.ErrorCodePreConsumeTokenQuotaFailed)
 			} else {
 				abortWithOpenAiMessage(c, http.StatusUnauthorized,
 					common.TranslateMessage(c, i18n.MsgTokenInvalid))
@@ -679,6 +683,7 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 	c.Set("token_key", token.Key)
 	c.Set("token_name", token.Name)
 	c.Set("token_unlimited_quota", token.UnlimitedQuota)
+	common.SetContextKey(c, constant.ContextKeyTokenQuotaMode, token.EffectiveQuotaMode())
 	if !token.UnlimitedQuota {
 		c.Set("token_quota", token.RemainQuota)
 	}

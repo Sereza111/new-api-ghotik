@@ -126,6 +126,34 @@ export function getPaymentIcon(
           style={{ color: PAYMENT_ICON_COLORS[PAYMENT_TYPES.CREEM] }}
         />
       )
+    case PAYMENT_TYPES.CRYPTO_PAY:
+      return (
+        <SiTelegram
+          className={className}
+          style={{ color: PAYMENT_ICON_COLORS[PAYMENT_TYPES.CRYPTO_PAY] }}
+        />
+      )
+    case PAYMENT_TYPES.PLATEGA_SBP:
+      return (
+        <QrCode
+          className={className}
+          style={{ color: PAYMENT_ICON_COLORS[PAYMENT_TYPES.PLATEGA_SBP] }}
+        />
+      )
+    case PAYMENT_TYPES.PLATEGA_CARD:
+      return (
+        <CreditCard
+          className={className}
+          style={{ color: PAYMENT_ICON_COLORS[PAYMENT_TYPES.PLATEGA_CARD] }}
+        />
+      )
+    case PAYMENT_TYPES.PLATEGA_CRYPTO:
+      return (
+        <Bitcoin
+          className={className}
+          style={{ color: PAYMENT_ICON_COLORS[PAYMENT_TYPES.PLATEGA_CRYPTO] }}
+        />
+      )
     case PAYMENT_TYPES.WAFFO:
       return (
         <CreditCard

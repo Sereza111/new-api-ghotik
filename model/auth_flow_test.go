@@ -70,6 +70,34 @@ func TestAuthFlowExpiryIsEnforced(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrAuthFlowExpired))
 }
 
+func TestCompareAndSwapAuthFlowPayloadAcceptsOnlyFirstProviderResult(t *testing.T) {
+	truncateTables(t)
+	token, _, err := CreateAuthFlow(AuthFlowCreate{
+		Purpose:   AuthFlowPurposeTelegramLogin,
+		Payload:   `{}`,
+		ExpiresAt: time.Now().Add(time.Minute),
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, CompareAndSwapAuthFlowPayload(
+		token,
+		AuthFlowMatch{Purpose: AuthFlowPurposeTelegramLogin},
+		`{}`,
+		`{"telegram_id":"123"}`,
+	))
+	err = CompareAndSwapAuthFlowPayload(
+		token,
+		AuthFlowMatch{Purpose: AuthFlowPurposeTelegramLogin},
+		`{}`,
+		`{"telegram_id":"456"}`,
+	)
+	assert.ErrorIs(t, err, ErrAuthFlowConsumed)
+
+	flow, err := GetAuthFlow(token, AuthFlowMatch{Purpose: AuthFlowPurposeTelegramLogin})
+	require.NoError(t, err)
+	assert.Equal(t, `{"telegram_id":"123"}`, flow.Payload)
+}
+
 func TestExternalAuthAssertionCanOnlyBeClaimedOnce(t *testing.T) {
 	truncateTables(t)
 	expiresAt := time.Now().Add(time.Minute)

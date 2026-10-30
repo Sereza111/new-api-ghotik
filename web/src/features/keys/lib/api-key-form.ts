@@ -23,6 +23,12 @@ import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
 
 import { DEFAULT_GROUP } from '../constants'
 import type { ApiKey, ApiKeyFormData } from '../types'
+import {
+  MAX_TOKEN_QUOTA_MILLIONS,
+  MAX_TOKEN_QUOTA_UNITS,
+  quotaMillionsToUnits,
+  quotaUnitsToMillions,
+} from './api-key-quota'
 
 // ============================================================================
 // Form Schema
@@ -86,13 +92,23 @@ export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
       }
 
       if (
-        data.remain_quota_dollars === undefined ||
-        data.remain_quota_dollars < 0
+        data.remain_quota_amount === undefined ||
+        !Number.isFinite(data.remain_quota_amount) ||
+        data.remain_quota_amount < 0 ||
+        (data.quota_mode === 'tokens' &&
+          (data.remain_quota_amount > MAX_TOKEN_QUOTA_MILLIONS ||
+            quotaMillionsToUnits(data.remain_quota_amount) >
+              MAX_TOKEN_QUOTA_UNITS))
       ) {
         ctx.addIssue({
           code: 'custom',
-          path: ['remain_quota_dollars'],
-          message: t('Quota must be zero or greater'),
+          path: ['remain_quota_amount'],
+          message:
+            data.quota_mode === 'tokens'
+              ? t('Token quota must be no greater than {{max}} million', {
+                  max: MAX_TOKEN_QUOTA_MILLIONS,
+                })
+              : t('Quota must be zero or greater'),
         })
       }
     })
@@ -141,11 +157,19 @@ export function getApiKeyFormDefaultValues(
 export function transformFormDataToPayload(
   data: ApiKeyFormValues
 ): ApiKeyFormData {
+  const quotaAmount = data.remain_quota_amount || 0
+  let remainQuota = 0
+  if (!data.unlimited_quota) {
+    remainQuota =
+      data.quota_mode === 'tokens'
+        ? quotaMillionsToUnits(quotaAmount)
+        : parseQuotaFromDollars(quotaAmount)
+  }
+
   return {
     name: data.name,
-    remain_quota: data.unlimited_quota
-      ? 0
-      : parseQuotaFromDollars(data.remain_quota_dollars || 0),
+    remain_quota: remainQuota,
+    quota_mode: data.quota_mode,
     expired_time: data.expired_time
       ? Math.floor(data.expired_time.getTime() / 1000)
       : -1,
@@ -177,12 +201,19 @@ export function transformApiKeyToFormDefaults(
     .filter((group) => availableSet.has(group))
     .slice(0, Math.max(0, maxAutoGroups))
   const autoGroupsMode = storedAutoGroups.length > 0 ? 'custom' : 'inherit'
+  const quotaMode = apiKey.quota_mode === 'tokens' ? 'tokens' : 'money'
+  let remainQuotaAmount = 0
+  if (!apiKey.unlimited_quota) {
+    remainQuotaAmount =
+      quotaMode === 'tokens'
+        ? quotaUnitsToMillions(apiKey.remain_quota)
+        : quotaUnitsToDollars(apiKey.remain_quota)
+  }
 
   return {
     name: apiKey.name,
-    remain_quota_dollars: apiKey.unlimited_quota
-      ? 0
-      : quotaUnitsToDollars(apiKey.remain_quota),
+    quota_mode: quotaMode,
+    remain_quota_amount: remainQuotaAmount,
     expired_time:
       apiKey.expired_time > 0 ? new Date(apiKey.expired_time * 1000) : null,
     unlimited_quota: apiKey.unlimited_quota,

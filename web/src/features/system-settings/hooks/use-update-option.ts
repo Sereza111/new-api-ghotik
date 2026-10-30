@@ -51,6 +51,23 @@ const STATUS_RELATED_KEYS = new Set([
   'QuotaRemindThreshold',
 ])
 
+const PRICING_RELATED_KEYS = new Set([
+  'ModelPrice',
+  'ModelRatio',
+  'CompletionRatio',
+  'CacheRatio',
+  'CreateCacheRatio',
+  'ImageRatio',
+  'AudioRatio',
+  'AudioCompletionRatio',
+  'GroupRatio',
+  'GroupGroupRatio',
+  'UserUsableGroups',
+  'AutoGroups',
+  'billing_setting.billing_mode',
+  'billing_setting.billing_expr',
+])
+
 export function useUpdateOption() {
   const queryClient = useQueryClient()
 
@@ -76,6 +93,51 @@ export function useUpdateOption() {
       } else {
         handleServerError(data, i18next.t('Failed to update setting'))
       }
+      return response
+    },
+    onSuccess: (_data, variables) => {
+      // Always refresh system-options
+      queryClient.invalidateQueries({ queryKey: ['system-options'] })
+
+      if (PRICING_RELATED_KEYS.has(variables.key)) {
+        queryClient.invalidateQueries({ queryKey: ['pricing'] })
+      }
+
+      // If updating frontend-display-related config, also refresh status
+      if (STATUS_RELATED_KEYS.has(variables.key)) {
+        queryClient.invalidateQueries({ queryKey: ['status'] })
+        try {
+          window.localStorage.removeItem('status')
+        } catch {
+          /* empty */
+        }
+      }
+
+      toast.success(i18next.t('Setting updated successfully'))
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || i18next.t('Failed to update setting'))
+    },
+  })
+}
+
+export function useUpdateResellerCommercialSettings() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (request: UpdateResellerCommercialSettingsRequest) => {
+      const response = await updateResellerCommercialSettings(request)
+      if (!response.success) {
+        throw new Error(
+          response.message || i18next.t('Failed to update setting')
+        )
+      }
+      return response
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['system-options'] })
+      queryClient.invalidateQueries({ queryKey: ['reseller', 'config'] })
+      toast.success(i18next.t('Setting updated successfully'))
     },
     onError: (error: Error) => {
       handleServerError(error, i18next.t('Failed to update setting'))

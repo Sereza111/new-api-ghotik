@@ -16,7 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Gift, ExternalLink, Loader2, Receipt, WalletCards } from 'lucide-react'
+import {
+  Gift,
+  ExternalLink,
+  Info,
+  Loader2,
+  Receipt,
+  WalletCards,
+} from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 
@@ -39,10 +46,15 @@ import { cn } from '@/lib/utils'
 
 import {
   formatCurrency,
+  formatPaymentAmount,
+  formatUsdAmount,
+  formatRubAmount,
   getDiscountLabel,
   getPaymentIcon,
   getMinTopupAmount,
   calculatePresetPricing,
+  isCryptoPayPayment,
+  isPlategaPayment,
 } from '../lib'
 import type {
   PaymentMethod,
@@ -62,6 +74,7 @@ interface RechargeFormCardProps {
   onTopupAmountChange: (amount: number) => void
   paymentAmount: number
   calculating: boolean
+  paymentType: string
   onPaymentMethodSelect: (method: PaymentMethod) => void
   paymentLoading: string | null
   redemptionCode: string
@@ -92,6 +105,7 @@ export function RechargeFormCard({
   onTopupAmountChange,
   paymentAmount,
   calculating,
+  paymentType,
   onPaymentMethodSelect,
   paymentLoading,
   redemptionCode,
@@ -133,6 +147,8 @@ export function RechargeFormCard({
   const hasConfigurableTopup =
     topupInfo?.enable_online_topup ||
     topupInfo?.enable_stripe_topup ||
+    topupInfo?.enable_crypto_pay_topup ||
+    topupInfo?.enable_platega_topup ||
     enableWaffoTopup ||
     enableWaffoPancakeTopup
   const hasAnyTopup = hasConfigurableTopup || enableCreemTopup
@@ -142,6 +158,12 @@ export function RechargeFormCard({
     Array.isArray(waffoPayMethods) && waffoPayMethods.length > 0
   const minTopup = getMinTopupAmount(topupInfo)
   const redemptionEnabled = topupInfo?.enable_redemption !== false
+  const isCryptoPay = isCryptoPayPayment(paymentType)
+  const isPlatega = isPlategaPayment(paymentType)
+  const selectedPaymentMethod = topupInfo?.pay_methods?.find(
+    (method) => method.type === paymentType
+  )
+  const plategaExchangeRate = Number(selectedPaymentMethod?.exchange_rate) || 1
 
   if (loading) {
     return (
@@ -239,7 +261,7 @@ export function RechargeFormCard({
                         hasDiscount,
                       } = calculatePresetPricing(
                         preset.value,
-                        priceRatio,
+                        isPlatega ? 1 : priceRatio,
                         discount,
                         usdExchangeRate
                       )
@@ -257,9 +279,11 @@ export function RechargeFormCard({
                         >
                           <div className='flex w-full items-center justify-between'>
                             <div className='text-base font-semibold sm:text-lg'>
-                              {formatNumber(displayValue)}
+                              {isCryptoPay || isPlatega
+                                ? formatUsdAmount(preset.value)
+                                : formatNumber(displayValue)}
                             </div>
-                            {hasDiscount && (
+                            {!isCryptoPay && hasDiscount && (
                               <div className='text-xs font-medium text-green-600'>
                                 {getDiscountLabel(discount, t)}
                               </div>
@@ -316,12 +340,23 @@ export function RechargeFormCard({
                       <Skeleton className='h-5 w-16' />
                     ) : (
                       <span className='text-sm font-semibold'>
-                        {formatCurrency(paymentAmount)}
+                        {formatPaymentAmount(paymentAmount, paymentType)}
                       </span>
                     )}
                   </div>
                 </div>
               </div>
+
+              {isPlatega && (
+                <Alert className='bg-muted/20 border-border/70'>
+                  <Info />
+                  <AlertDescription>
+                    {t(
+                      'The payment amount is approximate. Payment provider fees are not included.'
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
 
               <div className='space-y-2.5 sm:space-y-3'>
                 <Label className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>
@@ -370,7 +405,7 @@ export function RechargeFormCard({
                           )}
                           <span className='flex min-w-0 flex-col items-start gap-0.5'>
                             <span className='max-w-full truncate'>
-                              {method.name}
+                              {t(method.name)}
                             </span>
                             {disabledLabel && (
                               <span className='text-muted-foreground max-w-full truncate text-[11px] leading-4 font-normal'>

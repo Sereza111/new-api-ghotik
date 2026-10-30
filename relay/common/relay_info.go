@@ -77,7 +77,8 @@ type ChannelMeta struct {
 
 type TokenCountMeta struct {
 	//promptTokens int
-	estimatePromptTokens int
+	estimatePromptTokens     int
+	estimateCompletionTokens int
 }
 
 type RelayInfo struct {
@@ -88,6 +89,7 @@ type RelayInfo struct {
 	UsingGroup        string // 使用的分组，当auto跨分组重试时，会变动
 	UserGroup         string // 用户所在分组
 	TokenUnlimited    bool
+	TokenQuotaMode    string
 	StartTime         time.Time
 	FirstResponseTime time.Time
 	isFirstResponse   bool
@@ -139,8 +141,8 @@ type RelayInfo struct {
 	// Billing 是计费会话，封装了预扣费/结算/退款的统一生命周期。
 	// 初始免费组可为 nil；若 auto 重试切换到付费组，会在发送前创建。
 	Billing BillingSettler
-	// BillingSource indicates whether this request is billed from wallet quota or subscription.
-	// "" or "wallet" => wallet; "subscription" => subscription
+	// BillingSource indicates whether this request is billed from wallet quota,
+	// a subscription, or prepaid reseller-token quota.
 	BillingSource string
 	// SubscriptionId is the user_subscriptions.id used when BillingSource == "subscription"
 	SubscriptionId int
@@ -630,6 +632,7 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		TokenId:        common.GetContextKeyInt(c, constant.ContextKeyTokenId),
 		TokenKey:       common.GetContextKeyString(c, constant.ContextKeyTokenKey),
 		TokenUnlimited: common.GetContextKeyBool(c, constant.ContextKeyTokenUnlimited),
+		TokenQuotaMode: common.GetContextKeyString(c, constant.ContextKeyTokenQuotaMode),
 		TokenGroup:     tokenGroup,
 
 		isFirstResponse: true,
@@ -839,6 +842,20 @@ func (info *RelayInfo) GetEstimatePromptTokens() int {
 		return 0
 	}
 	return info.estimatePromptTokens
+}
+
+func (info *RelayInfo) SetEstimateCompletionTokens(completionTokens int) {
+	if info == nil {
+		return
+	}
+	info.estimateCompletionTokens = completionTokens
+}
+
+func (info *RelayInfo) GetEstimateCompletionTokens() int {
+	if info == nil {
+		return 0
+	}
+	return info.estimateCompletionTokens
 }
 
 // ---------------------------------------------------------------------------

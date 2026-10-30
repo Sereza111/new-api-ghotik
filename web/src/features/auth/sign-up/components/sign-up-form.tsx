@@ -47,6 +47,8 @@ import { useEmailVerification } from '@/features/auth/hooks/use-email-verificati
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
 import {
   getAffiliateCode,
+  hasAcceptedLegalConsent,
+  rememberLegalConsent,
   saveAffiliateCode,
 } from '@/features/auth/lib/storage'
 import { useStatus } from '@/hooks/use-status'
@@ -126,7 +128,7 @@ export function SignUpForm({
 
   useEffect(() => {
     if (requiresLegalConsent) {
-      setAgreedToLegal(false)
+      setAgreedToLegal(hasAcceptedLegalConsent())
     } else {
       setAgreedToLegal(true)
     }
@@ -364,7 +366,10 @@ export function SignUpForm({
         <LegalConsent
           status={status}
           checked={agreedToLegal}
-          onCheckedChange={setAgreedToLegal}
+          onCheckedChange={(checked) => {
+            setAgreedToLegal(checked)
+            rememberLegalConsent(checked)
+          }}
           className='mt-1'
         />
 

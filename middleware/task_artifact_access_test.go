@@ -152,6 +152,30 @@ func TestSetUpLoggerNeverWritesTaskArtifactAccess(t *testing.T) {
 	assert.False(t, strings.Contains(output.String(), "never-log-this"))
 }
 
+func TestSetUpLoggerNeverWritesOAuthQueryCredentials(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousWriter := gin.DefaultWriter
+	var output bytes.Buffer
+	gin.DefaultWriter = &output
+	t.Cleanup(func() { gin.DefaultWriter = previousWriter })
+
+	router := gin.New()
+	SetUpLogger(router)
+	router.GET("/oauth/oidc", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/oauth/oidc?code=one-time-google-code&state=csrf-flow-token",
+		nil,
+	)
+	router.ServeHTTP(httptest.NewRecorder(), request)
+
+	assert.Contains(t, output.String(), "GET /oauth/oidc")
+	assert.NotContains(t, output.String(), "one-time-google-code")
+	assert.NotContains(t, output.String(), "csrf-flow-token")
+}
+
 func urlQueryEscape(value string) string {
 	replacer := strings.NewReplacer("+", "%2B", "=", "%3D")
 	return replacer.Replace(value)

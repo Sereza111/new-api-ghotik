@@ -49,6 +49,13 @@ export interface Message {
   isContentComplete?: boolean
   status?: MessageStatus
   errorCode?: string | null
+  images?: GeneratedImage[]
+}
+
+export interface GeneratedImage {
+  id: string
+  src: string
+  revisedPrompt?: string
 }
 
 // API payload types
@@ -76,6 +83,7 @@ export interface ChatCompletionRequest {
   frequency_penalty?: number
   presence_penalty?: number
   seed?: number
+  reasoning_effort?: 'low' | 'medium' | 'high'
 }
 
 export interface ChatCompletionChunk {
@@ -117,6 +125,24 @@ export interface ChatCompletionResponse {
   }
 }
 
+export interface ImageGenerationRequest {
+  model: string
+  group?: string
+  prompt: string
+  n: number
+  quality: 'medium'
+  size: '1024x1024'
+}
+
+export interface ImageGenerationResponse {
+  created?: number
+  data: Array<{
+    url?: string
+    b64_json?: string
+    revised_prompt?: string
+  }>
+}
+
 // Configuration types
 export interface PlaygroundConfig {
   model: string
@@ -128,6 +154,7 @@ export interface PlaygroundConfig {
   presence_penalty: number
   seed: number | null
   stream: boolean
+  reasoning_effort: 'none' | 'low' | 'medium' | 'high'
 }
 
 export interface ParameterEnabled {

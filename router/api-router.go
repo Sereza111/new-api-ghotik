@@ -63,6 +63,8 @@ func SetApiRouter(router *gin.Engine) {
 
 		apiRouter.POST("/stripe/webhook", anonymousRequestBodyLimit, controller.StripeWebhook)
 		apiRouter.POST("/creem/webhook", anonymousRequestBodyLimit, controller.CreemWebhook)
+		apiRouter.POST("/crypto-pay/webhook", anonymousRequestBodyLimit, controller.CryptoPayWebhook)
+		apiRouter.POST("/platega/webhook", anonymousRequestBodyLimit, controller.PlategaWebhook)
 		apiRouter.POST("/waffo/webhook", anonymousRequestBodyLimit, controller.WaffoWebhook)
 		// :env separates test vs prod URLs so the operator can register each
 		// in Pancake's matching webhook slot; handler enforces env match.
@@ -97,6 +99,9 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.DELETE("/sessions/:sid", middleware.DisableCache(), controller.DeleteLoginSession)
 				selfRoute.POST("/sessions/revoke-others", middleware.DisableCache(), controller.RevokeOtherLoginSessions)
 				selfRoute.GET("/self/groups", controller.GetUserGroups)
+				selfRoute.GET("/self/routing-sources", middleware.DisableCache(), controller.GetRoutingSources)
+				selfRoute.PUT("/self/routing-sources/:family", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.UpdateRoutingSource)
+				selfRoute.DELETE("/self/routing-sources/:family", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.DeleteRoutingSource)
 				selfRoute.GET("/self", controller.GetSelf)
 				selfRoute.GET("/models", controller.GetUserModels)
 				selfRoute.PUT("/self", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.UpdateSelf)
@@ -127,6 +132,10 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/stripe/pay", middleware.CriticalRateLimit(), controller.RequestStripePay)
 				selfRoute.POST("/stripe/amount", controller.RequestStripeAmount)
 				selfRoute.POST("/creem/pay", middleware.CriticalRateLimit(), controller.RequestCreemPay)
+				selfRoute.POST("/crypto-pay/amount", controller.RequestCryptoPayAmount)
+				selfRoute.POST("/crypto-pay/pay", middleware.CriticalRateLimit(), controller.RequestCryptoPay)
+				selfRoute.POST("/platega/amount", controller.RequestPlategaAmount)
+				selfRoute.POST("/platega/pay", middleware.CriticalRateLimit(), controller.RequestPlatega)
 				selfRoute.POST("/waffo/amount", controller.RequestWaffoAmount)
 				selfRoute.POST("/waffo/pay", middleware.CriticalRateLimit(), controller.RequestWaffoPay)
 				selfRoute.POST("/waffo-pancake/amount", controller.RequestWaffoPancakeAmount)
@@ -223,6 +232,7 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.POST("/model_pricing/convert", controller.PreviewModelPricingConversion)
 			optionRoute.POST("/model_pricing/preview", controller.PreviewModelPricing)
 			optionRoute.POST("/payment_compliance", controller.ConfirmPaymentCompliance)
+			optionRoute.POST("/telegram_channel_bonus/webhook", controller.ConfigureTelegramChannelBonusWebhook)
 			optionRoute.GET("/channel_affinity_cache", controller.GetChannelAffinityCacheStats)
 			optionRoute.DELETE("/channel_affinity_cache", controller.ClearChannelAffinityCache)
 			optionRoute.POST("/rest_model_ratio", controller.ResetModelRatio)
@@ -295,6 +305,17 @@ func SetApiRouter(router *gin.Engine) {
 			tokenRoute.POST("/batch", controller.DeleteTokenBatch)
 			tokenRoute.POST("/batch/keys", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.GetTokenKeysBatch)
 		}
+		resellerRoute := apiRouter.Group("/reseller")
+		resellerRoute.Use(middleware.UserAuth())
+		{
+			resellerRoute.GET("/config", controller.GetResellerConfig)
+			resellerRoute.GET("/keys", controller.GetResellerKeys)
+			resellerRoute.POST("/subscription", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.PurchaseResellerSubscription)
+			resellerRoute.POST("/keys", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.AddResellerKey)
+			resellerRoute.DELETE("/keys/:id", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.DeleteResellerKey)
+			resellerRoute.POST("/keys/:id/reissue", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.ReissueResellerKey)
+			resellerRoute.POST("/keys/:id/quota", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.AdjustResellerKeyQuota)
+		}
 
 		usageRoute := apiRouter.Group("/usage")
 		usageRoute.Use(middleware.CORS(), middleware.CriticalRateLimit())
@@ -352,6 +373,7 @@ func SetApiRouter(router *gin.Engine) {
 		dataRoute.GET("/", middleware.AdminAuth(), controller.GetAllQuotaDates)
 		dataRoute.GET("/users", middleware.AdminAuth(), controller.GetQuotaDatesByUser)
 		dataRoute.GET("/self", middleware.UserAuth(), controller.GetUserQuotaDates)
+		dataRoute.GET("/usage-summary/self", middleware.UserAuth(), controller.GetUserUsageSummary)
 		dataRoute.GET("/flow", middleware.AdminAuth(), controller.GetAllFlowQuotaDates)
 		dataRoute.GET("/flow/self", middleware.UserAuth(), controller.GetUserFlowQuotaDates)
 

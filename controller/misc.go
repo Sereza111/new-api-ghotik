@@ -46,6 +46,12 @@ func GetStatus(c *gin.Context) {
 	defer common.OptionMapRWMutex.RUnlock()
 
 	legalSetting := system_setting.GetLegalSettings()
+	telegramBotID := ""
+	if tokenParts := strings.SplitN(common.TelegramBotToken, ":", 2); len(tokenParts) == 2 {
+		if _, err := strconv.ParseInt(tokenParts[0], 10, 64); err == nil {
+			telegramBotID = tokenParts[0]
+		}
+	}
 
 	data := gin.H{
 		"version":                     common.Version,
@@ -61,6 +67,7 @@ func GetStatus(c *gin.Context) {
 		"telegram_oauth":              common.TelegramOAuthEnabled,
 		"telegram_oauth_configured":   oauth.TelegramConfigurationError() == nil,
 		"telegram_bot_name":           common.TelegramBotName,
+		"telegram_bot_id":             telegramBotID,
 		"theme":                       "default",
 		"system_name":                 common.SystemName,
 		"logo":                        common.Logo,

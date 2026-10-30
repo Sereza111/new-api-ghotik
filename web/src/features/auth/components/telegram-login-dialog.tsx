@@ -30,55 +30,51 @@ type TelegramLoginDialogProps = {
   onAuthorization: (authorization: unknown) => void
 }
 
-let telegramCallbackSequence = 0
-
 export function TelegramLoginDialog(props: TelegramLoginDialogProps) {
   const { t } = useTranslation()
-  const widgetContainer = useRef<HTMLDivElement | null>(null)
+  const widgetFrame = useRef<HTMLIFrameElement | null>(null)
   const authorizationHandler = useRef(props.onAuthorization)
-  const [callbackName] = useState(
-    () => `newApiTelegramLogin${++telegramCallbackSequence}`
-  )
   const [widgetState, setWidgetState] = useState<
-    'idle' | 'loading' | 'ready' | 'failed'
-  >('idle')
+    'loading' | 'ready' | 'failed'
+  >('loading')
+  const botName = props.botName.trim().replace(/^@/, '')
+  const widgetUrl =
+    props.open && botName
+      ? `https://oauth.telegram.org/embed/${encodeURIComponent(botName)}?origin=${encodeURIComponent(window.location.origin)}&return_to=${encodeURIComponent(window.location.href)}&size=large&radius=8&request_access=write`
+      : ''
 
   useEffect(() => {
     authorizationHandler.current = props.onAuthorization
   }, [props.onAuthorization])
 
   useEffect(() => {
-    const container = widgetContainer.current
-    const botName = props.botName.trim()
-    if (!props.open || !container || !botName) return
-
+    if (!widgetUrl) return
     setWidgetState('loading')
-    const callback = (authorization: unknown) => {
-      authorizationHandler.current(authorization)
-    }
-    const browserWindow = window as unknown as Record<string, unknown>
-    browserWindow[callbackName] = callback
 
-    const script = document.createElement('script')
-    script.async = true
-    script.src = 'https://telegram.org/js/telegram-widget.js?22'
-    script.dataset.telegramLogin = botName
-    script.dataset.size = 'large'
-    script.dataset.radius = '8'
-    script.dataset.onauth = `${callbackName}(user)`
-    const handleLoad = () => setWidgetState('ready')
-    const handleError = () => setWidgetState('failed')
-    script.addEventListener('load', handleLoad)
-    script.addEventListener('error', handleError)
-    container.replaceChildren(script)
+    const handleTelegramMessage = (event: MessageEvent<unknown>) => {
+      if (
+        !['https://oauth.telegram.org', 'null'].includes(event.origin) ||
+        event.source !== widgetFrame.current?.contentWindow
+      ) {
+        return
+      }
 
-    return () => {
-      script.removeEventListener('load', handleLoad)
-      script.removeEventListener('error', handleError)
-      container.replaceChildren()
-      delete browserWindow[callbackName]
+      let data: { event?: string; auth_data?: unknown } | null = null
+      try {
+        data = (
+          typeof event.data === 'string' ? JSON.parse(event.data) : event.data
+        ) as { event?: string; auth_data?: unknown } | null
+      } catch {
+        return
+      }
+      if (data?.event === 'auth_user' && data.auth_data) {
+        authorizationHandler.current(data.auth_data)
+      }
     }
-  }, [callbackName, props.botName, props.open])
+
+    window.addEventListener('message', handleTelegramMessage)
+    return () => window.removeEventListener('message', handleTelegramMessage)
+  }, [widgetUrl])
 
   return (
     <Dialog
@@ -92,18 +88,24 @@ export function TelegramLoginDialog(props: TelegramLoginDialogProps) {
     >
       <div
         className='flex min-h-12 items-center justify-center'
-        aria-busy={widgetState === 'loading' || props.pending}
+        aria-busy={props.pending || widgetState === 'loading'}
       >
-        {(widgetState === 'loading' || props.pending) && <Spinner />}
+        {widgetState === 'loading' && <Spinner />}
         {widgetState === 'failed' && (
           <p className='text-destructive text-sm'>{t('Login failed')}</p>
         )}
-        <div
-          ref={widgetContainer}
-          className={
-            widgetState === 'ready' && !props.pending ? 'block' : 'hidden'
-          }
-        />
+        {widgetUrl && (
+          <iframe
+            ref={widgetFrame}
+            src={widgetUrl}
+            title={t('Telegram Login Widget')}
+            className={widgetState === 'ready' ? 'h-10 w-[238px]' : 'hidden'}
+            scrolling='no'
+            sandbox='allow-forms allow-popups allow-popups-to-escape-sandbox allow-scripts'
+            onLoad={() => setWidgetState('ready')}
+            onError={() => setWidgetState('failed')}
+          />
+        )}
       </div>
     </Dialog>
   )

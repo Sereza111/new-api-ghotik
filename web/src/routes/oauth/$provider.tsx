@@ -27,6 +27,7 @@ import i18next from 'i18next'
 import { useEffect, useRef } from 'react'
 import { toast } from 'sonner'
 
+import { telegramLogin } from '@/features/auth/api'
 import { OAuthCallbackScreen } from '@/features/auth/components/oauth-callback-screen'
 import {
   OAUTH_POPUP_CALLBACK_MESSAGE,
@@ -84,6 +85,14 @@ function OAuthCallback() {
     telegram_bind?: string
     flow_token?: string
     error_code?: string
+    id?: string
+    auth_date?: string
+    hash?: string
+    first_name?: string
+    last_name?: string
+    username?: string
+    photo_url?: string
+    lang?: string
   }
   const callbackState = search.state ?? ''
   const isTelegramBindCallback =
@@ -104,6 +113,24 @@ function OAuthCallback() {
 
     const code = search.code ?? ''
     const state = callbackState
+    const telegramAuthorization =
+      provider === 'telegram'
+        ? (pickTelegramAuthorization({
+            id: search.id,
+            auth_date: search.auth_date,
+            hash: search.hash,
+            first_name: search.first_name,
+            last_name: search.last_name,
+            username: search.username,
+            photo_url: search.photo_url,
+            lang: search.lang,
+          }) ?? parseTelegramAuthorizationHash(window.location.hash))
+        : null
+    if (telegramAuthorization && window.location.hash) {
+      const callbackUrl = new URL(window.location.href)
+      callbackUrl.hash = ''
+      window.history.replaceState(null, '', callbackUrl)
+    }
     const telegramCallback =
       provider === 'telegram'
         ? parseTelegramBindCallback({
@@ -197,7 +224,7 @@ function OAuthCallback() {
       void navigate({ href, replace: true })
     }
 
-    if (!code && !search.error) {
+    if (!code && !search.error && !telegramAuthorization) {
       toast.error(i18next.t('Missing code'))
       safeNavigate('/sign-in', '/sign-in')
       return
@@ -243,7 +270,7 @@ function OAuthCallback() {
           response.data,
           messageKey
             ? i18next.t(messageKey)
-            : response.data?.message || i18next.t('OAuth failed')
+            : oauthResponse.message || i18next.t('OAuth failed')
         )
       } catch (error: unknown) {
         if (!active) return
@@ -266,9 +293,17 @@ function OAuthCallback() {
     search.error,
     search.error_code,
     search.error_description,
+    search.first_name,
     search.flow_token,
+    search.hash,
+    search.id,
+    search.lang,
+    search.last_name,
+    search.photo_url,
     search.redirect,
     search.telegram_bind,
+    search.username,
+    search.auth_date,
   ])
 
   return <OAuthCallbackScreen provider={provider} mode={mode} />

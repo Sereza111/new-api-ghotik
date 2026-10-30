@@ -8,12 +8,12 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// FundingSource — 资金来源接口（钱包 or 订阅）
+// FundingSource — 资金来源接口（钱包、订阅或预付费令牌）
 // ---------------------------------------------------------------------------
 
 // FundingSource 抽象了预扣费的资金来源。
 type FundingSource interface {
-	// Source 返回资金来源标识："wallet" 或 "subscription"
+	// Source 返回资金来源标识。
 	Source() string
 	// PreConsume 从该资金来源预扣 amount 额度
 	PreConsume(amount int) error
@@ -22,6 +22,15 @@ type FundingSource interface {
 	// Refund 退还所有预扣费
 	Refund() error
 }
+
+// PrepaidTokenFunding represents reseller quota paid for when the token was
+// issued. Request settlement only adjusts the token quota itself.
+type PrepaidTokenFunding struct{}
+
+func (p *PrepaidTokenFunding) Source() string       { return BillingSourceReseller }
+func (p *PrepaidTokenFunding) PreConsume(int) error { return nil }
+func (p *PrepaidTokenFunding) Settle(int) error     { return nil }
+func (p *PrepaidTokenFunding) Refund() error        { return nil }
 
 // ---------------------------------------------------------------------------
 // WalletFunding — 钱包资金来源实现
@@ -71,7 +80,11 @@ func (w *WalletFunding) Refund() error {
 	}
 	// IncreaseUserQuota 是 quota += N 的非幂等操作，不能重试，否则会多退额度。
 	// 订阅的 RefundSubscriptionPreConsume 有 requestId 幂等保护所以可以重试。
-	return model.IncreaseUserQuota(w.userId, w.consumed, false)
+	if err := model.IncreaseUserQuota(w.userId, w.consumed, false); err != nil {
+		return err
+	}
+	w.consumed = 0
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -123,9 +136,13 @@ func (s *SubscriptionFunding) Refund() error {
 	if s.preConsumed <= 0 {
 		return nil
 	}
-	return refundWithRetry(func() error {
+	err := refundWithRetry(func() error {
 		return model.RefundSubscriptionPreConsume(s.requestId)
 	})
+	if err == nil {
+		s.preConsumed = 0
+	}
+	return err
 }
 
 // refundWithRetry 尝试多次执行退款操作以提高成功率，只能用于基于事务的退款函数！！！！！！

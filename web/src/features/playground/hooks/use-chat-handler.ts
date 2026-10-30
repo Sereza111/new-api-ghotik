@@ -21,7 +21,7 @@ import { useTranslation } from 'react-i18next'
 
 import { handleServerError } from '@/lib/handle-server-error'
 
-import { sendChatCompletion } from '../api'
+import { sendChatCompletion, sendImageGeneration } from '../api'
 import { ERROR_MESSAGES } from '../constants'
 import {
   applyStreamingChunk,
@@ -30,10 +30,13 @@ import {
   updateLastAssistantMessage,
   parseRequestErrorDetails,
   applyChatCompletionResponse,
+  applyImageGenerationResponse,
+  buildImageGenerationPayload,
   completeAssistantMessage,
   hasChatCompletionChoice,
   isAssistantMessageFinal,
   isAssistantMessagePending,
+  isImageGenerationModel,
 } from '../lib'
 import type { Message, PlaygroundConfig, ParameterEnabled } from '../types'
 import { useStreamRequest } from './use-stream-request'
@@ -346,16 +349,97 @@ export function useChatHandler({
     ]
   )
 
+  const sendImage = useCallback(
+    async (messages: Message[]) => {
+      const payload = buildImageGenerationPayload(messages, config)
+      const generation = requestGenerationRef.current + 1
+      const abortController = new AbortController()
+
+      requestGenerationRef.current = generation
+      stopStream()
+      discardPendingStreamUpdates(generation)
+      abortControllerRef.current?.abort()
+      abortControllerRef.current = abortController
+
+      try {
+        setIsRequesting(true)
+        const response = await sendImageGeneration(
+          payload,
+          abortController.signal
+        )
+        if (
+          abortController.signal.aborted ||
+          requestGenerationRef.current !== generation
+        ) {
+          return
+        }
+
+        const hasImage = response.data.some(
+          (image) => Boolean(image.b64_json) || Boolean(image.url)
+        )
+        if (!hasImage) {
+          handleStreamError(generation, ERROR_MESSAGES.API_REQUEST_ERROR)
+          return
+        }
+
+        onMessageUpdate((prev) => {
+          if (requestGenerationRef.current !== generation) return prev
+          return updateLastAssistantMessage(prev, (message) => {
+            const updatedMessage = applyImageGenerationResponse(
+              message,
+              response
+            )
+
+            return updatedMessage ?? message
+          })
+        })
+      } catch (error: unknown) {
+        if (
+          abortController.signal.aborted ||
+          requestGenerationRef.current !== generation
+        ) {
+          return
+        }
+
+        const { errorCode, errorMessage } = parseRequestErrorDetails(error)
+        handleStreamError(generation, errorMessage, errorCode)
+      } finally {
+        if (requestGenerationRef.current === generation) {
+          abortControllerRef.current = null
+          setIsRequesting(false)
+        }
+      }
+    },
+    [
+      config,
+      stopStream,
+      discardPendingStreamUpdates,
+      onMessageUpdate,
+      handleStreamError,
+    ]
+  )
+
   // Send chat request (stream or non-stream based on config)
   const sendChat = useCallback(
     (messages: Message[]) => {
+      if (isImageGenerationModel(config.model)) {
+        void sendImage(messages)
+        return
+      }
+
       if (config.stream) {
         sendStreamingChat(messages)
       } else {
         sendNonStreamingChat(messages)
       }
     },
-    [config.stream, sendStreamingChat, sendNonStreamingChat]
+    [
+      config.model,
+      config.stream,
+      sendImage,
+      sendStreamingChat,
+      sendNonStreamingChat,
+    ]
   )
 
   // Stop generation

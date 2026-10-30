@@ -104,6 +104,12 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 	if ctx == nil || relayInfo == nil || apiErr == nil {
 		return false
 	}
+	// Reseller allocations are prepaid raw-token balances.  The legacy Grok
+	// violation fee is price/ratio based and would both violate that contract
+	// and race the synchronous reseller refund path on rejected requests.
+	if isResellerBilling(relayInfo) {
+		return false
+	}
 	//if relayInfo.IsPlayground {
 	//	return false
 	//}

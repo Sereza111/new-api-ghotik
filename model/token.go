@@ -11,6 +11,13 @@ import (
 	"gorm.io/gorm"
 )
 
+const resellerTokenKeyPrefix = "rsl"
+
+const (
+	TokenQuotaModeMoney  = "money"
+	TokenQuotaModeTokens = "tokens"
+)
+
 type Token struct {
 	Id                 int            `json:"id"`
 	UserId             int            `json:"user_id" gorm:"index"`
@@ -22,6 +29,7 @@ type Token struct {
 	ExpiredTime        int64          `json:"expired_time" gorm:"bigint;default:-1"` // -1 means never expired
 	RemainQuota        int            `json:"remain_quota" gorm:"default:0"`
 	UnlimitedQuota     bool           `json:"unlimited_quota"`
+	QuotaMode          string         `json:"quota_mode" gorm:"type:varchar(16)"`
 	ModelLimitsEnabled bool           `json:"model_limits_enabled"`
 	ModelLimits        string         `json:"model_limits" gorm:"type:text"`
 	AllowIps           *string        `json:"allow_ips" gorm:"default:''"`
@@ -32,6 +40,35 @@ type Token struct {
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 	// 允许用此令牌查询所属用户的额度；新建令牌默认开启，已有令牌升级后保持关闭
 	AllowUserQuotaQuery bool `json:"allow_user_quota_query"`
+}
+
+func NormalizeTokenQuotaMode(mode string) (string, bool) {
+	switch strings.TrimSpace(mode) {
+	case "", TokenQuotaModeMoney:
+		return TokenQuotaModeMoney, true
+	case TokenQuotaModeTokens:
+		return TokenQuotaModeTokens, true
+	default:
+		return "", false
+	}
+}
+
+func (token *Token) EffectiveQuotaMode() string {
+	if token != nil && IsResellerTokenKey(token.Key) {
+		return TokenQuotaModeTokens
+	}
+	if token == nil {
+		return TokenQuotaModeMoney
+	}
+	mode, ok := NormalizeTokenQuotaMode(token.QuotaMode)
+	if !ok {
+		return TokenQuotaModeMoney
+	}
+	return mode
+}
+
+func (token *Token) UsesTokenQuota() bool {
+	return token != nil && token.EffectiveQuotaMode() == TokenQuotaModeTokens
 }
 
 func (token *Token) GetAutoGroups() ([]string, error) {
@@ -110,6 +147,14 @@ func GetAllUserTokens(userId int, startIdx int, num int) ([]*Token, error) {
 	var err error
 	err = DB.Where("user_id = ?", userId).Order("id desc").Limit(num).Offset(startIdx).Find(&tokens).Error
 	return tokens, err
+}
+
+func NewResellerTokenKey() (string, error) {
+	key, err := common.GenerateKey()
+	if err != nil {
+		return "", err
+	}
+	return resellerTokenKeyPrefix + "_" + key, nil
 }
 
 // sanitizeLikePattern 校验并清洗用户输入的 LIKE 搜索模式。
@@ -225,8 +270,10 @@ func ValidateUserToken(key string) (token *Token, err error) {
 	}
 	token, err = GetTokenByKey(key, false)
 	if err == nil {
-		if token.Status == common.TokenStatusExhausted ||
-			token.Status == common.TokenStatusExpired ||
+		if token.Status == common.TokenStatusExhausted && IsResellerTokenKey(token.Key) {
+			return token, ErrResellerTokenQuotaInsufficient
+		}
+		if token.Status == common.TokenStatusExhausted || token.Status == common.TokenStatusExpired ||
 			token.Status != common.TokenStatusEnabled {
 			return token, ErrTokenInvalid
 		}
@@ -241,12 +288,18 @@ func ValidateUserToken(key string) (token *Token, err error) {
 			return token, ErrTokenInvalid
 		}
 		if !token.UnlimitedQuota && token.RemainQuota <= 0 {
-			if !common.RedisEnabled {
+			// Raw-token keys reserve their complete finite allocation while a request
+			// is in flight. Do not persist an exhausted status for that temporary
+			// reservation; the remaining balance itself still rejects concurrent use.
+			if !common.RedisEnabled && !token.UsesTokenQuota() {
 				token.Status = common.TokenStatusExhausted
 				err := token.SelectUpdate()
 				if err != nil {
 					common.SysLog(common.LogText("failed to update token status%s", err.Error()))
 				}
+			}
+			if IsResellerTokenKey(token.Key) {
+				return token, ErrResellerTokenQuotaInsufficient
 			}
 			return token, ErrTokenInvalid
 		}
@@ -303,13 +356,49 @@ func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 }
 
 func (token *Token) Insert() error {
-	var err error
-	err = DB.Create(token).Error
-	return err
+	mode, ok := NormalizeTokenQuotaMode(token.QuotaMode)
+	if !ok {
+		return errors.New("invalid token quota mode")
+	}
+	if IsResellerTokenKey(token.Key) {
+		mode = TokenQuotaModeTokens
+	}
+	token.QuotaMode = mode
+	return DB.Create(token).Error
 }
 
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (token *Token) Update() (err error) {
+	mode, ok := NormalizeTokenQuotaMode(token.QuotaMode)
+	if !ok {
+		return errors.New("invalid token quota mode")
+	}
+	token.QuotaMode = mode
+	// Resolve the persisted allocation mode before selecting writable fields.
+	// Callers may pass a legacy/partial Token with an empty QuotaMode; treating
+	// that snapshot as money-denominated could overwrite a raw-token balance
+	// while a request is holding it. The mode is immutable, so the database row
+	// is the authority for existing tokens.
+	rawQuota := token.UsesTokenQuota() || IsResellerTokenKey(token.Key)
+	mutationKey := token.Key
+	if token.Id > 0 {
+		var persisted Token
+		queryErr := DB.Where("id = ?", token.Id).First(&persisted).Error
+		if queryErr != nil && !errors.Is(queryErr, gorm.ErrRecordNotFound) {
+			return queryErr
+		}
+		if queryErr == nil {
+			if persisted.Key != "" {
+				mutationKey = persisted.Key
+			}
+			rawQuota = rawQuota || persisted.UsesTokenQuota() || IsResellerTokenKey(persisted.Key)
+			if token.QuotaMode == TokenQuotaModeMoney && persisted.QuotaMode == TokenQuotaModeTokens {
+				// Keep the in-memory object consistent with the immutable persisted
+				// mode even when this update came from a legacy partial payload.
+				token.QuotaMode = TokenQuotaModeTokens
+			}
+		}
+	}
 	// 写库前失效缓存并设置 fence，防止并发读者把过期快照重新写回缓存。
 	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
 		common.SysLog(common.LogText("failed to invalidate token cache before update: %s", cacheErr.Error()))
@@ -328,6 +417,9 @@ func (token *Token) SelectUpdate() (err error) {
 }
 
 func (token *Token) Delete() (err error) {
+	if IsResellerTokenKey(token.Key) {
+		return DeleteResellerToken(token.Id, token.UserId)
+	}
 	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
 		common.SysLog(common.LogText("failed to invalidate token cache before delete: %s", cacheErr.Error()))
 	}
@@ -374,12 +466,21 @@ func DeleteTokenById(id int, userId int) (err error) {
 	if err != nil {
 		return err
 	}
+	if IsResellerTokenKey(token.Key) {
+		return DeleteResellerToken(token.Id, userId)
+	}
 	return token.Delete()
 }
 
 func IncreaseTokenQuota(tokenId int, key string, quota int) (err error) {
 	if quota < 0 {
 		return errors.New("quota cannot be negative")
+	}
+	if quota == 0 {
+		return nil
+	}
+	if IsResellerTokenKey(key) {
+		return increaseResellerTokenQuota(tokenId, key, quota)
 	}
 	if common.RedisEnabled {
 		gopool.Go(func() {
@@ -411,6 +512,12 @@ func increaseTokenQuota(id int, quota int) (err error) {
 func DecreaseTokenQuota(id int, key string, quota int) (err error) {
 	if quota < 0 {
 		return errors.New("quota cannot be negative")
+	}
+	if quota == 0 {
+		return nil
+	}
+	if IsResellerTokenKey(key) {
+		return decreaseResellerTokenQuota(id, key, quota)
 	}
 	if common.RedisEnabled {
 		gopool.Go(func() {
@@ -457,6 +564,18 @@ func BatchDeleteTokens(ids []int, userId int) (int, error) {
 		tx.Rollback()
 		return 0, err
 	}
+	resellerTokenIds := make([]int, 0)
+	for _, token := range tokens {
+		if IsResellerTokenKey(token.Key) {
+			resellerTokenIds = append(resellerTokenIds, token.Id)
+		}
+	}
+	if len(resellerTokenIds) > 0 {
+		if err := tx.Where("user_id = ? AND token_id IN (?)", userId, resellerTokenIds).Delete(&ResellerKey{}).Error; err != nil {
+			tx.Rollback()
+			return 0, err
+		}
+	}
 	if err := invalidateTokensCache(tokens); err != nil {
 		common.SysLog(common.LogText("failed to invalidate token cache before batch delete: %s", err.Error()))
 	}
@@ -478,6 +597,14 @@ func GetTokenKeysByIds(ids []int, userId int) ([]Token, error) {
 	err := DB.Select("id", commonKeyCol).
 		Where("user_id = ? AND id IN (?)", userId, ids).
 		Find(&tokens).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, token := range tokens {
+		if IsResellerTokenKey(token.Key) {
+			return nil, ErrResellerTokenSecretUnavailable
+		}
+	}
 	return tokens, err
 }
 

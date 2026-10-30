@@ -28,6 +28,7 @@ const { QueryClient, QueryClientProvider } =
 const { api } = await import('@/lib/api')
 const { ApiKeysProvider } = await import('../api-keys-provider')
 const { ApiKeysMutateDrawer } = await import('../api-keys-mutate-drawer')
+const { apiKeySchema } = await import('../../types')
 
 const i18n = createInstance()
 await i18n.use(initReactI18next).init({
@@ -39,6 +40,7 @@ type ApiMethod = (url: string, data?: unknown) => Promise<{ data: unknown }>
 type MockableApi = {
   get: ApiMethod
   post: ApiMethod
+  put: ApiMethod
 }
 type RenderedDrawer = {
   queryClient: InstanceType<typeof QueryClient>
@@ -47,7 +49,38 @@ type RenderedDrawer = {
 const apiClient = api as unknown as MockableApi
 const originalGet = apiClient.get
 const originalPost = apiClient.post
+const originalPut = apiClient.put
 let renderedDrawer: RenderedDrawer | null = null
+
+const tokenModeApiKey = apiKeySchema.parse({
+  id: 42,
+  name: 'token-mode key',
+  key: 'masked',
+  status: 1,
+  remain_quota: 1_000_000,
+  used_quota: 0,
+  quota_mode: 'tokens',
+  unlimited_quota: false,
+  expired_time: -1,
+  created_time: 1,
+  accessed_time: 0,
+  group: 'default',
+  auto_groups: null,
+  cross_group_retry: false,
+  model_limits_enabled: false,
+  model_limits: '',
+  allow_ips: '',
+})
+
+const resellerTokenApiKey = apiKeySchema.parse({
+  ...tokenModeApiKey,
+  id: 43,
+  name: 'reseller token key',
+  remain_quota: 8_000_000,
+  used_quota: 2_000_000,
+  is_reseller: true,
+  reseller_base_cost_per_million: 0.12,
+})
 
 function installApiFixtures(createdPayloads: Array<Record<string, unknown>>) {
   apiClient.get = async (url) => {
@@ -74,6 +107,10 @@ function installApiFixtures(createdPayloads: Array<Record<string, unknown>>) {
             data: { groups: ['vip', 'default'], max_count: 3 },
           },
         }
+      case `/api/token/${tokenModeApiKey.id}`:
+        return { data: { success: true, data: tokenModeApiKey } }
+      case `/api/token/${resellerTokenApiKey.id}`:
+        return { data: { success: true, data: resellerTokenApiKey } }
       default:
         throw new Error(`Unexpected GET ${url}`)
     }
@@ -86,7 +123,9 @@ function installApiFixtures(createdPayloads: Array<Record<string, unknown>>) {
   }
 }
 
-async function renderCreateDrawer(): Promise<void> {
+async function renderDrawer(
+  currentRow?: typeof tokenModeApiKey
+): Promise<void> {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -96,6 +135,13 @@ async function renderCreateDrawer(): Promise<void> {
     { default_use_auto_group: true },
     { updatedAt: freshAt }
   )
+  if (currentRow) {
+    queryClient.setQueryData(
+      ['api-key', currentRow.id],
+      { success: true, data: currentRow },
+      { updatedAt: freshAt }
+    )
+  }
   queryClient.setQueryData(
     ['user-models'],
     { success: true, data: [] },
@@ -127,7 +173,11 @@ async function renderCreateDrawer(): Promise<void> {
     <QueryClientProvider client={queryClient}>
       <I18nextProvider i18n={i18n}>
         <ApiKeysProvider>
-          <ApiKeysMutateDrawer open onOpenChange={() => undefined} />
+          <ApiKeysMutateDrawer
+            open
+            onOpenChange={() => undefined}
+            currentRow={currentRow}
+          />
         </ApiKeysProvider>
       </I18nextProvider>
     </QueryClientProvider>
@@ -153,7 +203,13 @@ function findButton(text: string, required = true): HTMLButtonElement | null {
   return button ?? null
 }
 
-function getControlByLabel(labelText: 'Name' | 'Quantity'): HTMLInputElement
+function getControlByLabel(
+  labelText:
+    | 'Name'
+    | 'Quantity'
+    | 'Quota (Million tokens)'
+    | 'Total quota (million tokens)'
+): HTMLInputElement
 function getControlByLabel(labelText: 'Group'): HTMLButtonElement
 function getControlByLabel(labelText: 'Auto group order'): HTMLElement
 function getControlByLabel(labelText: string): HTMLElement {
@@ -181,6 +237,19 @@ function changeInput(input: HTMLInputElement, value: string): void {
   fireEvent.input(input, { target: { value } })
 }
 
+function getSwitchByLabel(labelText: string): HTMLElement {
+  const label = [...document.querySelectorAll<HTMLLabelElement>('label')].find(
+    (candidate) => candidate.textContent?.trim() === labelText
+  )
+  const control = label
+    ?.closest('[data-slot="form-item"]')
+    ?.querySelector<HTMLElement>('[role="switch"]')
+  if (!control) {
+    throw new Error(`Expected switch for label "${labelText}"`)
+  }
+  return control
+}
+
 function selectComboboxOption(
   trigger: HTMLButtonElement,
   optionDescription: string
@@ -198,6 +267,7 @@ function selectComboboxOption(
 afterEach(() => {
   apiClient.get = originalGet
   apiClient.post = originalPost
+  apiClient.put = originalPut
   localStorage.clear()
   if (renderedDrawer) {
     renderedDrawer.queryClient.clear()
@@ -209,7 +279,7 @@ describe('API keys mutate drawer Auto group integration', () => {
   test('inherits the root Auto order and sends an empty override for every batch-created key', async () => {
     const createdPayloads: Array<Record<string, unknown>> = []
     installApiFixtures(createdPayloads)
-    await renderCreateDrawer()
+    await renderDrawer()
 
     const groupTrigger = getControlByLabel('Group')
     expect(groupTrigger.textContent?.includes('auto')).toBe(true)
@@ -242,7 +312,7 @@ describe('API keys mutate drawer Auto group integration', () => {
   test('preserves an unsaved custom order and mode after Auto to ordinary to Auto changes', async () => {
     const createdPayloads: Array<Record<string, unknown>> = []
     installApiFixtures(createdPayloads)
-    await renderCreateDrawer()
+    await renderDrawer()
 
     const autoOrderControl = getControlByLabel('Auto group order')
     const addGroupTrigger = autoOrderControl.querySelector<HTMLButtonElement>(

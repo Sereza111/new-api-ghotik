@@ -437,6 +437,25 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			}
 		}
 	}
+	settlementQuota := summary.Quota
+	rawTokenQuota := relayInfo.TokenQuotaPreConsumed
+	if usesRawTokenQuota(relayInfo) {
+		if authoritativeQuota, clamp, ok := authoritativeTextTokenQuota(
+			originUsage,
+			common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens),
+			relayInfo.GetEstimatePromptTokens(),
+		); ok {
+			rawTokenQuota = authoritativeQuota
+			noteQuotaClamp(relayInfo, clamp)
+			if !isResellerBilling(relayInfo) {
+				relayInfo.TokenQuotaActual = &rawTokenQuota
+			}
+		}
+		if isResellerBilling(relayInfo) {
+			settlementQuota = rawTokenQuota
+			relayInfo.BillingSource = BillingSourceReseller
+		}
+	}
 
 	for _, item := range summary.ToolSurchargeItems {
 		q := decimal.NewFromFloat(item.Price).
@@ -538,6 +557,15 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if tieredBillingApplied {
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 
+	}
+	if isResellerBilling(relayInfo) {
+		other["reseller_token_quota"] = settlementQuota
+	} else if usesRawTokenQuota(relayInfo) {
+		other["token_quota_mode"] = model.TokenQuotaModeTokens
+		other["raw_token_quota"] = rawTokenQuota
+		if relayInfo.TokenQuotaActual == nil {
+			other["raw_token_usage_missing"] = true
+		}
 	}
 
 	attachQuotaSaturation(ctx, relayInfo, other)

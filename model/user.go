@@ -183,18 +183,48 @@ func (user *User) SetSetting(setting dto.UserSetting) {
 }
 
 func UpdateUserSetting(userId int, setting dto.UserSetting) error {
+	return MutateUserSetting(userId, func(current *dto.UserSetting) error {
+		*current = setting
+		return nil
+	})
+}
+
+// MutateUserSetting serializes read-modify-write updates so independent
+// settings cannot overwrite each other when dashboard requests race.
+func MutateUserSetting(userId int, mutate func(*dto.UserSetting) error) error {
 	if userId == 0 {
 		return common.NewMessage("ID is empty!")
 	}
-	settingBytes, err := common.Marshal(setting)
+	if mutate == nil {
+		return errors.New("setting mutator is nil")
+	}
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var user User
+		if err := lockForUpdate(tx).
+			Select("id", "setting").
+			Where("id = ?", userId).
+			First(&user).Error; err != nil {
+			return err
+		}
+
+		current := user.GetSetting()
+		if err := mutate(&current); err != nil {
+			return err
+		}
+		settingBytes, err := common.Marshal(current)
+		if err != nil {
+			return err
+		}
+		settingValue := string(settingBytes)
+		return tx.Model(&User{}).
+			Where("id = ?", userId).
+			Update("setting", settingValue).Error
+	})
 	if err != nil {
 		return err
 	}
-	settingValue := string(settingBytes)
-	if err = DB.Model(&User{}).Where("id = ?", userId).Update("setting", settingValue).Error; err != nil {
-		return err
-	}
-	return updateUserSettingCache(userId, settingValue)
+	return RefreshUserSettingCache(userId)
 }
 
 // userBindColumns 允许通过 UpdateUserBindColumn 更新的第三方账号绑定列白名单。
@@ -1045,6 +1075,9 @@ func deleteUserAuthenticationData(tx *gorm.DB, userId int) error {
 		&UserSession{},
 		&AuthFlow{},
 		&PasskeyCredential{},
+		&ResellerQuotaOperation{},
+		&ResellerKey{},
+		&ResellerSubscription{},
 		&Token{},
 	} {
 		if err := tx.Unscoped().Where("user_id = ?", userId).Delete(authenticationData).Error; err != nil {
@@ -1398,7 +1431,10 @@ func DecreaseUserQuota(id int, quota int, db bool) (err error) {
 		addNewRecord(BatchUpdateTypeUserQuota, id, -quota)
 		return nil
 	}
-	return decreaseUserQuota(id, quota)
+	if cacheErr := invalidateUserCache(id); cacheErr != nil {
+		common.SysLog("failed to invalidate user quota cache after durable debit: " + cacheErr.Error())
+	}
+	return nil
 }
 
 func decreaseUserQuota(id int, quota int) (err error) {

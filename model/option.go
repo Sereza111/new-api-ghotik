@@ -105,6 +105,16 @@ func InitOptionMap() {
 	common.OptionMap["CreemProducts"] = setting.CreemProducts
 	common.OptionMap["CreemTestMode"] = strconv.FormatBool(setting.CreemTestMode)
 	common.OptionMap["CreemWebhookSecret"] = setting.CreemWebhookSecret
+	common.OptionMap["CryptoPayEnabled"] = strconv.FormatBool(setting.CryptoPayEnabled)
+	common.OptionMap["CryptoPayAPIToken"] = setting.CryptoPayAPIToken
+	common.OptionMap["CryptoPayTestnet"] = strconv.FormatBool(setting.CryptoPayTestnet)
+	common.OptionMap["CryptoPayAcceptedAssets"] = setting.CryptoPayAcceptedAssets
+	common.OptionMap["CryptoPayUnitPrice"] = strconv.FormatFloat(setting.CryptoPayUnitPrice, 'f', -1, 64)
+	common.OptionMap["CryptoPayMinTopUp"] = strconv.Itoa(setting.CryptoPayMinTopUp)
+	common.OptionMap["PlategaEnabled"] = strconv.FormatBool(setting.PlategaEnabled)
+	common.OptionMap["PlategaMerchantID"] = setting.PlategaMerchantID
+	common.OptionMap["PlategaAPISecret"] = setting.PlategaAPISecret
+	common.OptionMap["PlategaMinTopUp"] = strconv.Itoa(setting.PlategaMinTopUp)
 	common.OptionMap["WaffoEnabled"] = strconv.FormatBool(setting.WaffoEnabled)
 	common.OptionMap["WaffoApiKey"] = setting.WaffoApiKey
 	common.OptionMap["WaffoPrivateKey"] = setting.WaffoPrivateKey
@@ -138,6 +148,9 @@ func InitOptionMap() {
 	common.OptionMap["GitHubClientSecret"] = ""
 	common.OptionMap["TelegramBotToken"] = ""
 	common.OptionMap["TelegramBotName"] = ""
+	common.OptionMap["TelegramChannelBonusEnabled"] = strconv.FormatBool(setting.TelegramChannelBonusEnabled)
+	common.OptionMap["TelegramChannelBonusChannel"] = setting.TelegramChannelBonusChannel
+	common.OptionMap["TelegramChannelBonusAmountUSD"] = strconv.FormatFloat(setting.TelegramChannelBonusAmountUSD, 'f', -1, 64)
 	common.OptionMap["WeChatServerAddress"] = ""
 	common.OptionMap["WeChatServerToken"] = ""
 	common.OptionMap["WeChatAccountQRCodeImageURL"] = ""
@@ -271,6 +284,21 @@ func validateOptionValue(key string, value string) error {
 	if key == "MaxTokenAutoGroups" {
 		return setting.ValidateMaxTokenAutoGroups(value)
 	}
+	if key == operation_setting.ResellerBaseCostPerMillionOption {
+		return operation_setting.ValidateResellerBaseCost(value)
+	}
+	if key == operation_setting.ResellerEndpointOption {
+		return operation_setting.ValidateResellerEndpoint(value)
+	}
+	if key == operation_setting.ResellerSubscriptionPriceOption {
+		return operation_setting.ValidateResellerSubscriptionPrice(value)
+	}
+	if key == operation_setting.ResellerSubscriptionDiscountOption {
+		return operation_setting.ValidateResellerSubscriptionDiscountPercent(value)
+	}
+	if key == operation_setting.ResellerSubscriptionDurationDaysOption {
+		return operation_setting.ValidateResellerSubscriptionDurationDays(value)
+	}
 	return nil
 }
 
@@ -377,13 +405,18 @@ func updateOptionMap(key string, value string) (err error) {
 		common.OptionMapRWMutex.Unlock()
 		return nil
 	}
+	switch key {
+	case "ModelPrice", "ModelRatio", "CompletionRatio", "CacheRatio",
+		"CreateCacheRatio", "ImageRatio", "AudioRatio", "AudioCompletionRatio":
+		defer InvalidatePricingCache()
+	}
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
 	common.OptionMap[key] = value
 
 	// 检查是否是模型配置 - 使用更规范的方式处理
-	if handleConfigUpdate(key, value) {
-		return nil // 已由配置系统处理
+	if handled, handleErr := handleConfigUpdate(key, value); handled {
+		return handleErr // 已由配置系统处理
 	}
 
 	// 处理传统配置项...
@@ -417,6 +450,8 @@ func updateOptionMap(key string, value string) (err error) {
 			common.WeChatAuthEnabled = boolValue
 		case "TelegramOAuthEnabled":
 			common.TelegramOAuthEnabled = boolValue
+		case "TelegramChannelBonusEnabled":
+			setting.TelegramChannelBonusEnabled = boolValue
 		case "TurnstileCheckEnabled":
 			common.TurnstileCheckEnabled = boolValue
 		case "RegisterEnabled":
@@ -559,6 +594,28 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.CreemTestMode = value == "true"
 	case "CreemWebhookSecret":
 		setting.CreemWebhookSecret = value
+	case "CryptoPayEnabled":
+		setting.CryptoPayEnabled = value == "true"
+	case "CryptoPayAPIToken":
+		setting.CryptoPayAPIToken = value
+	case "CryptoPayTestnet":
+		setting.CryptoPayTestnet = value == "true"
+	case "CryptoPayAcceptedAssets":
+		setting.CryptoPayAcceptedAssets = value
+	case "CryptoPayUnitPrice":
+		setting.CryptoPayUnitPrice, _ = strconv.ParseFloat(value, 64)
+	case "CryptoPayMinTopUp":
+		setting.CryptoPayMinTopUp, _ = strconv.Atoi(value)
+	case "PlategaEnabled":
+		setting.PlategaEnabled = value == "true"
+	case "PlategaMerchantID":
+		setting.PlategaMerchantID = value
+	case "PlategaAPISecret":
+		setting.PlategaAPISecret = value
+	case "PlategaMinTopUp":
+		if minTopUp, parseErr := strconv.Atoi(value); parseErr == nil && minTopUp > 0 {
+			setting.PlategaMinTopUp = minTopUp
+		}
 	case "WaffoEnabled":
 		setting.WaffoEnabled = value == "true"
 	case "WaffoApiKey":
@@ -631,6 +688,10 @@ func updateOptionMap(key string, value string) (err error) {
 		common.TelegramBotToken = value
 	case "TelegramBotName":
 		common.TelegramBotName = value
+	case "TelegramChannelBonusChannel":
+		setting.TelegramChannelBonusChannel = value
+	case "TelegramChannelBonusAmountUSD":
+		setting.TelegramChannelBonusAmountUSD, _ = strconv.ParseFloat(value, 64)
 	case "TurnstileSiteKey":
 		common.TurnstileSiteKey = value
 	case "TurnstileSecretKey":
@@ -712,15 +773,18 @@ func updateOptionMap(key string, value string) (err error) {
 }
 
 // handleConfigUpdate 处理分层配置更新，返回是否已处理
-func handleConfigUpdate(key, value string) bool {
+func handleConfigUpdate(key, value string) (bool, error) {
 	if key == operation_setting.ToolPriceOptionKey {
 		operation_setting.LoadToolPricesFromJSONString(value)
-		return true
+		return true, nil
+	}
+	if handled, err := operation_setting.UpdateResellerSettingOption(key, value); handled {
+		return true, err
 	}
 
 	parts := strings.SplitN(key, ".", 2)
 	if len(parts) != 2 {
-		return false // 不是分层配置
+		return false, nil // 不是分层配置
 	}
 
 	configName := parts[0]
@@ -729,14 +793,16 @@ func handleConfigUpdate(key, value string) bool {
 	// 获取配置对象
 	cfg := config.GlobalConfig.Get(configName)
 	if cfg == nil {
-		return false // 未注册的配置
+		return false, nil // 未注册的配置
 	}
 
 	// 更新配置
 	configMap := map[string]string{
 		configKey: value,
 	}
-	config.UpdateConfigFromMap(cfg, configMap)
+	if err := config.UpdateConfigFromMap(cfg, configMap); err != nil {
+		return true, err
+	}
 
 	// 特定配置的后处理
 	if configName == "performance_setting" {
@@ -746,5 +812,5 @@ func handleConfigUpdate(key, value string) bool {
 		ratio_setting.InvalidateExposedDataCache()
 	}
 
-	return true // 已处理
+	return true, nil // 已处理
 }

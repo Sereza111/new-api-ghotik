@@ -16,6 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Link } from '@tanstack/react-router'
+import { WalletCards } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+
 import { ConfigDrawer } from '@/components/config-drawer'
 import { LanguageSwitcher } from '@/components/language-switcher'
 import { NotificationPopover } from '@/components/notification-popover'
@@ -24,6 +28,9 @@ import { Search } from '@/components/search'
 import { SystemUpdateAction } from '@/features/system-update/system-update-action'
 import { useNotifications } from '@/hooks/use-notifications'
 import { useTopNavLinks } from '@/hooks/use-top-nav-links'
+import { formatQuota } from '@/lib/format'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { defaultTopNavLinks } from '../config/top-nav.config'
 import type { TopNavLink } from '../types'
@@ -92,6 +99,26 @@ type AppHeaderProps = {
    * @default true
    */
   showProfileDropdown?: boolean
+}
+
+function HeaderBalance() {
+  const { t } = useTranslation()
+  const user = useAuthStore((state) => state.auth.user)
+  const balance =
+    user?.role === ROLE.SUPER_ADMIN ? '∞' : formatQuota(user?.quota ?? 0)
+
+  return (
+    <Button
+      variant='ghost'
+      size='sm'
+      className='hidden border-l pl-3 font-mono tabular-nums xl:inline-flex'
+      aria-label={t('Wallet')}
+      render={<Link to='/wallet' />}
+    >
+      <WalletCards data-icon='inline-start' />
+      {balance}
+    </Button>
+  )
 }
 
 export function AppHeader({

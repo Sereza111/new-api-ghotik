@@ -43,6 +43,10 @@ func TestMain(m *testing.M) {
 		&AuthFlow{},
 		&ExternalIdentityClaim{},
 		&Token{},
+		&ResellerKey{},
+		&ResellerSubscription{},
+		&ResellerQuotaOperation{},
+		&Option{},
 		&PasskeyCredential{},
 		&TwoFA{},
 		&TwoFABackupCode{},
@@ -51,6 +55,7 @@ func TestMain(m *testing.M) {
 		&QuotaData{},
 		&Ability{},
 		&TopUp{},
+		&TelegramChannelBonus{},
 		&SubscriptionPlan{},
 		&SubscriptionOrder{},
 		&UserSubscription{},
@@ -77,6 +82,9 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM passkey_credentials")
 		DB.Exec("DELETE FROM two_fa_backup_codes")
 		DB.Exec("DELETE FROM two_fas")
+		DB.Exec("DELETE FROM reseller_keys")
+		DB.Exec("DELETE FROM reseller_subscriptions")
+		DB.Exec("DELETE FROM reseller_quota_operations")
 		DB.Exec("DELETE FROM tokens")
 		DB.Exec("DELETE FROM user_access_tokens")
 		DB.Exec("DELETE FROM user_oauth_bindings")
@@ -86,6 +94,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM quota_data")
 		DB.Exec("DELETE FROM abilities")
 		DB.Exec("DELETE FROM top_ups")
+		DB.Exec("DELETE FROM telegram_channel_bonuses")
 		DB.Exec("DELETE FROM subscription_orders")
 		DB.Exec("DELETE FROM subscription_plans")
 		DB.Exec("DELETE FROM user_subscriptions")

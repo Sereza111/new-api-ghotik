@@ -136,6 +136,15 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
 	}
+	if relayUsesRawTokenQuota(relayInfo) && !relaySupportsRawTokenAccounting(relayInfo) {
+		newAPIError = types.NewErrorWithStatusCode(
+			fmt.Errorf("raw-token quota keys only support endpoints with reliable token usage"),
+			types.ErrorCodeInvalidRequest,
+			http.StatusBadRequest,
+			types.ErrOptionWithSkipRetry(),
+		)
+		return
+	}
 
 	defer func() {
 		recovered := recover()
@@ -288,6 +297,32 @@ func CountClaudeTokens(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"input_tokens": inputTokens})
 }
 
+func relayUsesRawTokenQuota(relayInfo *relaycommon.RelayInfo) bool {
+	return relayInfo != nil &&
+		(model.IsResellerTokenKey(relayInfo.TokenKey) || relayInfo.TokenQuotaMode == model.TokenQuotaModeTokens)
+}
+
+func relaySupportsRawTokenAccounting(relayInfo *relaycommon.RelayInfo) bool {
+	if relayInfo == nil {
+		return false
+	}
+	switch relayInfo.RelayFormat {
+	case types.RelayFormatClaude,
+		types.RelayFormatGemini,
+		types.RelayFormatEmbedding,
+		types.RelayFormatRerank,
+		types.RelayFormatOpenAIResponses,
+		types.RelayFormatOpenAIResponsesCompaction,
+		types.RelayFormatOpenAIRealtime:
+		return true
+	case types.RelayFormatOpenAI:
+		return relayInfo.RelayMode == relayconstant.RelayModeChatCompletions ||
+			relayInfo.RelayMode == relayconstant.RelayModeCompletions
+	default:
+		return false
+	}
+}
+
 var upgrader = websocket.Upgrader{
 	Subprotocols: []string{"realtime", "responses"}, // WS 握手支持的协议，如果有使用 Sec-WebSocket-Protocol，则必须在此声明对应的 Protocol
 	CheckOrigin: func(r *http.Request) bool {
@@ -346,6 +381,14 @@ func RelayMidjourney(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"description": fmt.Sprintf("failed to generate relay info: %s", err.Error()),
 			"type":        "upstream_error",
+			"code":        4,
+		})
+		return
+	}
+	if relayUsesRawTokenQuota(relayInfo) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"description": "raw-token quota keys are not supported by the legacy Midjourney API",
+			"type":        "invalid_request_error",
 			"code":        4,
 		})
 		return

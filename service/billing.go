@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
@@ -15,6 +17,7 @@ import (
 const (
 	BillingSourceWallet       = "wallet"
 	BillingSourceSubscription = "subscription"
+	BillingSourceReseller     = "reseller_prepaid"
 )
 
 // PreConsumeBilling 根据用户计费偏好创建 BillingSession 并执行预扣费。
@@ -52,6 +55,7 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 	if apiErr != nil {
 		return apiErr
 	}
+	session.fullBalanceHeld = fullBalanceHeld
 	relayInfo.Billing = session
 	return nil
 }
@@ -86,6 +90,13 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 		}
 
 		if err := relayInfo.Billing.Settle(actualQuota); err != nil {
+			// A reseller response may already have been delivered by the time usage
+			// settlement runs. Do not refund its reservation after a late database
+			// failure, otherwise the client receives the upstream response for free.
+			// Ordinary raw-token requests retain their compensating refund path.
+			if usesRawTokenQuota(relayInfo) && !isResellerBilling(relayInfo) {
+				relayInfo.Billing.Refund(ctx)
+			}
 			return err
 		}
 
@@ -93,7 +104,7 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 		if actualQuota != 0 {
 			if relayInfo.BillingSource == BillingSourceSubscription {
 				checkAndSendSubscriptionQuotaNotify(relayInfo)
-			} else {
+			} else if relayInfo.BillingSource == BillingSourceWallet {
 				checkAndSendQuotaNotify(relayInfo, actualQuota-preConsumed, preConsumed)
 			}
 		}
@@ -101,6 +112,9 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 	}
 
 	// 回退：无 BillingSession 时使用旧路径
+	if usesRawTokenQuota(relayInfo) && !isResellerBilling(relayInfo) {
+		return errors.New("raw token quota billing session is missing")
+	}
 	quotaDelta := actualQuota - relayInfo.FinalPreConsumedQuota
 	if quotaDelta != 0 {
 		return PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true)

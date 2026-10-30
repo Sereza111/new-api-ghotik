@@ -93,6 +93,18 @@ export function isStripePayment(paymentType: string): boolean {
   return paymentType === PAYMENT_TYPES.STRIPE
 }
 
+export function isCryptoPayPayment(paymentType: string): boolean {
+  return paymentType === PAYMENT_TYPES.CRYPTO_PAY
+}
+
+export function isPlategaPayment(paymentType: string): boolean {
+  return (
+    paymentType === PAYMENT_TYPES.PLATEGA_SBP ||
+    paymentType === PAYMENT_TYPES.PLATEGA_CARD ||
+    paymentType === PAYMENT_TYPES.PLATEGA_CRYPTO
+  )
+}
+
 /**
  * Check if payment method is Waffo
  */
@@ -154,6 +166,14 @@ export function getDefaultPaymentType(topupInfo: TopupInfo | null): string {
     return PAYMENT_TYPES.STRIPE
   }
 
+  if (topupInfo.enable_crypto_pay_topup) {
+    return PAYMENT_TYPES.CRYPTO_PAY
+  }
+
+  if (topupInfo.enable_platega_topup) {
+    return PAYMENT_TYPES.PLATEGA_SBP
+  }
+
   if (topupInfo.enable_waffo_topup) {
     return PAYMENT_TYPES.WAFFO
   }
@@ -179,6 +199,14 @@ export function getMinTopupAmount(topupInfo: TopupInfo | null): number {
 
   if (topupInfo.enable_stripe_topup) {
     return topupInfo.stripe_min_topup
+  }
+
+  if (topupInfo.enable_crypto_pay_topup) {
+    return topupInfo.crypto_pay_min_topup || DEFAULT_MIN_TOPUP
+  }
+
+  if (topupInfo.enable_platega_topup) {
+    return topupInfo.platega_min_topup || DEFAULT_MIN_TOPUP
   }
 
   if (topupInfo.enable_waffo_topup) {

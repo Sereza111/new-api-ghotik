@@ -184,6 +184,9 @@ export type AuthSettings = {
   'telegram.client_secret': string
   TelegramBotToken: string
   TelegramBotName: string
+  TelegramChannelBonusEnabled: boolean
+  TelegramChannelBonusChannel: string
+  TelegramChannelBonusAmountUSD: number
   LinuxDOOAuthEnabled: boolean
   LinuxDOClientId: string
   LinuxDOClientSecret: string
@@ -285,6 +288,11 @@ export type BillingSettings = {
   'general_setting.custom_currency_exchange_rate': number
   DisplayInCurrencyEnabled: boolean
   DisplayTokenStatEnabled: boolean
+  'reseller_setting.base_cost_per_million': number
+  'reseller_setting.endpoint': string
+  'reseller_setting.subscription_price': number
+  'reseller_setting.subscription_discount_percent': number
+  'reseller_setting.subscription_duration_days': number
   ModelPrice: string
   ModelRatio: string
   CacheRatio: string
@@ -330,6 +338,16 @@ export type BillingSettings = {
   CreemWebhookSecret: string
   CreemTestMode: boolean
   CreemProducts: string
+  CryptoPayEnabled: boolean
+  CryptoPayAPIToken: string
+  CryptoPayTestnet: boolean
+  CryptoPayAcceptedAssets: string
+  CryptoPayUnitPrice: number
+  CryptoPayMinTopUp: number
+  PlategaEnabled: boolean
+  PlategaMerchantID: string
+  PlategaAPISecret: string
+  PlategaMinTopUp: number
   WaffoEnabled: boolean
   WaffoApiKey: string
   WaffoPrivateKey: string

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -238,16 +239,72 @@ func RefreshUserGroupCache(userId int) error {
 	return fmt.Errorf("user group changed repeatedly during cache refresh")
 }
 
+// RefreshUserSettingCache writes the database-authoritative setting into an
+// existing user hash without changing quota or authentication state.
+func RefreshUserSettingCache(userId int) error {
+	if !common.RedisEnabled {
+		return nil
+	}
+	if userId <= 0 {
+		return fmt.Errorf("invalid user id")
+	}
+
+	var authoritative struct {
+		Setting     sql.NullString `gorm:"column:setting"`
+		AuthVersion int64          `gorm:"column:auth_version"`
+	}
+	if err := DB.Model(&User{}).
+		Select("setting", "auth_version").
+		Where("id = ?", userId).
+		First(&authoritative).Error; err != nil {
+		return err
+	}
+	authoritativeSetting := ""
+	if authoritative.Setting.Valid {
+		authoritativeSetting = authoritative.Setting.String
+	}
+
+	// Setting transitions intentionally keep the same authentication version.
+	// Re-read after every write so a delayed refresh cannot overwrite a newer
+	// committed setting with an older snapshot at the same version.
+	for range 3 {
+		if err := updateUserCacheFieldAtVersion(userId, "Setting", authoritativeSetting, authoritative.AuthVersion); err != nil {
+			return err
+		}
+
+		var verified struct {
+			Setting     sql.NullString `gorm:"column:setting"`
+			AuthVersion int64          `gorm:"column:auth_version"`
+		}
+		if err := DB.Model(&User{}).
+			Select("setting", "auth_version").
+			Where("id = ?", userId).
+			First(&verified).Error; err != nil {
+			return err
+		}
+		verifiedSetting := ""
+		if verified.Setting.Valid {
+			verifiedSetting = verified.Setting.String
+		}
+		if verified.AuthVersion == authoritative.AuthVersion && verifiedSetting == authoritativeSetting {
+			return nil
+		}
+		authoritative = verified
+		authoritativeSetting = verifiedSetting
+	}
+
+	if err := updateUserCacheFieldAtVersion(userId, "Setting", authoritativeSetting, authoritative.AuthVersion); err != nil {
+		return err
+	}
+	return fmt.Errorf("user setting changed repeatedly during cache refresh")
+}
+
 func updateUserEmailCache(userId int, email string) error {
 	return updateUserCacheField(userId, "Email", email)
 }
 
 func updateUserNameCache(userId int, username string) error {
 	return updateUserCacheField(userId, "Username", username)
-}
-
-func updateUserSettingCache(userId int, setting string) error {
-	return updateUserCacheField(userId, "Setting", setting)
 }
 
 // updateUserCacheField prevents individual cache refreshes from bypassing the

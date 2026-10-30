@@ -41,7 +41,9 @@ type tokenRequest struct {
 
 type tokenResponse struct {
 	*model.Token
-	AutoGroups []string `json:"auto_groups"`
+	AutoGroups                 []string `json:"auto_groups"`
+	IsReseller                 bool     `json:"is_reseller"`
+	ResellerBaseCostPerMillion *float64 `json:"reseller_base_cost_per_million,omitempty"`
 }
 
 func maxTokenQuota() int {
@@ -60,6 +62,7 @@ func buildMaskedTokenResponse(token *model.Token) *tokenResponse {
 	}
 	maskedToken := *token
 	maskedToken.Key = token.GetMaskedKey()
+	maskedToken.QuotaMode = token.EffectiveQuotaMode()
 	autoGroups, err := token.GetAutoGroups()
 	if err != nil {
 		common.SysError(common.LogText("failed to parse auto groups for token %d: %v", token.Id, err))
@@ -68,7 +71,11 @@ func buildMaskedTokenResponse(token *model.Token) *tokenResponse {
 	if len(autoGroups) == 0 {
 		autoGroups = nil
 	}
-	return &tokenResponse{Token: &maskedToken, AutoGroups: autoGroups}
+	return &tokenResponse{
+		Token:      &maskedToken,
+		AutoGroups: autoGroups,
+		IsReseller: model.IsResellerTokenKey(token.Key),
+	}
 }
 
 func buildMaskedTokenResponses(tokens []*model.Token) []*tokenResponse {
@@ -172,7 +179,22 @@ func GetToken(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, buildMaskedTokenResponse(token))
+	response := buildMaskedTokenResponse(token)
+	if response.IsReseller {
+		record, lookupErr := model.GetUserResellerKeyByTokenID(userId, id)
+		if lookupErr != nil {
+			common.ApiError(c, lookupErr)
+			return
+		}
+		baseCost, parseErr := decimal.NewFromString(record.Metadata.BaseCostPerMillion)
+		if parseErr != nil || !baseCost.IsPositive() {
+			common.ApiError(c, fmt.Errorf("invalid reseller base cost for token %d", id))
+			return
+		}
+		baseCostPerMillion, _ := baseCost.Float64()
+		response.ResellerBaseCostPerMillion = &baseCostPerMillion
+	}
+	common.ApiSuccess(c, response)
 }
 
 func GetTokenAutoGroups(c *gin.Context) {
@@ -221,6 +243,7 @@ func GetTokenStatus(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"object":          "credit_summary",
+		"quota_mode":      token.EffectiveQuotaMode(),
 		"total_granted":   token.RemainQuota,
 		"total_used":      0, // not supported currently
 		"total_available": token.RemainQuota,
@@ -304,6 +327,16 @@ func AddToken(c *gin.Context) {
 		return
 	}
 	token := request.Token
+	quotaMode := model.TokenQuotaModeMoney
+	if request.QuotaMode != nil {
+		var ok bool
+		quotaMode, ok = model.NormalizeTokenQuotaMode(*request.QuotaMode)
+		if !ok {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
+	}
+	token.QuotaMode = quotaMode
 	if len(token.Name) > 50 {
 		common.ApiErrorT(c, "Token name is too long")
 		return
@@ -317,6 +350,9 @@ func AddToken(c *gin.Context) {
 			return
 		}
 		maxQuotaValue := maxTokenQuota()
+		if token.UsesTokenQuota() {
+			maxQuotaValue = common.MaxQuota
+		}
 		if token.RemainQuota > maxQuotaValue {
 			common.ApiErrorT(c, "Quota value exceeds valid range, maximum is {{max}}", map[string]any{"max": logger.FormatQuota(maxQuotaValue)})
 			return
@@ -356,6 +392,7 @@ func AddToken(c *gin.Context) {
 		ExpiredTime:        token.ExpiredTime,
 		RemainQuota:        token.RemainQuota,
 		UnlimitedQuota:     token.UnlimitedQuota,
+		QuotaMode:          token.QuotaMode,
 		ModelLimitsEnabled: token.ModelLimitsEnabled,
 		ModelLimits:        token.ModelLimits,
 		AllowIps:           token.AllowIps,
@@ -450,9 +487,13 @@ func UpdateToken(c *gin.Context) {
 	} else {
 		// If you add more fields, please also update token.Update()
 		cleanToken.Name = token.Name
-		cleanToken.ExpiredTime = token.ExpiredTime
-		cleanToken.RemainQuota = token.RemainQuota
-		cleanToken.UnlimitedQuota = token.UnlimitedQuota
+		if !model.IsResellerTokenKey(cleanToken.Key) && (request.expiredTimeSet || !cleanToken.UsesTokenQuota()) {
+			cleanToken.ExpiredTime = token.ExpiredTime
+		}
+		if !model.IsResellerTokenKey(cleanToken.Key) && !cleanToken.UsesTokenQuota() {
+			cleanToken.RemainQuota = token.RemainQuota
+			cleanToken.UnlimitedQuota = token.UnlimitedQuota
+		}
 		cleanToken.ModelLimitsEnabled = token.ModelLimitsEnabled
 		cleanToken.ModelLimits = token.ModelLimits
 		cleanToken.AllowIps = token.AllowIps
@@ -470,7 +511,11 @@ func UpdateToken(c *gin.Context) {
 			}
 		}
 	}
-	err = cleanToken.Update()
+	if model.IsResellerTokenKey(cleanToken.Key) {
+		err = cleanToken.UpdateResellerMetadataWithLegacyGroup(legacyResellerGroup)
+	} else {
+		err = cleanToken.Update()
+	}
 	if err != nil {
 		common.ApiError(c, err)
 		return
