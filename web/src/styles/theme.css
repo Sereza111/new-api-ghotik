@@ -128,18 +128,18 @@ For commercial licensing, please contact support@quantumnous.com
    * saved preference. Explicit Sans selects Public Sans in theme-presets.css. */
   --font-ui-sans: sans-serif;
   --font-body: var(--font-ui-sans);
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.692 0.141 243.716);
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.95 0 0);
-  --secondary-foreground: oklch(0.42 0.16 250);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.49 0 0);
+  --background: oklch(0.968 0.003 240);
+  --foreground: oklch(0.18 0.008 240);
+  --card: oklch(0.99 0.002 240);
+  --card-foreground: oklch(0.18 0.008 240);
+  --popover: oklch(0.994 0.002 240);
+  --popover-foreground: oklch(0.18 0.008 240);
+  --primary: oklch(0.56 0.09 230);
+  --primary-foreground: oklch(0.985 0.004 240);
+  --secondary: oklch(0.92 0.012 230);
+  --secondary-foreground: oklch(0.25 0.02 230);
+  --muted: oklch(0.94 0.005 240);
+  --muted-foreground: oklch(0.47 0.01 240);
   --accent: color-mix(in oklch, var(--primary) 12%, var(--background));
   --accent-foreground: oklch(0.18 0.008 240);
   --destructive: oklch(0.5 0.165 24);
@@ -207,19 +207,18 @@ For commercial licensing, please contact support@quantumnous.com
   /* Native controls follow the theme; Dark Reader also reads this to detect
      the built-in dark theme. */
   color-scheme: dark;
-  /* OpenAI-like dark mode with a crisp charcoal canvas. */
-  --background: oklch(0.235 0 0);
-  --foreground: oklch(0.965 0 0);
-  --card: oklch(0.285 0 0);
-  --card-foreground: oklch(0.965 0 0);
-  --popover: oklch(0.305 0 0);
-  --popover-foreground: oklch(0.965 0 0);
-  --primary: oklch(0.54 0.142 248.516);
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.335 0 0);
-  --secondary-foreground: oklch(0.9 0.05 250);
-  --muted: oklch(0.305 0 0);
-  --muted-foreground: oklch(0.78 0 0);
+  --background: oklch(0.14 0.005 240);
+  --foreground: oklch(0.92 0.006 240);
+  --card: oklch(0.175 0.007 240);
+  --card-foreground: oklch(0.92 0.006 240);
+  --popover: oklch(0.2 0.008 240);
+  --popover-foreground: oklch(0.92 0.006 240);
+  --primary: oklch(0.78 0.07 225);
+  --primary-foreground: oklch(0.16 0.008 240);
+  --secondary: oklch(0.245 0.018 230);
+  --secondary-foreground: oklch(0.91 0.006 240);
+  --muted: oklch(0.215 0.009 240);
+  --muted-foreground: oklch(0.7 0.008 240);
   --accent: color-mix(in oklch, var(--primary) 20%, var(--background));
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.66 0.18 24);

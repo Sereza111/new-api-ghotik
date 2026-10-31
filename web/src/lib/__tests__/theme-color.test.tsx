@@ -16,6 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
@@ -100,4 +103,13 @@ describe('resolveThemeColor', () => {
     expect(context.fillStyle).toBe('oklch(0.965 0 0)')
     expect(color).toBe('rgba(245, 245, 245, 1.00)')
   })
+})
+
+test('keeps the default dark canvas near black', () => {
+  const css = readFileSync(resolve('src/styles/theme.css'), 'utf8')
+  const darkTheme = css.match(/\.dark\s*\{([\s\S]*?)\n\}/)?.[1]
+
+  expect(darkTheme).toContain('--background: oklch(0.14 0.005 240)')
+  expect(darkTheme).toContain('--card: oklch(0.175 0.007 240)')
+  expect(darkTheme).toContain('--popover: oklch(0.2 0.008 240)')
 })
