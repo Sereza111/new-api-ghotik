@@ -237,19 +237,6 @@ function changeInput(input: HTMLInputElement, value: string): void {
   fireEvent.input(input, { target: { value } })
 }
 
-function getSwitchByLabel(labelText: string): HTMLElement {
-  const label = [...document.querySelectorAll<HTMLLabelElement>('label')].find(
-    (candidate) => candidate.textContent?.trim() === labelText
-  )
-  const control = label
-    ?.closest('[data-slot="form-item"]')
-    ?.querySelector<HTMLElement>('[role="switch"]')
-  if (!control) {
-    throw new Error(`Expected switch for label "${labelText}"`)
-  }
-  return control
-}
-
 function selectComboboxOption(
   trigger: HTMLButtonElement,
   optionDescription: string
@@ -364,6 +351,8 @@ describe('API key expiry across editing sessions', () => {
         remain_quota: 0,
         used_quota: 0,
         unlimited_quota: true,
+        quota_mode: 'money',
+        is_reseller: false,
         expired_time: 2000000000,
         created_time: 1,
         accessed_time: 0,
@@ -458,7 +447,7 @@ describe('API key expiry across editing sessions', () => {
     async (action) => {
       const payloads: Array<Record<string, unknown>> = []
       installApiFixtures(payloads)
-      await renderCreateDrawer()
+      await renderDrawer()
       changeInput(getControlByLabel('Name'), 'no-expiry')
       fireEvent.click(screen.getByRole('button', { name: '1 Month' }))
       expect(screen.getByLabelText('Time')).toBeEnabled()
@@ -478,9 +467,13 @@ describe('API keys mutate drawer user quota query switch', () => {
   test('sends false for a new key after the switch, which starts on, is turned off', async () => {
     const createdPayloads: Array<Record<string, unknown>> = []
     installApiFixtures(createdPayloads)
-    await renderCreateDrawer()
+    await renderDrawer()
 
-    fireEvent.click(findButton('Advanced Settings', true))
+    fireEvent.click(
+      screen.getByRole('switch', {
+        name: 'Unlimited Quota',
+      })
+    )
     const quotaQuerySwitch = await screen.findByRole('switch', {
       name: 'Allow querying user quota',
     })

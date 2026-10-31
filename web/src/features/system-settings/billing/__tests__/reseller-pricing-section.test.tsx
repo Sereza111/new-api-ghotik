@@ -38,7 +38,7 @@ vi.mock('../../components/form-navigation-guard', () => ({
 const defaultValues = {
   reseller_setting: {
     base_cost_per_million: 0.12,
-    endpoint: 'https://pugshop.ru/v1',
+    endpoint: 'https://reseler.errorclub.club/v1',
     subscription_price: 10,
     subscription_discount_percent: 0,
     subscription_duration_days: 30,
@@ -98,7 +98,7 @@ describe('reseller pricing settings', () => {
     ).toHaveValue(0.12)
     expect(
       screen.getByRole('textbox', { name: 'Reseller endpoint' })
-    ).toHaveValue('https://pugshop.ru/v1')
+    ).toHaveValue('https://reseler.errorclub.club/v1')
     expect(
       screen.getByRole('spinbutton', { name: 'Subscription price (USD)' })
     ).toHaveValue(10)

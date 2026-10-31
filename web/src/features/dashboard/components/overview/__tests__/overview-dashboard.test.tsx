@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 
@@ -23,7 +24,28 @@ import { OverviewDashboard } from '../overview-dashboard'
 
 const dashboardVisibilityMock = vi.fn()
 
+vi.mock('@tanstack/react-router', () => ({
+  Link: ({
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <a {...props}>{children}</a>
+  ),
+}))
+
+function renderDashboard() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <OverviewDashboard />
+    </QueryClientProvider>
+  )
+}
+
 vi.mock('@/features/dashboard/hooks/use-status-data', () => ({
+  useApiInfo: () => ({ items: [] }),
   useDashboardContentVisibility: () => dashboardVisibilityMock(),
 }))
 
@@ -54,12 +76,11 @@ describe('OverviewDashboard', () => {
   })
 
   test('shows usage before announcements when announcements are enabled', () => {
-    render(<OverviewDashboard />)
+    renderDashboard()
 
     const regions = screen.getAllByRole('region')
     expect(regions.map((region) => region.getAttribute('aria-label'))).toEqual([
       'usage-summary',
-      'usage-insights',
       'announcements',
     ])
   })
@@ -67,7 +88,7 @@ describe('OverviewDashboard', () => {
   test('keeps the usage summary focused when announcements are disabled', () => {
     dashboardVisibilityMock.mockReturnValue({ announcements: false })
 
-    render(<OverviewDashboard />)
+    renderDashboard()
 
     expect(screen.getByRole('region', { name: 'usage-summary' })).toBeVisible()
     expect(

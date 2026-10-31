@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createRef, type RefObject } from 'react'
@@ -51,7 +52,17 @@ const editData = {
 
 function renderEditor() {
   const editorRef = createRef<ModelPricingEditorPanelHandle>()
-  render(<ModelPricingEditorPanel ref={editorRef} editData={editData} />)
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  })
+  render(
+    <QueryClientProvider client={queryClient}>
+      <ModelPricingEditorPanel ref={editorRef} editData={editData} />
+    </QueryClientProvider>
+  )
   return editorRef
 }
 
@@ -69,7 +80,10 @@ describe('model pricing discount editor', () => {
   test('saves exact regular input and output prices', async () => {
     const user = userEvent.setup()
     const editorRef = renderEditor()
-    const regularInput = screen.getByRole('textbox', {
+    expect(
+      await screen.findByRole('switch', { name: 'Show discount' })
+    ).toBeChecked()
+    const regularInput = await screen.findByRole('textbox', {
       name: 'Regular input price',
     })
     const regularOutput = screen.getByRole('textbox', {
@@ -95,8 +109,8 @@ describe('model pricing discount editor', () => {
   test('recalculates regular prices when the discount changes', async () => {
     const user = userEvent.setup()
     renderEditor()
-    const discount = screen.getByRole('textbox', { name: 'Discount' })
-    const regularInput = screen.getByRole('textbox', {
+    const discount = await screen.findByRole('textbox', { name: 'Discount' })
+    const regularInput = await screen.findByRole('textbox', {
       name: 'Regular input price',
     })
     const regularOutput = screen.getByRole('textbox', {
@@ -114,7 +128,7 @@ describe('model pricing discount editor', () => {
   test('rejects a regular price below the final price', async () => {
     const user = userEvent.setup()
     const editorRef = renderEditor()
-    const regularInput = screen.getByRole('textbox', {
+    const regularInput = await screen.findByRole('textbox', {
       name: 'Regular input price',
     })
 

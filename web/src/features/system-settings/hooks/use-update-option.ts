@@ -23,8 +23,16 @@ import { toast } from 'sonner'
 import { handleServerError } from '@/lib/handle-server-error'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
-import { updatePasskeyDomains, updateSystemOption } from '../api'
-import type { UpdateOptionRequest, UpdatePasskeyDomainsRequest } from '../types'
+import {
+  updatePasskeyDomains,
+  updateResellerCommercialSettings,
+  updateSystemOption,
+} from '../api'
+import type {
+  UpdateOptionRequest,
+  UpdatePasskeyDomainsRequest,
+  UpdateResellerCommercialSettingsRequest,
+} from '../types'
 
 // Configuration keys that require status refresh
 const STATUS_RELATED_KEYS = new Set([
@@ -53,6 +61,7 @@ const STATUS_RELATED_KEYS = new Set([
 
 const PRICING_RELATED_KEYS = new Set([
   'ModelPrice',
+  'ModelReferencePrice',
   'ModelRatio',
   'CompletionRatio',
   'CacheRatio',
@@ -74,27 +83,6 @@ export function useUpdateOption() {
   return useMutation({
     mutationFn: async (request: UpdateOptionRequest) =>
       requireServerSuccess(await updateSystemOption(request)),
-    onSuccess: (data, variables) => {
-      if (data.success) {
-        // Always refresh system-options
-        queryClient.invalidateQueries({ queryKey: ['system-options'] })
-
-        // If updating frontend-display-related config, also refresh status
-        if (STATUS_RELATED_KEYS.has(variables.key)) {
-          queryClient.invalidateQueries({ queryKey: ['status'] })
-          try {
-            window.localStorage.removeItem('status')
-          } catch {
-            /* empty */
-          }
-        }
-
-        toast.success(i18next.t('Setting updated successfully'))
-      } else {
-        handleServerError(data, i18next.t('Failed to update setting'))
-      }
-      return response
-    },
     onSuccess: (_data, variables) => {
       // Always refresh system-options
       queryClient.invalidateQueries({ queryKey: ['system-options'] })

@@ -40,7 +40,7 @@ const defaultBillingSettings: BillingSettings = {
   DisplayInCurrencyEnabled: true,
   DisplayTokenStatEnabled: true,
   'reseller_setting.base_cost_per_million': 0.12,
-  'reseller_setting.endpoint': 'https://pugshop.ru/v1',
+  'reseller_setting.endpoint': 'https://reseler.errorclub.club/v1',
   'reseller_setting.subscription_price': 10,
   'reseller_setting.subscription_discount_percent': 0,
   'reseller_setting.subscription_duration_days': 30,

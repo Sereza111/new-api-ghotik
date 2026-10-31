@@ -39,6 +39,14 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type UpdateResellerCommercialSettingsRequest = {
+  base_cost_per_million: number
+  endpoint: string
+  subscription_price: number
+  subscription_discount_percent: number
+  subscription_duration_days: number
+}
+
 export interface PasskeyDomainChange {
   rp_id: string
   legacy_rp_ids: string

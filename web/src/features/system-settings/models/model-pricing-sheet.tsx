@@ -52,7 +52,11 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
-import { InputGroup, InputGroupAddon } from '@/components/ui/input-group'
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from '@/components/ui/input-group'
 import {
   Sheet,
   SheetContent,
@@ -162,6 +166,8 @@ const EMPTY_REFERENCE_PRICE_DRAFT: ReferencePriceDraft = {
   request: '',
 }
 
+const numericDraftRegex = /^\d*(?:\.\d*)?$/
+
 export const ModelPricingSheet = forwardRef<
   ModelPricingEditorPanelHandle,
   ModelPricingSheetProps
@@ -256,6 +262,11 @@ export const ModelPricingEditorPanel = forwardRef<
     meta: { errorToast: false },
   })
   const [requestRuleExpr, setRequestRuleExpr] = useState('')
+  const [discountEnabled, setDiscountEnabled] = useState(false)
+  const [discountPercent, setDiscountPercent] = useState('')
+  const [referencePriceDraft, setReferencePriceDraft] =
+    useState<ReferencePriceDraft>({ ...EMPTY_REFERENCE_PRICE_DRAFT })
+  const [discountError, setDiscountError] = useState<string | null>(null)
   const [pluginExpressions, setPluginExpressions] = useState<
     Record<string, string>
   >({})
@@ -401,9 +412,10 @@ export const ModelPricingEditorPanel = forwardRef<
     setWasConverted(false)
     setConversionPreview(null)
     const nextLaneState = createInitialLaneState(editData)
-    let nextPricingMode: PricingMode = 'per-token'
+    let nextPricingMode: PricingMode = 'tiered_expr'
 
     if (editData) {
+      nextPricingMode = initialPricingMode
       form.reset({
         name: editData.name,
         price: editData.price || '',
@@ -559,6 +571,7 @@ export const ModelPricingEditorPanel = forwardRef<
   }
 
   const handlePromptPriceChange = (value: string) => {
+    if (!numericDraftRegex.test(value)) return
     setPromptPrice(value)
     syncLaneRatios(value, lanePrices, laneEnabled)
     const nextDiscount = calculateDiscountPercent(
@@ -572,6 +585,7 @@ export const ModelPricingEditorPanel = forwardRef<
   }
 
   const handleLanePriceChange = (lane: LaneKey, value: string) => {
+    if (!numericDraftRegex.test(value)) return
     const nextLanePrices = { ...lanePrices, [lane]: value }
     setLanePrices(nextLanePrices)
 
@@ -641,6 +655,133 @@ export const ModelPricingEditorPanel = forwardRef<
     }
   }
 
+  const applyDiscountToReferencePrices = (discount: number) => {
+    if (pricingMode === 'per-request') {
+      const requestPrice =
+        currentRequestPrice === null
+          ? null
+          : calculateReferencePriceFromDiscount(currentRequestPrice, discount)
+      setReferencePriceDraft((current) => ({
+        ...current,
+        request: formatPricingNumber(requestPrice),
+      }))
+      return
+    }
+
+    const inputPrice =
+      currentInputPrice === null
+        ? null
+        : calculateReferencePriceFromDiscount(currentInputPrice, discount)
+    const outputPrice =
+      currentOutputPrice === null
+        ? null
+        : calculateReferencePriceFromDiscount(currentOutputPrice, discount)
+    setReferencePriceDraft((current) => ({
+      ...current,
+      input: formatPricingNumber(inputPrice),
+      output: formatPricingNumber(outputPrice),
+    }))
+  }
+
+  const handleDiscountToggle = (checked: boolean) => {
+    setDiscountEnabled(checked)
+    setDiscountError(null)
+    if (!checked) return
+
+    const nextDiscount = discountPercent || '10'
+    setDiscountPercent(nextDiscount)
+    const discount = toNumberOrNull(nextDiscount)
+    if (discount !== null && discount > 0 && discount < 100) {
+      applyDiscountToReferencePrices(discount)
+    }
+  }
+
+  const handleDiscountChange = (value: string) => {
+    if (!numericDraftRegex.test(value)) return
+    setDiscountPercent(value)
+    const discount = toNumberOrNull(value)
+    if (discount === null) {
+      setDiscountError(null)
+      return
+    }
+    if (discount <= 0 || discount >= 100) {
+      setDiscountError(t('Enter a discount greater than 0 and less than 100.'))
+      return
+    }
+    setDiscountError(null)
+    applyDiscountToReferencePrices(discount)
+  }
+
+  const handleReferencePriceChange = (
+    field: keyof ReferencePriceDraft,
+    value: string
+  ) => {
+    if (!numericDraftRegex.test(value)) return
+    setReferencePriceDraft((current) => ({ ...current, [field]: value }))
+
+    let currentPrice = currentRequestPrice
+    if (field === 'input') currentPrice = currentInputPrice
+    if (field === 'output') currentPrice = currentOutputPrice
+
+    const discount = calculateDiscountPercent(
+      toNumberOrNull(value),
+      currentPrice ?? Number.NaN
+    )
+    if (discount === null) {
+      setDiscountError(
+        value
+          ? t('Regular prices must be greater than the final prices.')
+          : null
+      )
+      return
+    }
+    setDiscountPercent(discount.toString())
+    setDiscountError(null)
+  }
+
+  const referencePrice = useMemo(() => {
+    if (!discountEnabled || pricingMode === 'tiered_expr') return undefined
+
+    if (pricingMode === 'per-request') {
+      const requestPrice = toNumberOrNull(referencePriceDraft.request)
+      return requestPrice === null || requestPrice <= 0
+        ? undefined
+        : { request_usd: Number(formatPricingNumber(requestPrice)) }
+    }
+
+    const referenceInputPrice = toNumberOrNull(referencePriceDraft.input)
+    const referenceOutputPrice = toNumberOrNull(referencePriceDraft.output)
+    if (
+      referenceInputPrice === null ||
+      referenceInputPrice <= 0 ||
+      referenceOutputPrice === null ||
+      referenceOutputPrice <= 0
+    ) {
+      return undefined
+    }
+    return {
+      input_usd: Number(formatPricingNumber(referenceInputPrice)),
+      output_usd: Number(formatPricingNumber(referenceOutputPrice)),
+    }
+  }, [
+    discountEnabled,
+    pricingMode,
+    referencePriceDraft.input,
+    referencePriceDraft.output,
+    referencePriceDraft.request,
+  ])
+
+  const previewDiscountPercent =
+    pricingMode === 'per-request'
+      ? calculateDiscountPercent(
+          referencePrice?.request_usd ?? null,
+          currentRequestPrice ?? Number.NaN
+        )
+      : calculateDiscountPercent(
+          referencePrice?.input_usd ?? null,
+          currentInputPrice ?? Number.NaN
+        )
+
   const previewRows = useMemo(() => {
     let previewLanes = {
       promptPrice,
@@ -652,7 +793,7 @@ export const ModelPricingEditorPanel = forwardRef<
         pricingRow(watchedValues.name, effectivePreview.effective)
       )
     }
-    return buildPreviewRows(
+    const rows = buildPreviewRows(
       watchedValues,
       pricingMode,
       resolvedBillingExpr,
@@ -665,6 +806,28 @@ export const ModelPricingEditorPanel = forwardRef<
       effectivePreview?.cacheWriteMode,
       effectivePreview?.billingDetails
     )
+    if (!referencePrice || previewDiscountPercent === null) return rows
+
+    const prices =
+      pricingMode === 'per-request'
+        ? [`$${formatPricingNumber(referencePrice.request_usd)}`]
+        : [
+            `$${formatPricingNumber(referencePrice.input_usd)}`,
+            `$${formatPricingNumber(referencePrice.output_usd)}`,
+          ]
+    return [
+      ...rows,
+      {
+        key: 'discount',
+        label: t('Discount'),
+        value: `-${previewDiscountPercent}%`,
+      },
+      {
+        key: 'referencePrice',
+        label: t('Regular price'),
+        value: prices.join(' / '),
+      },
+    ]
   }, [
     resolvedBillingExpr,
     laneEnabled,
@@ -676,6 +839,8 @@ export const ModelPricingEditorPanel = forwardRef<
     watchedValues,
     currency,
     effectivePreview,
+    previewDiscountPercent,
+    referencePrice,
   ])
 
   const warnings = useMemo(() => {
@@ -854,6 +1019,7 @@ export const ModelPricingEditorPanel = forwardRef<
       pricingMode,
       requestRuleExpr,
       resolvedBillingExpr,
+      referencePrice,
       pluginExpressions,
       editData,
       pluginVariants,
@@ -1317,6 +1483,102 @@ export const ModelPricingEditorPanel = forwardRef<
                       </FieldGroup>
                     </TabsContent>
                   </Tabs>
+
+                  {pricingMode !== 'tiered_expr' && (
+                    <SettingsControlGroup className='space-y-3'>
+                      <SettingsSwitchField
+                        controlId='model-pricing-discount'
+                        checked={discountEnabled}
+                        onCheckedChange={handleDiscountToggle}
+                        label={t('Show discount')}
+                        description={t(
+                          'Show a crossed-out regular price and discount badge on the public pricing page.'
+                        )}
+                      />
+                      {discountEnabled && (
+                        <div className='space-y-3'>
+                          <Field>
+                            <FieldLabel>{t('Discount')}</FieldLabel>
+                            <InputGroup>
+                              <InputGroupInput
+                                inputMode='decimal'
+                                value={discountPercent}
+                                placeholder='10'
+                                aria-label={t('Discount')}
+                                onChange={(event) =>
+                                  handleDiscountChange(event.target.value)
+                                }
+                              />
+                              <InputGroupAddon align='inline-end'>
+                                %
+                              </InputGroupAddon>
+                            </InputGroup>
+                          </Field>
+
+                          {pricingMode === 'per-request' ? (
+                            <Field>
+                              <FieldLabel>{t('Regular price')}</FieldLabel>
+                              <InputGroup>
+                                <InputGroupAddon>$</InputGroupAddon>
+                                <InputGroupInput
+                                  inputMode='decimal'
+                                  value={referencePriceDraft.request}
+                                  placeholder='0.02'
+                                  aria-label={t('Regular price')}
+                                  onChange={(event) =>
+                                    handleReferencePriceChange(
+                                      'request',
+                                      event.target.value
+                                    )
+                                  }
+                                />
+                                <InputGroupAddon align='inline-end'>
+                                  {t('per request')}
+                                </InputGroupAddon>
+                              </InputGroup>
+                            </Field>
+                          ) : (
+                            <div className='grid gap-3 sm:grid-cols-2'>
+                              <Field>
+                                <FieldLabel>
+                                  {t('Regular input price')}
+                                </FieldLabel>
+                                <PriceInput
+                                  currency={USD_PRICING_CURRENCY}
+                                  value={referencePriceDraft.input}
+                                  placeholder='3'
+                                  aria-label={t('Regular input price')}
+                                  onChange={(value) =>
+                                    handleReferencePriceChange('input', value)
+                                  }
+                                />
+                              </Field>
+                              <Field>
+                                <FieldLabel>
+                                  {t('Regular output price')}
+                                </FieldLabel>
+                                <PriceInput
+                                  currency={USD_PRICING_CURRENCY}
+                                  value={referencePriceDraft.output}
+                                  placeholder='15'
+                                  aria-label={t('Regular output price')}
+                                  onChange={(value) =>
+                                    handleReferencePriceChange('output', value)
+                                  }
+                                />
+                              </Field>
+                            </div>
+                          )}
+
+                          {discountError && (
+                            <p className='text-destructive text-sm'>
+                              {discountError}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </SettingsControlGroup>
+                  )}
                 </TaskPluginPricingEditor>
               </FieldGroup>
 

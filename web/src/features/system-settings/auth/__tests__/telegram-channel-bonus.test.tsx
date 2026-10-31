@@ -57,6 +57,8 @@ describe('Telegram channel bonus settings', () => {
             TelegramChannelBonusEnabled: true,
             TelegramChannelBonusChannel: '@VL_API',
             TelegramChannelBonusAmountUSD: 0.5,
+            'telegram.client_id': '',
+            'telegram.client_secret': '',
             LinuxDOOAuthEnabled: false,
             LinuxDOClientId: '',
             LinuxDOClientSecret: '',

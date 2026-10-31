@@ -91,7 +91,7 @@ const createdKey: ResellerKey = {
 
 const activeSubscription = {
   active: true,
-  expires_at: 1_790_592_100,
+  expires_at: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
   list_price: 10,
   discount_percent: 20,
   price: 8,

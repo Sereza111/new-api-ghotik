@@ -51,7 +51,6 @@ import {
   API_KEY_STATUSES,
   ERROR_MESSAGES,
 } from '../constants'
-import { formatApiKeyQuota } from '../lib'
 import type { ApiKey } from '../types'
 import { ApiKeyQuotaCell } from './api-key-quota-cell'
 import { ApiKeyActivityCell } from './api-key-timestamp-cell'
@@ -108,9 +107,8 @@ function ApiKeysMobileList({
   isLoading: boolean
   now: number
 }) {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const rows = table.getRowModel().rows
-  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
 
   if (isLoading) return <ApiKeysMobileSkeleton />
 

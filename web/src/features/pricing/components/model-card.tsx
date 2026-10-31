@@ -39,6 +39,11 @@ import {
 import { parseTags } from '../lib/filters'
 import { isTokenBasedModel } from '../lib/model-helpers'
 import { formatPrice, formatRequestPrice } from '../lib/price'
+import {
+  formatReferencePrice,
+  getRequestDiscountPercent,
+  getTokenDiscountPercent,
+} from '../lib/reference-price'
 import { taskPriceLabel, taskUsageUnitLabel } from '../lib/task-price-display'
 import type { PricingModel, PriceType, TokenUnit } from '../types'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
@@ -227,26 +232,42 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         ? [{ type: 'cache' as const, label: t('Cached') }]
         : []),
     ]
-    priceSummary = prices.map((price) => (
-      <div key={price.type} className='flex min-w-0 flex-col gap-1'>
-        <span className='text-muted-foreground text-xs'>{price.label}</span>
-        <span className='font-mono text-sm font-semibold tabular-nums'>
-          {formatPrice(
-            props.model,
-            price.type,
-            tokenUnit,
-            showRechargePrice,
-            priceRate,
-            usdExchangeRate,
-            props.selectedGroup
-          )}
-          <span className='text-muted-foreground text-xs font-normal'>
-            {' '}
-            / {tokenUnitLabel}
-          </span>
-        </span>
-      </div>
-    ))
+    priceSummary = prices.map((price) => {
+      const currentPrice = formatPrice(
+        props.model,
+        price.type,
+        tokenUnit,
+        showRechargePrice,
+        priceRate,
+        usdExchangeRate,
+        props.selectedGroup
+      )
+      const referencePrice =
+        price.type === 'input' || price.type === 'output'
+          ? formatReferencePrice(props.model, price.type, tokenUnit)
+          : null
+      const discountPercent =
+        price.type === 'input' || price.type === 'output'
+          ? getTokenDiscountPercent(props.model, price.type, {
+              showRechargePrice,
+              priceRate,
+              usdExchangeRate,
+              selectedGroup: props.selectedGroup,
+            })
+          : null
+
+      return (
+        <div key={price.type} className='flex min-w-0 flex-col gap-1'>
+          <span className='text-muted-foreground text-xs'>{price.label}</span>
+          <PriceComparison
+            currentPrices={[currentPrice]}
+            referencePrices={referencePrice ? [referencePrice] : undefined}
+            discountPercent={discountPercent}
+            unit={`/ ${tokenUnitLabel}`}
+          />
+        </div>
+      )
+    })
   } else {
     const currentPrice = formatRequestPrice(
       props.model,
@@ -257,21 +278,18 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
     )
     const referencePrice = formatReferencePrice(props.model, 'request')
     priceSummary = (
-      <div className='col-span-full flex min-w-0 flex-col gap-1'>
-        <span className='font-mono text-sm font-semibold tabular-nums'>
-          {formatRequestPrice(
-            props.model,
-            showRechargePrice,
-            priceRate,
-            usdExchangeRate,
-            props.selectedGroup
-          )}
-          <span className='text-muted-foreground text-xs font-normal'>
-            {' '}
-            / {t('request')}
-          </span>
-        </span>
-      </div>
+      <PriceComparison
+        currentPrices={[currentPrice]}
+        referencePrices={referencePrice ? [referencePrice] : undefined}
+        discountPercent={getRequestDiscountPercent(props.model, {
+          showRechargePrice,
+          priceRate,
+          usdExchangeRate,
+          selectedGroup: props.selectedGroup,
+        })}
+        unit={`/ ${t('request')}`}
+        className='col-span-full'
+      />
     )
   }
 

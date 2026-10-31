@@ -17,164 +17,56 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 
-import { resetModelRatios, updateSystemOption } from '../../api'
-import { RatioSettingsCard } from '../ratio-settings-card'
-import { UpstreamRatioSync } from '../upstream-ratio-sync'
-
-vi.mock('../../api', () => ({
-  fetchUpstreamRatios: vi.fn(),
-  getUpstreamChannels: vi.fn(),
-  resetModelRatios: vi.fn(),
-  updateResellerCommercialSettings: vi.fn(),
-  updateSystemOption: vi.fn(),
-}))
-
-vi.mock('sonner', () => ({
-  toast: {
-    error: vi.fn(),
-    info: vi.fn(),
-    success: vi.fn(),
-    warning: vi.fn(),
-  },
-}))
-
-vi.mock('@/components/confirm-dialog', () => ({
-  ConfirmDialog: (props: { open: boolean; handleConfirm: () => void }) =>
-    props.open ? (
-      <button type='button' onClick={props.handleConfirm}>
-        Confirm reset
-      </button>
-    ) : null,
-}))
-
-vi.mock('../model-ratio-form', () => ({
-  ModelRatioForm: (props: { onReset: () => void }) => (
-    <button type='button' onClick={props.onReset}>
-      Reset model ratios
-    </button>
-  ),
-}))
-
-vi.mock('../upstream-ratio-sync-table', () => ({
-  UpstreamRatioSyncTable: (props: {
-    onSelectValue: (
-      model: string,
-      ratioType: 'model_ratio',
-      value: number,
-      sourceName: string
-    ) => void
-  }) => (
-    <button
-      type='button'
-      onClick={() =>
-        props.onSelectValue('gpt-test', 'model_ratio', 2, 'upstream')
-      }
-    >
-      Select upstream price
-    </button>
-  ),
-}))
-
-vi.mock('../channel-selector-dialog', () => ({
-  ChannelSelectorDialog: () => null,
-}))
-
-vi.mock('../conflict-confirm-dialog', () => ({
-  ConflictConfirmDialog: () => null,
-}))
-
-const emptyModelRatios = {
-  ModelPrice: '{}',
-  ModelReferencePrice: '{}',
-  ModelRatio: '{}',
-  CompletionRatio: '{}',
-  CacheRatio: '{}',
-  CreateCacheRatio: '{}',
-  ImageRatio: '{}',
-  AudioRatio: '{}',
-  AudioCompletionRatio: '{}',
-  'billing_setting.billing_mode': '{}',
-  'billing_setting.billing_expr': '{}',
-}
-
-function renderWithQueryClient(ui: ReactNode) {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      mutations: { retry: false },
-      queries: { retry: false },
-    },
-  })
-  queryClient.setQueryData(['pricing'], { data: [{ model_name: 'stale' }] })
-
-  render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
-
-  return queryClient
-}
+import { useSaveModelPricing } from '@/features/model-pricing/api'
+import { api } from '@/lib/api'
 
 describe('model pricing cache invalidation', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    vi.mocked(updateSystemOption).mockResolvedValue({
-      success: true,
-      message: '',
-    })
-    vi.mocked(resetModelRatios).mockResolvedValue({
-      success: true,
-      message: '',
-    })
-  })
+  afterEach(() => vi.restoreAllMocks())
 
-  test('invalidates pricing after applying an upstream price sync', async () => {
-    const user = userEvent.setup()
-    const queryClient = renderWithQueryClient(
-      <UpstreamRatioSync modelRatios={emptyModelRatios} />
-    )
+  test('invalidates every pricing consumer after saving model prices', async () => {
+    vi.spyOn(api, 'patch').mockResolvedValue({
+      data: { success: true, message: '' },
+    })
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        mutations: { retry: false },
+        queries: { retry: false },
+      },
+    })
+    const queryKeys = [
+      ['model-pricing-config'],
+      ['model-pricing-preview'],
+      ['system-options'],
+      ['pricing'],
+      ['models'],
+    ]
+    for (const queryKey of queryKeys) {
+      queryClient.setQueryData(queryKey, { stale: true })
+    }
 
-    await user.click(
-      screen.getByRole('button', { name: 'Select upstream price' })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     )
-    await user.click(screen.getByRole('button', { name: 'Apply Sync' }))
+    const { result } = renderHook(() => useSaveModelPricing(), { wrapper })
+
+    await act(async () => {
+      await result.current.mutateAsync([
+        {
+          model_name: 'gpt-test',
+          expected_version: 'version-1',
+          pricing: { ModelRatio: 2 },
+        },
+      ])
+    })
 
     await waitFor(() => {
-      expect(queryClient.getQueryState(['pricing'])?.isInvalidated).toBe(true)
-    })
-  })
-
-  test('invalidates pricing after resetting model prices', async () => {
-    const user = userEvent.setup()
-    const queryClient = renderWithQueryClient(
-      <RatioSettingsCard
-        modelDefaults={{
-          ...emptyModelRatios,
-          BillingMode: '{}',
-          BillingExpr: '{}',
-          ExposeRatioEnabled: false,
-        }}
-        groupDefaults={{
-          GroupRatio: '{}',
-          TopupGroupRatio: '{}',
-          UserUsableGroups: '{}',
-          GroupGroupRatio: '{}',
-          AutoGroups: '[]',
-          MaxTokenAutoGroups: 1,
-          DefaultUseAutoGroup: false,
-          GroupSpecialUsableGroup: '{}',
-        }}
-        toolPricesDefault='{}'
-        visibleTabs={['models']}
-      />
-    )
-
-    await user.click(screen.getByRole('button', { name: 'Reset model ratios' }))
-    await user.click(screen.getByRole('button', { name: 'Confirm reset' }))
-
-    await waitFor(() => {
-      expect(queryClient.getQueryState(['pricing'])?.isInvalidated).toBe(true)
+      for (const queryKey of queryKeys) {
+        expect(queryClient.getQueryState(queryKey)?.isInvalidated).toBe(true)
+      }
     })
   })
 })

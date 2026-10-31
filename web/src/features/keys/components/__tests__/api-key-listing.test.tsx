@@ -79,6 +79,13 @@ await i18n.init({
 })
 const clients: QueryClient[] = []
 
+function normalizeNumericText(value: string | null | undefined) {
+  return (value ?? '')
+    .replaceAll('\u00a0', '')
+    .replaceAll('\u202f', '')
+    .replaceAll(',', '.')
+}
+
 function QuotaTable(props: { apiKey: ApiKey }) {
   const columns = useApiKeysColumns(now).filter(
     (column) => column.id === 'quota'
@@ -189,9 +196,11 @@ it.each([
     expect(progress).toHaveAttribute('aria-valuenow', String(percentage))
     if (color) expect(progress).toHaveClass(color)
     if (remaining < 0) {
-      expect(
-        within(button).getByText(remaining === -500000 ? '-1' : '-0.1')
-      ).toHaveClass('text-destructive')
+      const negative = button.querySelector('.text-destructive')
+      expect(normalizeNumericText(negative?.textContent)).toBe(
+        remaining === -500000 ? '-1' : '-0.1'
+      )
+      expect(negative).toHaveClass('text-destructive')
     }
   }
 )
@@ -225,12 +234,12 @@ it('keeps small custom-currency amounts exact and shows full values in the detai
     screen.getByRole('columnheader', { name: 'Quota (🐱)' })
   ).toBeInTheDocument()
   const button = screen.getByRole('button')
-  expect(button).toHaveTextContent('0.0038')
+  expect(normalizeNumericText(button.textContent)).toContain('0.0038')
   expect(button).not.toHaveTextContent('🐱')
   await userEvent.click(button)
   const detail = await screen.findByRole('dialog')
-  expect(within(detail).getByText('0.0022')).toBeInTheDocument()
-  expect(within(detail).getByText('0.006')).toBeInTheDocument()
+  expect(normalizeNumericText(detail.textContent)).toContain('0.0022')
+  expect(normalizeNumericText(detail.textContent)).toContain('0.006')
 })
 
 it.each([
@@ -287,10 +296,15 @@ it('keeps a long amount within its column while showing the full amount in detai
   renderQuota({ ...key, remain_quota: 123456789000000, used_quota: 0 })
   const button = screen.getByRole('button')
   expect(button).toHaveClass('w-full', 'min-w-0')
-  expect(within(button).getByText('246,913,578')).toHaveClass('truncate')
+  const remaining = button.querySelector(
+    '[data-slot="api-key-quota-values"] span'
+  )
+  expect(normalizeNumericText(remaining?.textContent)).toBe('246913578')
+  expect(remaining).toHaveClass('truncate')
   await userEvent.click(button)
+  const details = await screen.findByRole('dialog')
   expect(
-    within(await screen.findByRole('dialog')).getAllByText('246,913,578')
+    normalizeNumericText(details.textContent).match(/246913578/g)
   ).toHaveLength(2)
 })
 
@@ -494,9 +508,11 @@ it('keeps mobile quota readable and opens complete model and IP restrictions by 
     allow_ips: '192.0.2.1\n2001:db8::1',
   })
   const quota = screen.getByRole('button', {
-    name: /Unlimited; Used amount 4,490.16/,
+    name: /Quota.*Unlimited.*Used amount/,
   })
-  expect(quota).toHaveTextContent('Remaining($)UnlimitedUsed amount4,490.16')
+  expect(normalizeNumericText(quota.textContent)).toContain(
+    'Remaining($)UnlimitedUsed amount4490.16'
+  )
   expect(quota.parentElement).toHaveClass('w-full')
   expect(quota.parentElement).not.toHaveClass('max-w-45')
   expect(quota.querySelector('[data-slot="api-key-quota-values"]')).toHaveClass(
@@ -507,7 +523,10 @@ it('keeps mobile quota readable and opens complete model and IP restrictions by 
     'text-sm',
     'font-normal'
   )
-  expect(within(quota).getByText('4,490.16')).toHaveClass(
+  const usedAmount = [...quota.querySelectorAll('span')].find(
+    (element) => normalizeNumericText(element.textContent) === '4490.16'
+  )
+  expect(usedAmount).toHaveClass(
     'tabular-nums',
     'text-sm',
     'font-normal',

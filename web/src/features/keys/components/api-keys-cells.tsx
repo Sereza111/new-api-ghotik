@@ -35,11 +35,9 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { toIntlLocale } from '@/i18n/languages'
 import { copyToClipboard } from '@/lib/copy-to-clipboard'
 
-import { formatApiKeyQuota } from '../lib'
-import type { ApiKey, ApiKeyQuotaMode } from '../types'
+import type { ApiKey } from '../types'
 import { useApiKeys } from './api-keys-provider'
 
 export function ApiKeyCell({ apiKey }: { apiKey: ApiKey }) {

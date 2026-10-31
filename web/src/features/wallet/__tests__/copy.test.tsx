@@ -95,6 +95,7 @@ it.each([
           selectedPreset={null}
           topupAmount={1}
           paymentAmount={priceRatio}
+          paymentType='stripe'
           priceRatio={priceRatio}
           calculating={false}
           paymentLoading={null}
@@ -108,20 +109,28 @@ it.each([
         />
       </I18nextProvider>
     )
-    expect(screen.getByRole('button', { name: /^100 / })).toHaveTextContent(
-      `优惠 20%支付 ${paid} • 节省 ${saved}`
-    )
-    expect(screen.getByRole('button', { name: /^20 / })).toHaveTextContent(
-      `支付 ${full}`
-    )
+    expect(
+      screen
+        .getByRole('button', { name: /^100 / })
+        .textContent?.replaceAll(',', '.')
+    ).toContain(`优惠 20%支付 ${paid} • 节省 ${saved}`)
+    expect(
+      screen
+        .getByRole('button', { name: /^20 / })
+        .textContent?.replaceAll(',', '.')
+    ).toContain(`支付 ${full}`)
     expect(screen.getByPlaceholderText('最低 1')).toBeVisible()
     await act(() => i18n.changeLanguage('en'))
-    expect(screen.getByRole('button', { name: /^100 / })).toHaveTextContent(
-      `20% OFFPay ${paid} • Save ${saved}`
-    )
-    expect(screen.getByRole('button', { name: /^20 / })).toHaveTextContent(
-      `Pay ${full}`
-    )
+    expect(
+      screen
+        .getByRole('button', { name: /^100 / })
+        .textContent?.replaceAll(',', '.')
+    ).toContain(`20% OFFPay ${paid} • Save ${saved}`)
+    expect(
+      screen
+        .getByRole('button', { name: /^20 / })
+        .textContent?.replaceAll(',', '.')
+    ).toContain(`Pay ${full}`)
     expect(screen.getByPlaceholderText('Minimum 1')).toBeVisible()
   }
 )

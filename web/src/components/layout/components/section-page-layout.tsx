@@ -100,7 +100,7 @@ export function SectionPageLayout(props: SectionPageLayoutProps) {
             >
               <h2 className='truncate text-base font-bold tracking-tight sm:text-lg'>
                 {title}
-              </h1>
+              </h2>
             </div>
             {actions != null && (
               <div className='flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2 sm:gap-x-4'>

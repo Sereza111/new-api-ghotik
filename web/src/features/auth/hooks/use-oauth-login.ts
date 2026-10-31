@@ -46,9 +46,6 @@ export function useOAuthLogin(
   const [isLoading, setIsLoading] = useState(false)
   const [githubButtonText, setGithubButtonText] = useState('')
   const [githubButtonDisabled, setGithubButtonDisabled] = useState(false)
-  const [telegramFlowExpiresAt, setTelegramFlowExpiresAt] = useState<
-    number | null
-  >(null)
   const githubTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
@@ -60,71 +57,6 @@ export function useOAuthLogin(
       }
     }
   }, [t])
-
-  useEffect(() => {
-    if (!telegramFlowExpiresAt) return
-
-    const abortController = new AbortController()
-    let requestPending = false
-    let stopped = false
-    const stopPolling = (message?: string) => {
-      if (stopped) return
-      stopped = true
-      setTelegramFlowExpiresAt(null)
-      setIsLoading(false)
-      if (message) toast.error(message)
-    }
-    const poll = async () => {
-      if (requestPending || stopped) return
-      if (Date.now() >= telegramFlowExpiresAt * 1000) {
-        stopPolling(t('Telegram binding failed. Please try again.'))
-        return
-      }
-      requestPending = true
-      try {
-        const response = await getTelegramLoginStatus(abortController.signal)
-        if (stopped) return
-        if (response.success && isAuthBundle(response.data)) {
-          stopped = true
-          applyAuthBundle(response.data)
-          toast.success(t('Signed in successfully!'))
-          const target =
-            sanitizeAuthRedirect(redirectTo, window.location.origin) ??
-            '/dashboard'
-          window.location.assign(target)
-          return
-        }
-        const status = (response.data as { status?: string } | undefined)
-          ?.status
-        if (!response.success || status !== 'pending') {
-          stopPolling(
-            response.message ||
-              t('Failed to start {{provider}} login', {
-                provider: 'Telegram',
-              })
-          )
-        }
-      } catch {
-        if (!abortController.signal.aborted) {
-          stopPolling(
-            t('Failed to start {{provider}} login', {
-              provider: 'Telegram',
-            })
-          )
-        }
-      } finally {
-        requestPending = false
-      }
-    }
-
-    void poll()
-    const interval = window.setInterval(() => void poll(), 1500)
-    return () => {
-      stopped = true
-      abortController.abort()
-      window.clearInterval(interval)
-    }
-  }, [redirectTo, t, telegramFlowExpiresAt])
 
   const resetSession = async () => {
     const response = await logout()

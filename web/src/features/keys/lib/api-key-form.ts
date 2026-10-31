@@ -41,7 +41,8 @@ export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
   return z
     .object({
       name: z.string().min(1, t('Please enter a name')),
-      remain_quota_dollars: z.number().optional(),
+      quota_mode: z.enum(['money', 'tokens']),
+      remain_quota_amount: z.number().optional(),
       expired_time: z.date().nullable(),
       unlimited_quota: z.boolean(),
       model_limits: z.array(z.string()),
@@ -122,7 +123,8 @@ export type ApiKeyFormValues = z.infer<ReturnType<typeof getApiKeyFormSchema>>
 
 export const API_KEY_FORM_DEFAULT_VALUES: ApiKeyFormValues = {
   name: '',
-  remain_quota_dollars: 10,
+  quota_mode: 'money',
+  remain_quota_amount: 10,
   expired_time: null,
   unlimited_quota: true,
   model_limits: [],

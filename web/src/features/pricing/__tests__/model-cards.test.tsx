@@ -378,7 +378,7 @@ describe('model cards', () => {
     }
     const { rerender } = render(<ModelCard {...props} tokenUnit='M' />)
     expectLocalizedPrice(
-      screen.getByLabelText('Our price').parentElement?.parentElement ?? null,
+      screen.getByRole('group', { name: 'Pricing' }),
       ['3', '9'],
       '/ 1M'
     )
@@ -389,7 +389,7 @@ describe('model cards', () => {
     )
     rerender(<ModelCard {...props} tokenUnit='K' />)
     expectLocalizedPrice(
-      screen.getByLabelText('Our price').parentElement?.parentElement ?? null,
+      screen.getByRole('group', { name: 'Pricing' }),
       ['0.003', '0.009'],
       '/ 1K'
     )
@@ -461,14 +461,20 @@ describe('model cards', () => {
         selectedGroup='default'
       />
     )
-    expect(screen.getByText('Input').parentElement).toHaveTextContent(
-      /\$0.15\s*\/\s*1M/
+    expectLocalizedPrice(
+      screen.getByText('Input').parentElement,
+      ['0.15'],
+      '/ 1M'
     )
-    expect(screen.getByText('Output').parentElement).toHaveTextContent(
-      /\$0.6\s*\/\s*1M/
+    expectLocalizedPrice(
+      screen.getByText('Output').parentElement,
+      ['0.6'],
+      '/ 1M'
     )
-    expect(screen.getByText('Cache Read').parentElement).toHaveTextContent(
-      /\$0.003\s*\/\s*1M/
+    expectLocalizedPrice(
+      screen.getByText('Cache Read').parentElement,
+      ['0.003'],
+      '/ 1M'
     )
   })
 
@@ -506,8 +512,10 @@ describe('model cards', () => {
         selectedGroup='default'
       />
     )
-    expect(screen.getByText('Cache Read').parentElement).toHaveTextContent(
-      /\$0.5\s*\/\s*1M/
+    expectLocalizedPrice(
+      screen.getByText('Cache Read').parentElement,
+      ['0.5'],
+      '/ 1M'
     )
   })
 
@@ -572,7 +580,7 @@ describe('model cards', () => {
         onClick={vi.fn()}
       />
     )
-    expect(screen.getByText(/^\$0\.4$/)).toBeVisible()
+    expectLocalizedPrice(screen.getByText('seconds').parentElement, ['0.4'])
     expect(screen.queryByText('(base)')).not.toBeInTheDocument()
   })
 

@@ -60,8 +60,6 @@ interface BillingHistoryDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
-const BILLING_HISTORY_SKELETONS = ['one', 'two', 'three', 'four', 'five']
-
 export function BillingHistoryDialog({
   open,
   onOpenChange,

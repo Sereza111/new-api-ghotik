@@ -1255,80 +1255,47 @@ func (r *OpenAIResponsesRequest) ParseInput() []MediaInput {
 	return parseResponsesInputContent(input)
 }
 
-	// Try array of parts
-	if kitutil.GetJsonType(r.Input) == "array" {
-		var inputs []Input
-		_ = kitutil.Unmarshal(r.Input, &inputs)
-		for _, input := range inputs {
-			content := input.Content
-			switch input.Type {
-			case "function_call":
-				content = input.Arguments
-			case "custom_tool_call":
-				content = input.ToolInput
-			case "function_call_output", "custom_tool_call_output", "local_shell_call_output":
-				content = input.Output
+func parseResponsesInputContent(value any) []MediaInput {
+	switch input := value.(type) {
+	case string:
+		return []MediaInput{{Type: "input_text", Text: input}}
+	case []any:
+		var parts []MediaInput
+		for _, item := range input {
+			parts = append(parts, parseResponsesInputContent(item)...)
+		}
+		return parts
+	case map[string]any:
+		inputType, _ := input["type"].(string)
+		switch inputType {
+		case "", "message":
+			return parseResponsesInputContent(input["content"])
+		case "input_text", "output_text", "summary_text", "reasoning_text":
+			return parseResponsesInputContent(input["text"])
+		case "refusal":
+			return parseResponsesInputContent(input["refusal"])
+		case "function_call":
+			parts := parseResponsesInputContent(input["name"])
+			return append(parts, parseResponsesInputContent(input["arguments"])...)
+		case "custom_tool_call":
+			parts := parseResponsesInputContent(input["name"])
+			return append(parts, parseResponsesInputContent(input["input"])...)
+		case "function_call_output", "custom_tool_call_output", "local_shell_call_output":
+			return parseResponsesInputContent(input["output"])
+		case "reasoning":
+			parts := parseResponsesInputContent(input["summary"])
+			return append(parts, parseResponsesInputContent(input["content"])...)
+		case "input_image", "input_file":
+			urlField := "image_url"
+			if inputType == "input_file" {
+				urlField = "file_url"
 			}
-			if input.Name != "" {
-				mediaInputs = append(mediaInputs, MediaInput{Type: "input_text", Text: input.Name})
-			}
-
-			if kitutil.GetJsonType(content) == "string" {
-				var str string
-				_ = kitutil.Unmarshal(content, &str)
-				mediaInputs = append(mediaInputs, MediaInput{Type: "input_text", Text: str})
-			}
-
-			if kitutil.GetJsonType(content) == "array" {
-				var array []any
-				_ = kitutil.Unmarshal(content, &array)
-				for _, itemAny := range array {
-					// Already parsed MediaContent
-					if media, ok := itemAny.(MediaInput); ok {
-						mediaInputs = append(mediaInputs, media)
-						continue
-					}
-
-					// Generic map
-					item, ok := itemAny.(map[string]any)
-					if !ok {
-						continue
-					}
-
-					typeVal, ok := item["type"].(string)
-					if !ok {
-						continue
-					}
-					switch typeVal {
-					case "input_text", "output_text":
-						text, _ := item["text"].(string)
-						mediaInputs = append(mediaInputs, MediaInput{Type: "input_text", Text: text})
-					case "input_image":
-						// image_url may be string or object with url field
-						var imageUrl string
-						switch v := item["image_url"].(type) {
-						case string:
-							imageUrl = v
-						case map[string]any:
-							if url, ok := v["url"].(string); ok {
-								imageUrl = url
-							}
-						}
-						mediaInputs = append(mediaInputs, MediaInput{Type: "input_image", ImageUrl: imageUrl})
-					case "input_file":
-						// file_url may be string or object with url field
-						var fileUrl string
-						switch v := item["file_url"].(type) {
-						case string:
-							fileUrl = v
-						case map[string]any:
-							if url, ok := v["url"].(string); ok {
-								fileUrl = url
-							}
-						}
-						mediaInputs = append(mediaInputs, MediaInput{Type: "input_file", FileUrl: fileUrl})
-					}
-				}
+			var url string
+			switch source := input[urlField].(type) {
+			case string:
+				url = source
+			case map[string]any:
+				url, _ = source["url"].(string)
 			}
 			if inputType == "input_file" {
 				return []MediaInput{{Type: inputType, FileUrl: url}}

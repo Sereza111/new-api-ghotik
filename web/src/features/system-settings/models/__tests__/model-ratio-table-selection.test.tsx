@@ -86,6 +86,7 @@ async function renderEditor(fixture: EditorFixture = {}) {
     <QueryClientProvider client={client}>
       <ModelRatioVisualEditor
         savedModelPrice='{}'
+        savedReferencePrice='{}'
         savedModelRatio={modelRatio}
         savedCacheRatio='{}'
         savedCreateCacheRatio='{}'
@@ -97,6 +98,7 @@ async function renderEditor(fixture: EditorFixture = {}) {
         savedBillingExpr={billingExpr}
         savedPluginBillingExpr={pluginBillingExpr}
         modelPrice='{}'
+        referencePrice='{}'
         modelRatio={modelRatio}
         cacheRatio='{}'
         createCacheRatio='{}'

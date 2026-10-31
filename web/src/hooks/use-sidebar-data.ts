@@ -17,6 +17,7 @@ import {
   Send,
   Settings,
   ShieldCheck,
+  Store,
   Ticket,
   User,
   Users,
@@ -115,6 +116,28 @@ export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
             title: t('Security & Access'),
             url: '/security',
             icon: ShieldCheck,
+          },
+          {
+            title: t('Routing'),
+            url: '/routing',
+            icon: Route,
+          },
+          {
+            title: t('Referral Program'),
+            url: '/referral',
+            icon: Gift,
+          },
+        ],
+      },
+      {
+        id: 'support',
+        title: t('Support'),
+        items: [
+          {
+            title: t('Customer chat'),
+            url: 'https://t.me/new_yozik',
+            icon: Send,
+            external: true,
           },
         ],
       },

@@ -26,6 +26,7 @@ import { EmptyState } from './components/empty-state'
 import { LoadingSkeleton } from './components/loading-skeleton'
 import { ModelCardGrid } from './components/model-card-grid'
 import { ModelDetailsDrawer } from './components/model-details'
+import { PricingSidebar } from './components/pricing-sidebar'
 import { PricingTable } from './components/pricing-table'
 import { PricingToolbar } from './components/pricing-toolbar'
 import { SearchBar } from './components/search-bar'
@@ -180,85 +181,11 @@ export function Pricing() {
               )}
               className='mx-auto mt-4 max-w-2xl sm:mt-6'
             />
-          </header>
-
-          <div className='grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]'>
-            <PricingSidebar
-              quotaTypeFilter={quotaTypeFilter}
-              endpointTypeFilter={endpointTypeFilter}
-              vendorFilter={vendorFilter}
-              groupFilter={groupFilter}
-              tagFilter={tagFilter}
-              onQuotaTypeChange={setQuotaTypeFilter}
-              onEndpointTypeChange={setEndpointTypeFilter}
-              onVendorChange={setVendorFilter}
-              onGroupChange={setGroupFilter}
-              onTagChange={setTagFilter}
-              vendors={vendors || []}
-              groups={availableGroups}
-              groupRatios={groupRatio}
-              tags={availableTags}
-              models={models || []}
-              hasActiveFilters={hasActiveFilters}
-              onClearFilters={clearFilters}
-              className='hover-scrollbar sticky top-20 hidden max-h-[calc(100dvh-6rem)] self-start overflow-y-auto xl:block'
-            />
-
-            <main className='min-w-0 space-y-4'>
-              <PricingToolbar
-                filteredCount={filteredModels.length}
-                totalCount={models?.length}
-                sortBy={sortBy}
-                onSortChange={setSortBy}
-                tokenUnit={tokenUnit}
-                onTokenUnitChange={setTokenUnit}
-                showRechargePrice={showRechargePrice}
-                onRechargePriceChange={setShowRechargePrice}
-                viewMode={viewMode}
-                onViewModeChange={setViewMode}
-                quotaTypeFilter={quotaTypeFilter}
-                endpointTypeFilter={endpointTypeFilter}
-                vendorFilter={vendorFilter}
-                groupFilter={groupFilter}
-                tagFilter={tagFilter}
-                onQuotaTypeChange={setQuotaTypeFilter}
-                onEndpointTypeChange={setEndpointTypeFilter}
-                onVendorChange={setVendorFilter}
-                onGroupChange={setGroupFilter}
-                onTagChange={setTagFilter}
-                vendors={vendors || []}
-                groups={availableGroups}
-                groupRatios={groupRatio}
-                tags={availableTags}
-                models={models || []}
-                hasActiveFilters={hasActiveFilters}
-                activeFilterCount={activeFilterCount}
-                onClearFilters={clearFilters}
-              />
-
-              {renderPricingContent()}
-            </main>
           </div>
-          <SearchBar
-            value={searchInput}
-            onChange={setSearchInput}
-            onClear={clearSearch}
-            placeholder={t('Search model name, provider, endpoint, or tag...')}
-          />
         </header>
 
-        <main className='flex min-w-0 flex-col gap-4'>
-          <PricingToolbar
-            filteredCount={filteredModels.length}
-            totalCount={models?.length}
-            sortBy={sortBy}
-            onSortChange={setSortBy}
-            tokenUnit={tokenUnit}
-            onTokenUnitChange={setTokenUnit}
-            showRechargePrice={showRechargePrice}
-            onRechargePriceChange={setShowRechargePrice}
-            viewMode={viewMode}
-            onViewModeChange={setViewMode}
+        <div className='grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]'>
+          <PricingSidebar
             quotaTypeFilter={quotaTypeFilter}
             endpointTypeFilter={endpointTypeFilter}
             vendorFilter={vendorFilter}
@@ -275,13 +202,45 @@ export function Pricing() {
             tags={availableTags}
             models={models || []}
             hasActiveFilters={hasActiveFilters}
-            activeFilterCount={activeFilterCount}
             onClearFilters={clearFilters}
+            className='hover-scrollbar sticky top-20 hidden max-h-[calc(100dvh-6rem)] self-start overflow-y-auto xl:block'
           />
 
-          {renderPricingContent()}
-        </main>
+          <main className='min-w-0 space-y-4'>
+            <PricingToolbar
+              filteredCount={filteredModels.length}
+              totalCount={models?.length}
+              sortBy={sortBy}
+              onSortChange={setSortBy}
+              tokenUnit={tokenUnit}
+              onTokenUnitChange={setTokenUnit}
+              showRechargePrice={showRechargePrice}
+              onRechargePriceChange={setShowRechargePrice}
+              viewMode={viewMode}
+              onViewModeChange={setViewMode}
+              quotaTypeFilter={quotaTypeFilter}
+              endpointTypeFilter={endpointTypeFilter}
+              vendorFilter={vendorFilter}
+              groupFilter={groupFilter}
+              tagFilter={tagFilter}
+              onQuotaTypeChange={setQuotaTypeFilter}
+              onEndpointTypeChange={setEndpointTypeFilter}
+              onVendorChange={setVendorFilter}
+              onGroupChange={setGroupFilter}
+              onTagChange={setTagFilter}
+              vendors={vendors || []}
+              groups={availableGroups}
+              groupRatios={groupRatio}
+              tags={availableTags}
+              models={models || []}
+              hasActiveFilters={hasActiveFilters}
+              activeFilterCount={activeFilterCount}
+              onClearFilters={clearFilters}
+            />
 
+            {renderPricingContent()}
+          </main>
+        </div>
         {selectedModel && (
           <ModelDetailsDrawer
             open={Boolean(selectedModel)}

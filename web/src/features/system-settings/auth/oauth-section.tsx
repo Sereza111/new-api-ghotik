@@ -84,6 +84,11 @@ const oauthSchema = z.object({
     user_info_endpoint: z.string(),
   }),
   TelegramOAuthEnabled: z.boolean(),
+  TelegramBotToken: z.string(),
+  TelegramBotName: z.string(),
+  TelegramChannelBonusEnabled: z.boolean(),
+  TelegramChannelBonusChannel: z.string().min(1),
+  TelegramChannelBonusAmountUSD: z.number().min(0.01).max(100),
   telegram: z.object({ client_id: z.string(), client_secret: z.string() }),
   LinuxDOOAuthEnabled: z.boolean(),
   LinuxDOClientId: z.string(),
@@ -113,6 +118,11 @@ type FlatOAuthDefaults = {
   'oidc.token_endpoint': string
   'oidc.user_info_endpoint': string
   TelegramOAuthEnabled: boolean
+  TelegramBotToken: string
+  TelegramBotName: string
+  TelegramChannelBonusEnabled: boolean
+  TelegramChannelBonusChannel: string
+  TelegramChannelBonusAmountUSD: number
   'telegram.client_id': string
   'telegram.client_secret': string
   LinuxDOOAuthEnabled: boolean
@@ -197,6 +207,12 @@ const buildFormDefaults = (defaults: FlatOAuthDefaults): OAuthFormValues => ({
     user_info_endpoint: defaults['oidc.user_info_endpoint'] ?? '',
   },
   TelegramOAuthEnabled: defaults.TelegramOAuthEnabled,
+  TelegramBotToken: defaults.TelegramBotToken ?? '',
+  TelegramBotName: defaults.TelegramBotName ?? '',
+  TelegramChannelBonusEnabled: defaults.TelegramChannelBonusEnabled,
+  TelegramChannelBonusChannel:
+    defaults.TelegramChannelBonusChannel ?? '@VL_API',
+  TelegramChannelBonusAmountUSD: defaults.TelegramChannelBonusAmountUSD ?? 0.5,
   telegram: {
     client_id: defaults['telegram.client_id'] ?? '',
     client_secret: defaults['telegram.client_secret'] ?? '',
@@ -229,6 +245,11 @@ const normalizeFormValues = (values: OAuthFormValues): FlatOAuthDefaults => ({
   'telegram.client_id': values.telegram.client_id,
   'telegram.client_secret': values.telegram.client_secret,
   TelegramOAuthEnabled: values.TelegramOAuthEnabled,
+  TelegramBotToken: values.TelegramBotToken,
+  TelegramBotName: values.TelegramBotName,
+  TelegramChannelBonusEnabled: values.TelegramChannelBonusEnabled,
+  TelegramChannelBonusChannel: values.TelegramChannelBonusChannel,
+  TelegramChannelBonusAmountUSD: values.TelegramChannelBonusAmountUSD,
   LinuxDOOAuthEnabled: values.LinuxDOOAuthEnabled,
   LinuxDOClientId: values.LinuxDOClientId,
   LinuxDOClientSecret: values.LinuxDOClientSecret,

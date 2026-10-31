@@ -17,8 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import i18next from 'i18next'
-import { CreditCard, Landmark } from 'lucide-react'
+import { Bitcoin, CreditCard, Landmark, QrCode } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { SiTelegram } from 'react-icons/si'
 
 import { IconAlipay, IconWeChat, IconStripe } from '@/assets/brand-icons'
 import { ReactIconByName } from '@/components/react-icon-by-name'

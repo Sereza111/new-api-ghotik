@@ -79,6 +79,7 @@ import { type ModelPricingIssue, useModelPricingIssues } from './pricing-issues'
 
 type ModelRatioVisualEditorProps = {
   savedModelPrice: string
+  savedReferencePrice: string
   savedModelRatio: string
   savedCacheRatio: string
   savedCreateCacheRatio: string
@@ -90,6 +91,7 @@ type ModelRatioVisualEditorProps = {
   savedBillingExpr: string
   savedPluginBillingExpr?: string
   modelPrice: string
+  referencePrice: string
   modelRatio: string
   cacheRatio: string
   createCacheRatio: string
@@ -120,6 +122,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
 >(function ModelRatioVisualEditor(
   {
     savedModelPrice,
+    savedReferencePrice,
     savedModelRatio,
     savedCacheRatio,
     savedCreateCacheRatio,
@@ -131,6 +134,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     savedBillingExpr,
     savedPluginBillingExpr = '{}',
     modelPrice,
+    referencePrice,
     modelRatio,
     cacheRatio,
     createCacheRatio,
@@ -253,6 +257,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       audioCompletionRatio: savedAudioCompletionRatio,
       billingMode: savedBillingMode,
       billingExpr: savedBillingExpr,
+      referencePrice: savedReferencePrice,
       pluginBillingExpr: savedPluginBillingExpr,
     })
     const draftRows = buildModelSnapshots({
@@ -266,6 +271,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       audioCompletionRatio,
       billingMode,
       billingExpr,
+      referencePrice,
       pluginBillingExpr,
     })
 
@@ -308,6 +314,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     filterMode,
     pricingIssues,
     savedModelPrice,
+    savedReferencePrice,
     savedModelRatio,
     savedCacheRatio,
     savedCreateCacheRatio,
@@ -319,6 +326,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     savedBillingExpr,
     savedPluginBillingExpr,
     modelPrice,
+    referencePrice,
     modelRatio,
     cacheRatio,
     createCacheRatio,
@@ -523,6 +531,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       audioCompletionRatio,
       billingMode,
       billingExpr,
+      referencePrice,
       pluginBillingExpr,
       onChange,
     ]
@@ -591,6 +600,20 @@ const ModelRatioVisualEditorComponent = forwardRef<
       })
       const updated = applyPricingDraft(options, data, targetNames)
       for (const [key, value] of Object.entries(updated)) onChange(key, value)
+
+      const referencePriceMap = safeJsonParse<
+        Record<string, NonNullable<ModelRatioData['referencePrice']>>
+      >(referencePrice, { fallback: {}, silent: true })
+      for (const name of targetNames) {
+        delete referencePriceMap[name]
+        if (data.referencePrice) {
+          referencePriceMap[name] = data.referencePrice
+        }
+      }
+      onChange(
+        'ModelReferencePrice',
+        JSON.stringify(referencePriceMap, null, 2)
+      )
     },
     [
       modelPrice,
@@ -604,6 +627,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       billingMode,
       billingExpr,
       pluginBillingExpr,
+      referencePrice,
       onChange,
     ]
   )

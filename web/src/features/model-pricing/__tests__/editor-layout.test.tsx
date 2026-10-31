@@ -113,7 +113,7 @@ it.each(['none', 'standard', 'claude_ttl', 'openai_ttl'] as const)(
     const billing = await screen.findByRole('region', {
       name: 'Current Billing',
     })
-    expect(within(billing).getByText('16')).toBeVisible()
+    expect(within(billing).getByLabelText('Our price')).toHaveTextContent('16')
     expect(within(billing).queryByText('Image input')).not.toBeInTheDocument()
     const preview = screen.getByRole('complementary', { name: 'Preview' })
     expect(await within(preview).findByText('$16')).toBeVisible()
@@ -291,6 +291,7 @@ function PricingFormFixture(props: {
 }) {
   const values = {
     ModelPrice: props.variant === 'default' ? '{"example-model":0.1}' : '{}',
+    ModelReferencePrice: '{}',
     ModelRatio: '{}',
     CacheRatio: '{}',
     CreateCacheRatio: '{}',

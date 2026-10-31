@@ -45,6 +45,10 @@ import {
   consumeOAuthLoginRedirect,
   resolveOAuthCallbackMode,
 } from '@/features/auth/lib/oauth-callback-mode'
+import {
+  parseTelegramAuthorizationHash,
+  pickTelegramAuthorization,
+} from '@/features/auth/lib/telegram-login'
 import type { LoginResponse } from '@/features/auth/types'
 import { api } from '@/lib/api'
 import { handleServerError } from '@/lib/handle-server-error'
@@ -235,29 +239,37 @@ function OAuthCallback() {
     let active = true
     void (async () => {
       try {
-        const config: OAuthRequestConfig = {
-          params: {
-            code: code || undefined,
-            state,
-            error: search.error,
-            error_description: search.error_description,
-          },
-          skipBusinessError: true,
-          skipAuthRefresh: true,
-        }
-        if (loginExchange.current?.key !== loginKey) {
-          loginExchange.current = {
-            key: loginKey,
-            request: api.get<LoginResponse>(`/api/oauth/${provider}`, config),
+        let oauthResponse: LoginResponse
+        if (telegramAuthorization) {
+          oauthResponse = (await telegramLogin(
+            telegramAuthorization
+          )) as LoginResponse
+        } else {
+          const config: OAuthRequestConfig = {
+            params: {
+              code: code || undefined,
+              state,
+              error: search.error,
+              error_description: search.error_description,
+            },
+            skipBusinessError: true,
+            skipAuthRefresh: true,
           }
+          if (loginExchange.current?.key !== loginKey) {
+            loginExchange.current = {
+              key: loginKey,
+              request: api.get<LoginResponse>(`/api/oauth/${provider}`, config),
+            }
+          }
+          const response = await loginExchange.current.request
+          oauthResponse = response.data
         }
-        const response = await loginExchange.current.request
         if (!active) return
-        if (response.data?.success) {
+        if (oauthResponse.success) {
           completedLogin.current = loginKey
           if (
             await handleLoginResult(
-              response.data.data,
+              oauthResponse.data,
               search.redirect ?? consumeOAuthLoginRedirect(state) ?? undefined
             )
           ) {
@@ -265,9 +277,9 @@ function OAuthCallback() {
           }
           return
         }
-        const messageKey = getServerErrorMessageKey(response.data)
+        const messageKey = getServerErrorMessageKey(oauthResponse)
         handleServerError(
-          response.data,
+          oauthResponse,
           messageKey
             ? i18next.t(messageKey)
             : oauthResponse.message || i18next.t('OAuth failed')

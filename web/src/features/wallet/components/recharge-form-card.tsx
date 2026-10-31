@@ -48,7 +48,6 @@ import {
   formatCurrency,
   formatPaymentAmount,
   formatUsdAmount,
-  formatRubAmount,
   getDiscountLabel,
   getPaymentIcon,
   getMinTopupAmount,
@@ -160,11 +159,6 @@ export function RechargeFormCard({
   const redemptionEnabled = topupInfo?.enable_redemption !== false
   const isCryptoPay = isCryptoPayPayment(paymentType)
   const isPlatega = isPlategaPayment(paymentType)
-  const selectedPaymentMethod = topupInfo?.pay_methods?.find(
-    (method) => method.type === paymentType
-  )
-  const plategaExchangeRate = Number(selectedPaymentMethod?.exchange_rate) || 1
-
   if (loading) {
     return (
       <Card data-card-hover='false' className='gap-0 overflow-hidden py-0'>

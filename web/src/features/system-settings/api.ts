@@ -30,6 +30,7 @@ import type {
   UpdateOptionResponse,
   UpdatePasskeyDomainsRequest,
   UpdatePasskeyDomainsResponse,
+  UpdateResellerCommercialSettingsRequest,
   UpstreamChannelsResponse,
   UpstreamRatiosResponse,
 } from './types'
@@ -44,6 +45,16 @@ export async function updateSystemOption(request: UpdateOptionRequest) {
   return res.data
 }
 
+export async function updateResellerCommercialSettings(
+  request: UpdateResellerCommercialSettingsRequest
+) {
+  const res = await api.put<UpdateOptionResponse>(
+    '/api/option/reseller',
+    request
+  )
+  return res.data
+}
+
 export async function updatePasskeyDomains(
   request: UpdatePasskeyDomainsRequest
 ) {
@@ -54,6 +65,13 @@ export async function updatePasskeyDomains(
       validateStatus: (status) =>
         (status >= 200 && status < 300) || status === 409,
     }
+  )
+  return res.data
+}
+
+export async function configureTelegramChannelBonusWebhook() {
+  const res = await api.post<UpdateOptionResponse>(
+    '/api/option/telegram_channel_bonus/webhook'
   )
   return res.data
 }

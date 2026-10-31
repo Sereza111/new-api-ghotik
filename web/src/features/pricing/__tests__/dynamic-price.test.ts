@@ -708,9 +708,11 @@ describe('shared plugin price summaries', () => {
       field: 'seconds',
       minValue: 0.4,
       maxValue: 1.2,
-      formattedRange: '$0.4 – $1.2',
       unit: 'second',
     })
+    expect(summary?.primaryEntries[0]?.formattedRange).toMatch(
+      /(?:\$\s*0[.,]4|0[.,]4\s*\$) – (?:\$\s*1[.,]2|1[.,]2\s*\$)/
+    )
   })
 
   test('retains separate field names and units and flags unconfigured providers', () => {
@@ -796,10 +798,12 @@ describe('shared plugin price summaries', () => {
         ?.primaryEntries.slice(0, 2)
         .map((entry) => entry.field)
     ).toEqual(['credits', 'images'])
-    expect(getCardExamplePrice(model, summaryOptions)).toEqual({
+    expect(getCardExamplePrice(model, summaryOptions)).toMatchObject({
       label: 'Beta sample',
       total: 3,
-      formatted: '$3',
     })
+    expect(getCardExamplePrice(model, summaryOptions)?.formatted).toMatch(
+      /(?:\$\s*3|3\s*\$)/
+    )
   })
 })
