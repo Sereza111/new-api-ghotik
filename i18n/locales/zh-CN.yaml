@@ -28,6 +28,7 @@ distributor.no_available_channel: "分组 {{.Group}} 下模型 {{.Model}} 无可
 distributor.no_available_channel_task_plugin: "分组 {{.Group}} 下模型 {{.Model}} 无可用渠道：该模型由任务插件认领，但当前没有启用的渠道可服务此模型（distributor）"
 distributor.invalid_request_parse_model: "无法解析模型"
 quota.user_insufficient: "用户额度不足, 剩余额度: {{.Remaining}}"
+quota.insufficient: "额度不足"
 quota.pre_consume_insufficient: "预扣费额度失败, 用户剩余额度: {{.Remaining}}, 需要预扣费额度: {{.Required}}"
 quota.subscription_insufficient: "订阅额度不足或未配置订阅: {{.Error}}"
 relay.model_price_not_configured: "模型 {{.Model}} 的价格尚未由管理员配置，暂时无法使用，请联系站点管理员开启该模型；Model {{.Model}} has not been priced by the administrator yet. Please contact the site administrator to enable this model."

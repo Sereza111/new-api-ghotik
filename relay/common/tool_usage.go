@@ -27,6 +27,24 @@ var reservedBillableToolNames = map[string]struct{}{
 	"tool_search":    {},
 }
 
+// IsNonBillableResponsesStatus reports terminal response statuses that must
+// not bill pending image-generation observations.
+func IsNonBillableResponsesStatus(status []byte) bool {
+	if len(status) == 0 {
+		return false
+	}
+	var value string
+	if err := common.Unmarshal(status, &value); err != nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "failed", "cancelled", "canceled", "incomplete":
+		return true
+	default:
+		return false
+	}
+}
+
 // MaxBillableToolCallCount bounds every tool count at settlement, whatever its
 // source, before it becomes a surcharge multiplier (see
 // .agents/rules/billing.md).

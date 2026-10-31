@@ -216,7 +216,8 @@ func PurchaseResellerSubscription(c *gin.Context) {
 		return
 	}
 	if created {
-		model.RecordLog(c.GetInt("id"), model.LogTypeManage, fmt.Sprintf("Purchased reseller subscription for %s USD", subscription.PaidPrice))
+		model.RecordLog(c.GetInt("id"), model.LogTypeManage, common.NewMessage(
+			"Purchased reseller subscription for {{price}} USD", map[string]any{"price": subscription.PaidPrice}))
 	}
 	purchasedListPrice, parseErr := decimal.NewFromString(subscription.ListPrice)
 	if parseErr != nil {
@@ -286,7 +287,8 @@ func DeleteResellerKey(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	model.RecordLog(c.GetInt("id"), model.LogTypeManage, fmt.Sprintf("Deleted reseller key %d without quota refund", id))
+	model.RecordLog(c.GetInt("id"), model.LogTypeManage, common.NewMessage(
+		"Deleted reseller key {{id}} without quota refund", map[string]any{"id": id}))
 	common.ApiSuccess(c, nil)
 }
 
@@ -301,7 +303,8 @@ func ReissueResellerKey(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	model.RecordLog(c.GetInt("id"), model.LogTypeManage, fmt.Sprintf("Reissued reseller key %d", id))
+	model.RecordLog(c.GetInt("id"), model.LogTypeManage, common.NewMessage(
+		"Reissued reseller key {{id}}", map[string]any{"id": id}))
 	common.ApiSuccess(c, buildResellerKeyResponse(&record.Token, &record.Metadata, true))
 }
 
@@ -389,10 +392,12 @@ func AdjustResellerKeyQuota(c *gin.Context) {
 		return
 	}
 	if applied {
-		model.RecordLog(userID, model.LogTypeManage, fmt.Sprintf(
-			"Adjusted reseller key %d quota: mode=%s, expected_total=%d, amount=%s million tokens, remaining=%d tokens",
-			id, mode, *request.ExpectedTotalMillions, strconv.Itoa(*request.TokenMillions), record.Token.RemainQuota,
-		))
+		model.RecordLog(userID, model.LogTypeManage, common.NewMessage(
+			"Adjusted reseller key {{id}} quota: mode={{mode}}, expected_total={{expected_total}}, amount={{amount}} million tokens, remaining={{remaining}} tokens",
+			map[string]any{
+				"id": id, "mode": mode, "expected_total": *request.ExpectedTotalMillions,
+				"amount": strconv.Itoa(*request.TokenMillions), "remaining": record.Token.RemainQuota,
+			}))
 	}
 	common.ApiSuccess(c, buildResellerKeyResponse(&record.Token, &record.Metadata, false))
 }

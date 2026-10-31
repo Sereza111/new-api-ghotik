@@ -95,6 +95,7 @@ func Distribute() func(c *gin.Context) {
 						common.SetContextKey(c, constant.ContextKeyUsingGroup, playgroundRequest.Group)
 					}
 				}
+				service.ApplyRoutingSourcePreference(c, modelRequest.Model, modelRequest.Group)
 			}
 		}
 		if pinned || shouldSelectChannel {

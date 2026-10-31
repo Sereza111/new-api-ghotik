@@ -494,7 +494,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
 	}
 
-	if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
+	if err := SettleBilling(ctx, relayInfo, settlementQuota); err != nil {
 		logger.LogError(ctx, common.LogText("error settling billing: %s", err.Error()))
 	}
 
@@ -573,10 +573,10 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if isResellerBilling(relayInfo) {
 		appendResellerSettlementInfo(other, relayInfo)
 	} else if usesRawTokenQuota(relayInfo) {
-		other["token_quota_mode"] = model.TokenQuotaModeTokens
-		other["raw_token_quota"] = rawTokenQuota
+		other.SetPublic("token_quota_mode", model.TokenQuotaModeTokens)
+		other.SetPublic("raw_token_quota", rawTokenQuota)
 		if relayInfo.TokenQuotaActual == nil {
-			other["raw_token_usage_missing"] = true
+			other.SetPublic("raw_token_usage_missing", true)
 		}
 	}
 

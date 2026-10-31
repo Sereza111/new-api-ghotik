@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -35,8 +36,33 @@ func (input *tokenAutoGroupsInput) UnmarshalJSON(data []byte) error {
 type tokenRequest struct {
 	model.Token
 	AutoGroups tokenAutoGroupsInput `json:"auto_groups"`
+	QuotaMode  *string              `json:"quota_mode"`
 	// 指针区分“未传”和显式 false：新建时未传即开启，更新时未传则保留原值。
 	AllowUserQuotaQuery *bool `json:"allow_user_quota_query"`
+	expiredTimeSet      bool  `json:"-"`
+	groupSet            bool  `json:"-"`
+}
+
+// UnmarshalJSON tracks fields whose omission has different semantics from an
+// explicit zero value. Allocation mode is immutable after token creation.
+func (input *tokenRequest) UnmarshalJSON(data []byte) error {
+	type tokenRequestAlias tokenRequest
+	var decoded tokenRequestAlias
+	if err := common.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*input = tokenRequest(decoded)
+
+	var presence struct {
+		ExpiredTime *int64  `json:"expired_time"`
+		Group       *string `json:"group"`
+	}
+	if err := common.Unmarshal(data, &presence); err != nil {
+		return err
+	}
+	input.expiredTimeSet = presence.ExpiredTime != nil
+	input.groupSet = presence.Group != nil
+	return nil
 }
 
 type tokenResponse struct {
@@ -290,6 +316,8 @@ func GetTokenUsage(c *gin.Context) {
 	data := gin.H{
 		"object":               "token_usage",
 		"name":                 token.Name,
+		"quota_mode":           token.EffectiveQuotaMode(),
+		"billing_basis":        billingBasis,
 		"total_granted":        token.RemainQuota + token.UsedQuota,
 		"total_used":           token.UsedQuota,
 		"total_available":      token.RemainQuota,
@@ -336,7 +364,7 @@ func AddToken(c *gin.Context) {
 		var ok bool
 		quotaMode, ok = model.NormalizeTokenQuotaMode(*request.QuotaMode)
 		if !ok {
-			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			common.ApiErrorT(c, "Invalid parameters")
 			return
 		}
 	}
@@ -458,17 +486,6 @@ func UpdateToken(c *gin.Context) {
 		common.ApiErrorT(c, "Token name is too long")
 		return
 	}
-	if !token.UnlimitedQuota {
-		if token.RemainQuota < 0 {
-			common.ApiErrorT(c, "Quota value cannot be negative")
-			return
-		}
-		maxQuotaValue := maxTokenQuota()
-		if token.RemainQuota > maxQuotaValue {
-			common.ApiErrorT(c, "Quota value exceeds valid range, maximum is {{max}}", map[string]any{"max": logger.FormatQuota(maxQuotaValue)})
-			return
-		}
-	}
 	cleanToken, err := model.GetTokenByIds(token.Id, userId)
 	if err != nil {
 		common.ApiError(c, err)
@@ -476,6 +493,45 @@ func UpdateToken(c *gin.Context) {
 	}
 	params["name"] = cleanToken.Name
 	previous := *cleanToken
+	if statusOnly == "" && request.QuotaMode != nil {
+		quotaMode, ok := model.NormalizeTokenQuotaMode(*request.QuotaMode)
+		if !ok || quotaMode != cleanToken.EffectiveQuotaMode() {
+			common.ApiErrorT(c, "Invalid parameters")
+			return
+		}
+	}
+	legacyResellerGroup := ""
+	if statusOnly == "" {
+		if model.IsResellerTokenKey(cleanToken.Key) && request.groupSet {
+			token.Group = strings.TrimSpace(token.Group)
+			if cleanToken.Group == "" {
+				userGroup, groupErr := getTokenRequestUserGroup(c)
+				if groupErr != nil {
+					common.ApiError(c, groupErr)
+					return
+				}
+				if !isResellerGroupAvailable(userGroup, token.Group) {
+					common.ApiErrorT(c, "Invalid parameters")
+					return
+				}
+				legacyResellerGroup = token.Group
+			} else if token.Group != cleanToken.Group {
+				common.ApiErrorT(c, "Invalid parameters")
+				return
+			}
+		}
+		if !cleanToken.UsesTokenQuota() && !token.UnlimitedQuota {
+			if token.RemainQuota < 0 {
+				common.ApiErrorT(c, "Quota value cannot be negative")
+				return
+			}
+			maxQuotaValue := maxTokenQuota()
+			if token.RemainQuota > maxQuotaValue {
+				common.ApiErrorT(c, "Quota value exceeds valid range, maximum is {{max}}", map[string]any{"max": logger.FormatQuota(maxQuotaValue)})
+				return
+			}
+		}
+	}
 	if token.Status == common.TokenStatusEnabled {
 		if cleanToken.Status == common.TokenStatusExpired && cleanToken.ExpiredTime <= common.GetTimestamp() && cleanToken.ExpiredTime != -1 {
 			common.ApiErrorT(c, "Token has expired and cannot be enabled. Please modify the expiration time or set it to never expire")
@@ -504,14 +560,16 @@ func UpdateToken(c *gin.Context) {
 		if request.AllowUserQuotaQuery != nil {
 			cleanToken.AllowUserQuotaQuery = *request.AllowUserQuotaQuery
 		}
-		cleanToken.Group = token.Group
-		cleanToken.CrossGroupRetry = token.CrossGroupRetry
-		if token.Group != "auto" {
-			cleanToken.CrossGroupRetry = false
-			_ = cleanToken.SetAutoGroups(nil)
-		} else if request.AutoGroups.Set {
-			if !setTokenAutoGroups(c, cleanToken, request.AutoGroups.Groups) {
-				return
+		if !model.IsResellerTokenKey(cleanToken.Key) {
+			cleanToken.Group = token.Group
+			cleanToken.CrossGroupRetry = token.CrossGroupRetry
+			if token.Group != "auto" {
+				cleanToken.CrossGroupRetry = false
+				_ = cleanToken.SetAutoGroups(nil)
+			} else if request.AutoGroups.Set {
+				if !setTokenAutoGroups(c, cleanToken, request.AutoGroups.Groups) {
+					return
+				}
 			}
 		}
 	}

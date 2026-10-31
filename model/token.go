@@ -400,12 +400,78 @@ func (token *Token) Update() (err error) {
 		}
 	}
 	// 写库前失效缓存并设置 fence，防止并发读者把过期快照重新写回缓存。
-	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
+	if cacheErr := invalidateTokenCacheForMutation(mutationKey); cacheErr != nil {
 		common.SysLog(common.LogText("failed to invalidate token cache before update: %s", cacheErr.Error()))
 	}
-	return DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
-		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "auto_groups",
-		"allow_user_quota_query").Updates(token).Error
+	// QuotaMode is immutable after creation: changing it would reinterpret the
+	// existing remain/used counters in a different unit. Raw-token allocations
+	// are immutable too, because overwriting remain_quota could race an in-flight
+	// hard reservation.
+	fields := []string{"name", "status", "expired_time", "model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "auto_groups", "allow_user_quota_query"}
+	if !rawQuota {
+		fields = append(fields, "remain_quota", "unlimited_quota")
+	}
+	return DB.Model(token).Select(fields).Updates(token).Error
+}
+
+// UpdateResellerMetadata only updates fields that do not alter a prepaid
+// reseller key's purchased allocation or expiry.
+func (token *Token) UpdateResellerMetadata() error {
+	return token.UpdateResellerMetadataWithLegacyGroup("")
+}
+
+// UpdateResellerMetadataWithLegacyGroup updates mutable reseller metadata and
+// optionally assigns a concrete group to a legacy key that predates mandatory
+// reseller routing groups. A non-empty persisted group remains immutable.
+func (token *Token) UpdateResellerMetadataWithLegacyGroup(legacyGroup string) error {
+	if !IsResellerTokenKey(token.Key) {
+		return errors.New("token is not a reseller key")
+	}
+	legacyGroup = strings.TrimSpace(legacyGroup)
+	if legacyGroup == "auto" {
+		return errors.New("reseller token requires a concrete group")
+	}
+	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
+		common.SysLog("failed to invalidate reseller token cache before metadata update: " + cacheErr.Error())
+	}
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var persisted Token
+		if err := lockForUpdate(tx).Where("id = ? AND user_id = ?", token.Id, token.UserId).First(&persisted).Error; err != nil {
+			return err
+		}
+		if !IsResellerTokenKey(persisted.Key) {
+			return errors.New("token is not a reseller key")
+		}
+		if legacyGroup != "" && persisted.Group != "" && persisted.Group != legacyGroup {
+			return errors.New("reseller token group is immutable")
+		}
+
+		updates := map[string]interface{}{
+			"name":                 token.Name,
+			"status":               token.Status,
+			"model_limits_enabled": token.ModelLimitsEnabled,
+			"model_limits":         token.ModelLimits,
+			"allow_ips":            token.AllowIps,
+		}
+		if legacyGroup != "" && persisted.Group == "" {
+			updates["group"] = legacyGroup
+			updates["cross_group_retry"] = false
+			updates["auto_groups"] = ""
+		}
+		return tx.Model(&Token{}).Where("id = ? AND user_id = ?", token.Id, token.UserId).Updates(updates).Error
+	})
+	if err != nil {
+		return err
+	}
+	if legacyGroup != "" {
+		token.Group = legacyGroup
+		token.CrossGroupRetry = false
+		_ = token.SetAutoGroups(nil)
+	}
+	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
+		common.SysLog("failed to refresh reseller token cache fence after metadata update: " + cacheErr.Error())
+	}
+	return nil
 }
 
 func (token *Token) SelectUpdate() (err error) {

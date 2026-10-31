@@ -134,6 +134,27 @@ type RelayInfo struct {
 	ChatToGeminiStreamState any
 	ReceivedResponseCount   int
 	FinalPreConsumedQuota   int // 最终预消耗的配额
+	// TokenQuotaPreConsumed is the token-key reservation. It differs from
+	// FinalPreConsumedQuota when a raw-token key is backed by priced wallet or
+	// subscription billing.
+	TokenQuotaPreConsumed int
+	// TokenQuotaReservationInitialized distinguishes a zero-token reservation
+	// from legacy callers that let BillingSession derive a fallback amount.
+	TokenQuotaReservationInitialized bool
+	// TokenQuotaActual is populated by token-metered response handlers before
+	// settlement. Nil distinguishes a measured zero from missing accounting.
+	TokenQuotaActual *int
+	// Reseller settlement records measured usage separately from the durable
+	// debit. Nil charged means the reservation has not been reconciled yet.
+	TokenQuotaCharged     *int
+	TokenQuotaOperationID string
+	TokenQuotaUnfunded    int
+	// ResellerBaseCostPerMillion converts the panel's monetary charge into
+	// purchased package units. It is frozen at key purchase, not a model price.
+	ResellerBaseCostPerMillion string
+	// ResellerTariffBilling is captured at pre-consume. Legacy in-flight
+	// settlements without this snapshot retain their original accounting units.
+	ResellerTariffBilling bool
 	// ForcePreConsume 为 true 时禁用 BillingSession 的信任额度旁路，
 	// 强制预扣全额。用于异步任务（视频/音乐生成等），因为请求返回后任务仍在运行，
 	// 必须在提交前锁定全额。

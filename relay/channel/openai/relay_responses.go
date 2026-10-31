@@ -92,8 +92,14 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
 	// compute usage
-	usage := &dto.Usage{}
-	service.ApplyResponsesUsage(usage, responsesResponse.Usage)
+	usage := responsesUsageForBilling(responsesResponse.Usage, responseBody)
+	if usage == nil {
+		usage = &dto.Usage{BillingUsage: &dto.BillingUsage{
+			Source:    dto.BillingUsageSourceOAIResponses,
+			Semantic:  dto.BillingUsageSemanticOpenAI,
+			Estimated: true,
+		}}
+	}
 	// Count actual tool invocations from Output (not tool declarations).
 	for _, output := range responsesResponse.Output {
 		switch output.Type {
@@ -125,6 +131,8 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	defer service.CloseResponseBodyGracefully(resp)
 
 	accumulator := service.NewResponsesUsageAccumulator(info)
+	var reportedUsage *dto.Usage
+	hasReportedUsage := false
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 
@@ -137,6 +145,13 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		}
 		if streamResponse.Response != nil {
 			data = string(rewriteSGLangResponsesCreatedAt(info, []byte(data), "response.created_at", streamResponse.Response.CreatedAt))
+		}
+		switch streamResponse.Type {
+		case "response.completed", "response.done", "response.failed", "response.error", "response.incomplete", "response.cancelled", "response.canceled":
+			if streamResponse.Response != nil && streamResponse.Response.Usage != nil {
+				reportedUsage = responsesUsageForBilling(streamResponse.Response.Usage, []byte(data))
+				hasReportedUsage = true
+			}
 		}
 		accumulator.Observe(&streamResponse, common.StringToByteSlice(data))
 		if err := helper.ResponseChunkData(c, streamResponse, data); err != nil {
@@ -151,7 +166,17 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	common.SetContextKey(c, constant.ContextKeyResponseStreamStatus, info.StreamStatus)
 	info.StreamStatus.RequireTerminal()
-	return accumulator.Finish(), nil
+	usage := accumulator.Finish()
+	if hasReportedUsage {
+		return reportedUsage, nil
+	}
+	common.SetContextKey(c, constant.ContextKeyLocalCountTokens, true)
+	usage.BillingUsage = &dto.BillingUsage{
+		Source:    dto.BillingUsageSourceOAIResponses,
+		Semantic:  dto.BillingUsageSemanticOpenAI,
+		Estimated: true,
+	}
+	return usage, nil
 }
 
 func rewriteSGLangResponsesCreatedAt(info *relaycommon.RelayInfo, payload []byte, path string, createdAt dto.IntValue) []byte {

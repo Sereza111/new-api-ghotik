@@ -19,40 +19,38 @@ import (
 
 // appendResellerSettlementInfo reports the durable debit, not the requested
 // settlement target. An unreconciled hold is explicitly separate from usage.
-func appendResellerSettlementInfo(other map[string]interface{}, info *relaycommon.RelayInfo) {
+func appendResellerSettlementInfo(other *model.LogOther, info *relaycommon.RelayInfo) {
+	if other == nil || info == nil {
+		return
+	}
 	if info.ResellerTariffBilling {
-		other["reseller_billing_basis"] = "panel_tariff_v1"
-		other["reseller_base_cost_per_million"] = info.ResellerBaseCostPerMillion
+		other.SetPublic("reseller_billing_basis", "panel_tariff_v1")
+		other.SetPublic("reseller_base_cost_per_million", info.ResellerBaseCostPerMillion)
 	}
 	charged := info.TokenQuotaPreConsumed
 	if info.TokenQuotaCharged != nil {
 		charged = *info.TokenQuotaCharged
 	} else {
-		other["reseller_settlement_pending"] = true
+		other.SetPublic("reseller_settlement_pending", true)
 	}
-	other["reseller_token_quota"] = charged
-	other["reseller_reserved_tokens"] = info.FinalPreConsumedQuota
+	other.SetPublic("reseller_token_quota", charged)
+	other.SetPublic("reseller_reserved_tokens", info.FinalPreConsumedQuota)
 	if info.ResellerTariffBilling {
-		other["reseller_reserved_panel_quota"] = info.FinalPreConsumedQuota
+		other.SetPublic("reseller_reserved_panel_quota", info.FinalPreConsumedQuota)
 		reserved, _, err := resellerTariffTokenQuota(info.FinalPreConsumedQuota, info.ResellerBaseCostPerMillion)
 		if err == nil {
-			other["reseller_reserved_tokens"] = reserved
+			other.SetPublic("reseller_reserved_tokens", reserved)
 		}
 	}
 	if info.TokenQuotaActual != nil {
-		other["reseller_measured_tokens"] = *info.TokenQuotaActual
+		other.SetPublic("reseller_measured_tokens", *info.TokenQuotaActual)
 	} else {
-		other["reseller_usage_missing"] = true
+		other.SetPublic("reseller_usage_missing", true)
 	}
-	adminInfo, ok := other["admin_info"].(map[string]interface{})
-	if !ok || adminInfo == nil {
-		adminInfo = map[string]interface{}{}
-		other["admin_info"] = adminInfo
-	}
-	adminInfo["reseller_accounting"] = map[string]interface{}{
+	other.SetAdmin("reseller_accounting", map[string]interface{}{
 		"operation_id":    info.TokenQuotaOperationID,
 		"unfunded_tokens": info.TokenQuotaUnfunded,
-	}
+	})
 }
 
 // attachQuotaSaturationToOther nests a quota saturation marker under

@@ -51,6 +51,7 @@ const (
 
 var (
 	ErrPaymentMethodMismatch = errors.New("payment method mismatch")
+	ErrPaymentAmountMismatch = errors.New("payment amount mismatch")
 	ErrTopUpNotFound         = errors.New("topup not found")
 	ErrTopUpStatusInvalid    = errors.New("topup status invalid")
 	// The quota errors reach the web console, so they carry message keys.
@@ -302,7 +303,11 @@ func RechargeCryptoPay(tradeNo string, paidAmount decimal.Decimal, fiat string, 
 
 	syncCreditUserQuotaCache(topUp.UserId, quotaToAdd, "crypto pay topup")
 	common.SysLog(fmt.Sprintf("Crypto Pay 充值成功 trade_no=%s user_id=%d quota_to_add=%d money=%.2f", topUp.TradeNo, topUp.UserId, quotaToAdd, topUp.Money))
-	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用 Crypto Pay 充值成功，充值金额: %v，支付金额：%.2f USD", logger.LogQuota(quotaToAdd), topUp.Money), callerIp, PaymentMethodCryptoPay, PaymentProviderCryptoPay)
+	RecordTopupLog(topUp.UserId, common.NewMessage("{{provider}} top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{
+		"provider": "Crypto Pay",
+		"quota":    logger.FormatQuota(quotaToAdd),
+		"amount":   fmt.Sprintf("%.2f USD", topUp.Money),
+	}), callerIp, PaymentMethodCryptoPay, PaymentProviderCryptoPay)
 	return false, nil
 }
 
@@ -398,7 +403,11 @@ func RechargePlatega(providerTradeNo string, paidAmount decimal.Decimal, currenc
 
 	syncCreditUserQuotaCache(topUp.UserId, quotaToAdd, "platega topup")
 	common.SysLog(fmt.Sprintf("Platega 充值成功 provider_trade_no=%s user_id=%d quota_to_add=%d money=%.2f RUB", topUp.ProviderTradeNo, topUp.UserId, quotaToAdd, topUp.Money))
-	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用 Platega 充值成功，充值金额: %v，支付金额：%.2f RUB", logger.LogQuota(quotaToAdd), topUp.Money), callerIp, topUp.PaymentMethod, PaymentProviderPlatega)
+	RecordTopupLog(topUp.UserId, common.NewMessage("{{provider}} top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{
+		"provider": "Platega",
+		"quota":    logger.FormatQuota(quotaToAdd),
+		"amount":   fmt.Sprintf("%.2f RUB", topUp.Money),
+	}), callerIp, topUp.PaymentMethod, PaymentProviderPlatega)
 	return false, nil
 }
 

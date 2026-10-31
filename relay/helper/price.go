@@ -424,6 +424,7 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, billing
 
 	snapshot := &billingexpr.BillingSnapshot{
 		EstimatedImageCount:       trace.ImageCount,
+		EstimatedImageSize:        requestInput.ImageSize,
 		BillingMode:               billing_setting.BillingModeTieredExpr,
 		ModelName:                 billingModelName,
 		ExprString:                exprStr,

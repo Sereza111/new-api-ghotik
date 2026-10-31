@@ -19,11 +19,13 @@ import (
 	"github.com/QuantumNous/new-api/setting/model_setting"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/sjson"
 )
 
 func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
 	info.BillingImageCount = nil
+	info.BillingImageSize = nil
 	info.ImageRequestCount = 0
 
 	imageReq, ok := info.Request.(*dto.ImageRequest)
@@ -46,10 +48,11 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		return types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrorCodeInvalidApiType, types.ErrOptionWithSkipRetry())
 	}
 	adaptor.Init(info)
-	imageCount, err := request.ImageCount(false)
+	imageCount, err := request.ImageCount(info.ChannelType == constant.ChannelTypeAli)
 	if err != nil {
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
+	promptExtend := request.BillingParameters != nil && request.BillingParameters.PromptExtend != nil && *request.BillingParameters.PromptExtend
 	imageSize := request.Size
 
 	var requestBody io.Reader
@@ -105,22 +108,32 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		// This is a different trust boundary from ingress: channel overrides
 		// and pass-through bodies can change the quantity actually submitted.
 		var outbound struct {
-			N    *uint  `json:"n"`
-			Size string `json:"size"`
+			N          *uint                       `json:"n"`
+			Size       string                      `json:"size"`
+			Parameters *dto.ImageBillingParameters `json:"parameters"`
 		}
 		if err := common.Unmarshal(jsonData, &outbound); err != nil {
 			return types.NewErrorWithStatusCode(fmt.Errorf("invalid image billing parameters: %w", err), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
-		quantityRequest := dto.ImageRequest{N: outbound.N}
+		quantityRequest := dto.ImageRequest{N: outbound.N, BillingParameters: outbound.Parameters}
 		if quantityRequest.N == nil {
 			quantityRequest.N = common.GetPointer(uint(imageCount))
 		}
-		imageCount, err = quantityRequest.ImageCount(false)
+		imageCount, err = quantityRequest.ImageCount(info.ChannelType == constant.ChannelTypeAli)
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
 		if outbound.Size != "" {
 			imageSize = outbound.Size
+		}
+		promptExtend = outbound.Parameters != nil && outbound.Parameters.PromptExtend != nil && *outbound.Parameters.PromptExtend
+		if info.ChannelType == constant.ChannelTypeAli {
+			// Keep the submitted quantity identical to the amount reserved even
+			// when an empty parameters object accompanies a top-level n.
+			jsonData, err = sjson.SetBytes(jsonData, "parameters.n", imageCount)
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
 		}
 		logger.LogDebug(c, "image request body: %s", jsonData)
 		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
@@ -130,7 +143,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		defer closer.Close()
 		requestBody = body
 	}
-	if billingErr := service.PrepareImageBillingForRequest(c, info, imageCount, imageSize); billingErr != nil {
+	if billingErr := service.PrepareImageBillingForRequest(c, info, imageCount, imageSize, promptExtend); billingErr != nil {
 		return billingErr
 	}
 

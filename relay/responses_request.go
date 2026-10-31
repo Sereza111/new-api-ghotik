@@ -54,8 +54,23 @@ func PrepareResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, req *d
 		if err != nil {
 			return nil, nil, nil, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
 		}
-		body := common.NewReplayableBodyReader(storage)
-		return adaptor, body, io.NopCloser(body), nil
+		jsonData, err := storage.Bytes()
+		if err != nil {
+			return nil, nil, nil, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+		}
+		jsonData, err = normalizeLegacyResponsesConfigurationUpdates(jsonData, info.GetUpstreamModelName())
+		if err != nil {
+			return nil, nil, nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		normalizedStorage, err := common.CreateBodyStorage(jsonData)
+		if err != nil {
+			return nil, nil, nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		if hardCapErr := validateResellerPassThroughHardCap(c, info, normalizedStorage); hardCapErr != nil {
+			normalizedStorage.Close()
+			return nil, nil, nil, hardCapErr
+		}
+		return adaptor, common.NewReplayableBodyReader(normalizedStorage), normalizedStorage, nil
 	}
 
 	convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *request)
@@ -76,6 +91,13 @@ func PrepareResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, req *d
 		if err != nil {
 			return nil, nil, nil, newAPIErrorFromParamOverride(err)
 		}
+	}
+	jsonData, err = normalizeLegacyResponsesConfigurationUpdates(jsonData, info.GetUpstreamModelName())
+	if err != nil {
+		return nil, nil, nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+	}
+	if hardCapErr := validateResellerOutboundHardCap(c, info, jsonData); hardCapErr != nil {
+		return nil, nil, nil, hardCapErr
 	}
 
 	logger.LogDebug(c, "requestBody: %s", jsonData)

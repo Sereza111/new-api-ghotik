@@ -557,6 +557,13 @@ func executeTaskSubmissionWith(
 	relayInfo *relaycommon.RelayInfo,
 	submit taskSubmitAttempt,
 ) (*taskSubmissionOutcome, *taskdto.TaskError) {
+	if relayUsesRawTokenQuota(relayInfo) {
+		return nil, service.TaskErrorWrapperLocal(
+			errors.New("raw-token quota keys support token-metered synchronous APIs only"),
+			"raw_token_quota_task_unsupported",
+			http.StatusBadRequest,
+		)
+	}
 	policy := service.RequestPolicy(c)
 	diagnostics := newTaskPluginSubmitDiagnostics(c)
 	diagnostics.start(relayInfo)

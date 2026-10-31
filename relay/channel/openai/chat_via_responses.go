@@ -80,6 +80,13 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	if err != nil {
 		return finishResellerResponsesFailure(c, resellerUsage, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError), false)
 	}
+	if resellerUsage != nil {
+		usage = resellerUsage
+	}
+	if resellerUsage == nil && (usage == nil || usage.TotalTokens == 0) {
+		text := service.ExtractOutputTextFromResponses(&responsesResp)
+		usage = service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens())
+	}
 	responseBody, err := common.Marshal(responseValue)
 	if err != nil {
 		return finishResellerResponsesFailure(c, resellerUsage, types.NewOpenAIError(err, types.ErrorCodeJsonMarshalFailed, http.StatusInternalServerError), false)
@@ -123,6 +130,21 @@ func OaiResponsesToChatBufferedStreamHandler(c *gin.Context, info *relaycommon.R
 			logger.LogError(c, common.LogText("failed to unmarshal buffered responses stream event: %s", err.Error()))
 			streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 			break
+		}
+		if resellerUsage == nil {
+			resellerUsage = resellerResponsesUsageForSettlement(info, nil, nil)
+		}
+		switch streamResp.Type {
+		case "response.completed", "response.done", "response.failed", "response.error", "response.incomplete", "response.cancelled", "response.canceled":
+			var reported *dto.Usage
+			if streamResp.Response != nil {
+				reported = streamResp.Response.Usage
+			}
+			resellerUsage = resellerResponsesUsageForSettlement(info, reported, []byte(data))
+			if resellerUsage != nil && streamResp.Type != "response.completed" && streamResp.Type != "response.done" && streamResp.Type != "response.incomplete" {
+				c.Data(http.StatusOK, "application/json", []byte(data))
+				return resellerUsage, nil
+			}
 		}
 		if streamResp.Response != nil {
 			info.ObserveResponseModel(streamResp.Response.Model)
@@ -222,6 +244,8 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 	}
 	streamErr := (*types.NewAPIError)(nil)
+	var resellerUsage *dto.Usage
+	resellerTerminalForwarded := false
 	// upstreamFailed records a response.failed / response.error event and
 	// failedUsage the usage it reported, if any.
 	upstreamFailed := false

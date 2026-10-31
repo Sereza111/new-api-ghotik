@@ -231,6 +231,10 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 
 func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, modelName string,
 	usage *dto.RealtimeUsage, extraContent []*common.Message) {
+	originUsage := usage
+	if usage == nil {
+		usage = &dto.RealtimeUsage{}
+	}
 
 	var tieredResult *billingexpr.TieredResult
 	tieredOk, tieredQuota, tieredRes := TryTieredSettle(relayInfo, billingexpr.TokenParams{
@@ -323,7 +327,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
-	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
+	if err := SettleBilling(ctx, relayInfo, settlementQuota); err != nil {
 		logger.LogError(ctx, common.LogText("error settling billing: %s", err.Error()))
 	}
 
@@ -337,10 +341,10 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 	if isResellerBilling(relayInfo) {
 		appendResellerSettlementInfo(other, relayInfo)
 	} else if usesRawTokenQuota(relayInfo) {
-		other["token_quota_mode"] = model.TokenQuotaModeTokens
-		other["raw_token_quota"] = rawTokenQuota
+		other.SetPublic("token_quota_mode", model.TokenQuotaModeTokens)
+		other.SetPublic("raw_token_quota", rawTokenQuota)
 		if relayInfo.TokenQuotaActual == nil {
-			other["raw_token_usage_missing"] = true
+			other.SetPublic("raw_token_usage_missing", true)
 		}
 	}
 	attachQuotaSaturation(ctx, relayInfo, other)
@@ -387,6 +391,7 @@ func CalcOpenRouterCacheCreateTokens(usage dto.Usage, priceData types.PriceData)
 }
 
 func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent []*common.Message) {
+	originUsage := usage
 	if usage == nil {
 		usage = &dto.Usage{PromptTokens: relayInfo.GetEstimatePromptTokens(), TotalTokens: relayInfo.GetEstimatePromptTokens()}
 	}
@@ -489,7 +494,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
-	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
+	if err := SettleBilling(ctx, relayInfo, settlementQuota); err != nil {
 		logger.LogError(ctx, common.LogText("error settling billing: %s", err.Error()))
 	}
 
@@ -503,10 +508,10 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	if isResellerBilling(relayInfo) {
 		appendResellerSettlementInfo(other, relayInfo)
 	} else if usesRawTokenQuota(relayInfo) {
-		other["token_quota_mode"] = model.TokenQuotaModeTokens
-		other["raw_token_quota"] = rawTokenQuota
+		other.SetPublic("token_quota_mode", model.TokenQuotaModeTokens)
+		other.SetPublic("raw_token_quota", rawTokenQuota)
 		if relayInfo.TokenQuotaActual == nil {
-			other["raw_token_usage_missing"] = true
+			other.SetPublic("raw_token_usage_missing", true)
 		}
 	}
 	attachQuotaSaturation(ctx, relayInfo, other)

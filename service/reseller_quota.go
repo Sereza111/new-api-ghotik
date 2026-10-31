@@ -159,13 +159,25 @@ func (s *resellerTariffSession) Settle(monetaryQuota int) error {
 }
 
 func (s *resellerTariffSession) Reserve(monetaryQuota int) error {
+	return s.reserve(monetaryQuota, false)
+}
+
+func (s *resellerTariffSession) ReserveBeforeSubmit(monetaryQuota int) error {
+	return s.reserve(monetaryQuota, true)
+}
+
+func (s *resellerTariffSession) reserve(monetaryQuota int, beforeSubmit bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	quota, err := s.packageQuota(monetaryQuota)
 	if err != nil {
 		return err
 	}
-	err = s.session.Reserve(quota)
+	if beforeSubmit {
+		err = s.session.ReserveBeforeSubmit(quota)
+	} else {
+		err = s.session.Reserve(quota)
+	}
 	if err == nil && monetaryQuota > s.monetaryReservation {
 		s.monetaryReservation = monetaryQuota
 	}

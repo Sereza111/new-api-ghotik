@@ -224,7 +224,12 @@ func loadOptionsFromDatabase() {
 	defer passkeyOptionMutex.Unlock()
 	options, _ := AllOption()
 	passkeyOptions := make(map[string]string)
+	resellerValues := make(map[string]string, 5)
 	for _, option := range options {
+		if operation_setting.IsResellerSettingOption(option.Key) {
+			resellerValues[option.Key] = option.Value
+			continue
+		}
 		if IsPasskeyDomainOption(option.Key) {
 			passkeyOptions[option.Key] = option.Value
 			continue
@@ -235,6 +240,12 @@ func loadOptionsFromDatabase() {
 		}
 	}
 	applyPasskeyDomainOptions(passkeyOptions)
+	settings, err := operation_setting.ParseResellerSettingOptions(resellerValues)
+	if err != nil {
+		common.SysLog(common.LogText("failed to load reseller settings: %s", err.Error()))
+		return
+	}
+	publishResellerCommercialSettings(settings)
 }
 
 func SyncOptions(frequency int) {
@@ -397,6 +408,62 @@ func UpdateOptionsBulk(values map[string]string) error {
 		requestPolicySnapshot.Store(policySnapshot)
 	}
 	return nil
+}
+
+// UpdateResellerCommercialSettings stores the complete commercial tuple and
+// publishes a single in-memory snapshot only after the transaction commits.
+func UpdateResellerCommercialSettings(settings operation_setting.ResellerSetting) error {
+	values := resellerCommercialOptionValues(settings)
+	for key, value := range values {
+		if err := validateOptionValue(key, value); err != nil {
+			return err
+		}
+	}
+	if err := persistOptionValues(values); err != nil {
+		return err
+	}
+
+	publishResellerCommercialSettings(settings)
+	return nil
+}
+
+func resellerCommercialOptionValues(settings operation_setting.ResellerSetting) map[string]string {
+	return map[string]string{
+		operation_setting.ResellerBaseCostPerMillionOption:       strconv.FormatFloat(settings.BaseCostPerMillion, 'f', -1, 64),
+		operation_setting.ResellerEndpointOption:                 settings.Endpoint,
+		operation_setting.ResellerSubscriptionPriceOption:        strconv.FormatFloat(settings.SubscriptionPrice, 'f', -1, 64),
+		operation_setting.ResellerSubscriptionDiscountOption:     strconv.Itoa(settings.SubscriptionDiscountPercent),
+		operation_setting.ResellerSubscriptionDurationDaysOption: strconv.Itoa(settings.SubscriptionDurationDays),
+	}
+}
+
+func publishResellerCommercialSettings(settings operation_setting.ResellerSetting) {
+	values := resellerCommercialOptionValues(settings)
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string, len(values))
+	}
+	for key, value := range values {
+		common.OptionMap[key] = value
+	}
+	operation_setting.SetResellerSetting(settings)
+	common.OptionMapRWMutex.Unlock()
+}
+
+func persistOptionValues(values map[string]string) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		for key, value := range values {
+			option := Option{Key: key}
+			if err := tx.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
+				return err
+			}
+			option.Value = value
+			if err := tx.Save(&option).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func updateOptionMap(key string, value string) (err error) {

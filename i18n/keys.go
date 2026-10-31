@@ -36,6 +36,7 @@ const (
 	MsgDistributorInvalidParseModel            = "distributor.invalid_request_parse_model"
 
 	MsgQuotaUserInsufficient             = "quota.user_insufficient"
+	MsgQuotaInsufficient                 = "quota.insufficient"
 	MsgQuotaPreConsumeInsufficient       = "quota.pre_consume_insufficient"
 	MsgQuotaSubscriptionInsufficient     = "quota.subscription_insufficient"
 	MsgRelayModelPriceNotConfigured      = "relay.model_price_not_configured"

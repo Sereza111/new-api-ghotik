@@ -157,65 +157,11 @@ func handleTelegramAuthenticationStart(ctx context.Context, chatId int64, from *
 	if from == nil || chatId != from.Id {
 		return false
 	}
-	purpose := ""
-	flowToken := ""
-	switch {
-	case strings.HasPrefix(parameter, "login_"):
-		purpose = model.AuthFlowPurposeTelegramLogin
-		flowToken = strings.TrimPrefix(parameter, "login_")
-	case strings.HasPrefix(parameter, "bind_"):
-		purpose = model.AuthFlowPurposeTelegramBind
-		flowToken = strings.TrimPrefix(parameter, "bind_")
-	default:
+	if !strings.HasPrefix(parameter, "login_") && !strings.HasPrefix(parameter, "bind_") {
 		return false
-	}
-	if flowToken == "" {
-		return false
-	}
-
-	match := model.AuthFlowMatch{Purpose: purpose}
-	flow, err := model.GetAuthFlow(flowToken, match)
-	if err != nil {
-		_ = service.TelegramSendMessage(ctx, chatId,
-			"🖤 <b>Ссылка устарела</b>\n\nВернитесь на сайт и начните вход через Telegram ещё раз.", nil)
-		return true
-	}
-	var current telegramLoginFlowPayload
-	if err := common.UnmarshalJsonStr(flow.Payload, &current); err != nil {
-		common.SysError("Telegram auth flow payload decode failed: " + err.Error())
-		_ = service.TelegramSendMessage(ctx, chatId, "Не удалось подтвердить вход. Попробуйте ещё раз.", nil)
-		return true
-	}
-	if current.TelegramId != "" {
-		if current.TelegramId == strconv.FormatInt(from.Id, 10) {
-			_ = service.TelegramSendMessage(ctx, chatId,
-				"🖤 <b>Вход уже подтверждён</b>\n\nВернитесь во вкладку VL API — она завершит вход автоматически.", nil)
-		} else {
-			_ = service.TelegramSendMessage(ctx, chatId, "Эта ссылка уже была использована.", nil)
-		}
-		return true
-	}
-	payload, err := common.Marshal(telegramLoginFlowPayload{
-		TelegramId: strconv.FormatInt(from.Id, 10),
-		Username:   from.Username,
-		FirstName:  from.FirstName,
-		LastName:   from.LastName,
-	})
-	if err != nil {
-		common.SysError("Telegram auth flow payload encode failed: " + err.Error())
-		return true
-	}
-	if err := model.CompareAndSwapAuthFlowPayload(flowToken, match, flow.Payload, string(payload)); err != nil {
-		_ = service.TelegramSendMessage(ctx, chatId, "Эта ссылка устарела или уже была использована.", nil)
-		return true
-	}
-
-	action := "вход"
-	if purpose == model.AuthFlowPurposeTelegramBind {
-		action = "привязку аккаунта"
 	}
 	_ = service.TelegramSendMessage(ctx, chatId,
-		"🖤 <b>Telegram подтверждён</b>\n\nВернитесь во вкладку VL API — она завершит "+action+" автоматически.", nil)
+		"🖤 <b>Ссылка устарела</b>\n\nВернитесь на сайт и начните вход через Telegram ещё раз.", nil)
 	return true
 }
 
@@ -284,7 +230,9 @@ func handleTelegramChannelBonusClaim(ctx context.Context, callback *telegramBonu
 	}
 
 	reward := fmt.Sprintf("$%.2f", setting.TelegramChannelBonusAmountUSD)
-	model.RecordLog(bonus.UserId, model.LogTypeTopup, fmt.Sprintf("Бонус %s за подписку на Telegram-канал %s", logger.LogQuota(bonus.QuotaAwarded), bonus.Channel))
+	model.RecordLog(bonus.UserId, model.LogTypeTopup, common.NewMessage(
+		"Telegram channel subscription bonus: {{quota}} for {{channel}}",
+		map[string]any{"quota": logger.LogQuota(bonus.QuotaAwarded), "channel": bonus.Channel}))
 	_ = service.TelegramAnswerCallback(ctx, callback.Id, "Готово! Бонус "+reward+" начислен на баланс.", true)
 	_ = service.TelegramSendMessage(ctx, callback.Message.Chat.Id,
 		"🖤 <b>Бонус начислен</b>\n\nНа баланс вашего аккаунта New API добавлено <b>"+reward+"</b>. Сохраните подписку на канал минимум на 30 дней.", telegramBackToMenuButtons())
@@ -316,7 +264,9 @@ func handleTelegramChannelMemberUpdate(ctx context.Context, update *telegramBonu
 	}
 
 	reward := telegramQuotaUSD(bonus.QuotaAwarded)
-	model.RecordLog(bonus.UserId, model.LogTypeTopup, fmt.Sprintf("Списание %s: отписка от Telegram-канала %s в течение 30 дней", logger.LogQuota(bonus.QuotaAwarded), bonus.Channel))
+	model.RecordLog(bonus.UserId, model.LogTypeTopup, common.NewMessage(
+		"Telegram channel bonus revoked: {{quota}} for leaving {{channel}} within 30 days",
+		map[string]any{"quota": logger.LogQuota(bonus.QuotaAwarded), "channel": bonus.Channel}))
 	text := "🖤 <b>Бонус отозван</b>\n\nВы отписались от канала раньше чем через 30 дней, поэтому <b>" + reward + "</b> списано с баланса. Повторно получить этот бонус нельзя."
 	if err := service.TelegramSendMessage(ctx, telegramID, text, telegramBackToMenuButtons()); err != nil {
 		common.SysError("Telegram channel bonus revocation notice failed: " + err.Error())

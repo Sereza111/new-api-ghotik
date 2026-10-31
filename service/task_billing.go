@@ -301,7 +301,7 @@ func taskModelName(task *model.Task) string {
 	return task.Properties.OriginModelName
 }
 
-func settleResellerTaskQuota(ctx context.Context, task *model.Task, monetaryQuota int, reason string, clamps ...*common.QuotaClamp) bool {
+func settleResellerTaskQuota(ctx context.Context, task *model.Task, monetaryQuota int, reason *common.Message, clamps ...*common.QuotaClamp) bool {
 	packageQuota, clamp, err := resellerTariffTokenQuota(monetaryQuota, task.PrivateData.BillingContext.ResellerBaseCostPerMillion)
 	if err != nil {
 		logger.LogError(ctx, fmt.Sprintf("reseller task tariff conversion failed (task=%s): %s", task.TaskID, err))
@@ -328,11 +328,11 @@ func settleResellerTaskQuota(ctx context.Context, task *model.Task, monetaryQuot
 		logType, logQuota, packageDelta = model.LogTypeRefund, -logQuota, -packageDelta
 	}
 	other := taskBillingOther(task)
-	other["reseller_token_quota"] = packageDelta
-	other["reseller_measured_tokens"] = packageQuota
-	other["reason"] = reason
+	other.SetPublic("reseller_token_quota", packageDelta)
+	other.SetPublic("reseller_measured_tokens", packageQuota)
+	other.SetPublic("reason", reason.Error())
 	if settlement.Unfunded > 0 {
-		other["admin_info"] = map[string]any{"reseller_unfunded_tokens": settlement.Unfunded}
+		other.SetAdmin("reseller_unfunded_tokens", settlement.Unfunded)
 	}
 	attachQuotaSaturationToOther(other, clamp)
 	for _, quotaClamp := range clamps {
@@ -341,7 +341,7 @@ func settleResellerTaskQuota(ctx context.Context, task *model.Task, monetaryQuot
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 		UserId: task.UserId, LogType: logType, ChannelId: task.ChannelId,
 		ModelName: taskModelName(task), Quota: logQuota, TokenId: task.PrivateData.TokenId,
-		Group: task.Group, Other: other, NodeName: task.PrivateData.NodeName,
+		Group: task.Group, Content: []*common.Message{reason}, Other: other, NodeName: task.PrivateData.NodeName,
 	})
 	return true
 }
@@ -352,7 +352,7 @@ func settleResellerTaskQuota(ctx context.Context, task *model.Task, monetaryQuot
 func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool {
 	if task.PrivateData.BillingSource == BillingSourceReseller && task.PrivateData.BillingContext != nil &&
 		task.PrivateData.BillingContext.ResellerBaseCostPerMillion != "" {
-		return settleResellerTaskQuota(ctx, task, 0, reason)
+		return settleResellerTaskQuota(ctx, task, 0, common.NewMessage(reason))
 	}
 	quota := task.Quota
 	if quota == 0 {
@@ -498,7 +498,7 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 	if task.PrivateData.BillingSource == BillingSourceReseller &&
 		(task.PrivateData.BillingContext == nil || task.PrivateData.BillingContext.ResellerBaseCostPerMillion == "") {
 		actualQuota, clamp := resellerTokenQuota(totalTokens)
-		RecalculateTaskQuota(ctx, task, actualQuota, fmt.Sprintf("reseller raw token settlement: tokens=%d", totalTokens), clamp)
+		RecalculateTaskQuota(ctx, task, actualQuota, common.NewMessage("Reseller raw token settlement: {{tokens}}", map[string]any{"tokens": totalTokens}), clamp)
 		return true
 	}
 

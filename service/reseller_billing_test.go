@@ -230,7 +230,7 @@ func testResellerTaskTariffSettlement(t *testing.T) {
 				task.Status = model.TaskStatusSuccess
 				require.True(t, settleTaskBillingOnComplete(ctx, &taskPollingFetchAdaptor{}, task,
 					&relaycommon.TaskInfo{UsageFacts: map[string]any{"seconds": float64(tc.seconds)}}))
-				RecalculateTaskQuota(ctx, &stale, tc.wantPanel, "duplicate completion")
+				RecalculateTaskQuota(ctx, &stale, tc.wantPanel, common.NewMessage("Duplicate completion"))
 			}
 			var token model.Token
 			require.NoError(t, model.DB.First(&token, 602).Error)
@@ -274,7 +274,7 @@ func TestResellerSpeechUsesPanelAudioExpression(t *testing.T) {
 		PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150,
 		PromptTokensDetails:    dto.InputTokenDetails{TextTokens: 100},
 		CompletionTokenDetails: dto.OutputTokenDetails{AudioTokens: 50},
-	}, "")
+	}, nil)
 	var token model.Token
 	require.NoError(t, model.DB.First(&token, 702).Error)
 	assert.Equal(t, 14_000, token.UsedQuota)
@@ -807,11 +807,12 @@ type failingResellerBillingSettler struct {
 	refunded bool
 }
 
-func (s *failingResellerBillingSettler) Settle(int) error         { return errors.New("settlement failed") }
-func (s *failingResellerBillingSettler) Refund(*gin.Context)      { s.refunded = true }
-func (s *failingResellerBillingSettler) NeedsRefund() bool        { return true }
-func (s *failingResellerBillingSettler) GetPreConsumedQuota() int { return 100 }
-func (s *failingResellerBillingSettler) Reserve(int) error        { return nil }
+func (s *failingResellerBillingSettler) Settle(int) error              { return errors.New("settlement failed") }
+func (s *failingResellerBillingSettler) Refund(*gin.Context)           { s.refunded = true }
+func (s *failingResellerBillingSettler) NeedsRefund() bool             { return true }
+func (s *failingResellerBillingSettler) GetPreConsumedQuota() int      { return 100 }
+func (s *failingResellerBillingSettler) Reserve(int) error             { return nil }
+func (s *failingResellerBillingSettler) ReserveBeforeSubmit(int) error { return nil }
 
 func TestSettleBillingDoesNotRefundDeliveredResellerResponse(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
