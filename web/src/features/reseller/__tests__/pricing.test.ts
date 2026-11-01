@@ -20,6 +20,7 @@ import { describe, expect, test } from 'vitest'
 
 import {
   calculateResellerQuote,
+  getResellerPortalUrl,
   normalizeResellerEndpoint,
   RESELLER_MAX_MILLIONS,
   resellerDraftSchema,
@@ -81,5 +82,15 @@ describe('reseller pricing', () => {
     expect(
       normalizeResellerEndpoint('https://pugshop.ru?token=secret')
     ).toBeNull()
+  })
+
+  test('derives the reseller portal from the configured API endpoint', () => {
+    expect(getResellerPortalUrl('https://reseler.errorclub.club/v1')).toBe(
+      'https://reseler.errorclub.club'
+    )
+    expect(getResellerPortalUrl('https://example.com/custom/v1/')).toBe(
+      'https://example.com/custom'
+    )
+    expect(getResellerPortalUrl('javascript:alert(1)')).toBeNull()
   })
 })

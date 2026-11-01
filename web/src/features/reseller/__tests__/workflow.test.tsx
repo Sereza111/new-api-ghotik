@@ -35,6 +35,7 @@ const resellerApi = vi.hoisted(() => ({
   revealResellerKey: vi.fn(),
 }))
 const appApi = vi.hoisted(() => ({ getSelf: vi.fn() }))
+const chartRender = vi.hoisted(() => vi.fn())
 
 vi.mock('../api', () => resellerApi)
 
@@ -45,6 +46,17 @@ vi.mock('@/lib/api', async (importOriginal) => ({
 
 vi.mock('@/features/home/components/fortune-atmosphere', () => ({
   FortuneAtmosphere: () => <div data-testid='fortune-atmosphere' />,
+}))
+
+vi.mock('@visactor/react-vchart', () => ({
+  VChart: (props: unknown) => {
+    chartRender(props)
+    return <div data-testid='reseller-revenue-chart' />
+  },
+}))
+
+vi.mock('@/lib/use-chart-theme', () => ({
+  useChartTheme: () => ({ resolvedTheme: 'dark', themeReady: true }),
 }))
 
 vi.mock('sonner', () => ({
@@ -129,9 +141,10 @@ describe('reseller workflow', () => {
     resellerApi.reissueResellerKey.mockReset()
     resellerApi.revealResellerKey.mockReset()
     appApi.getSelf.mockReset()
+    chartRender.mockReset()
     resellerApi.getResellerConfig.mockResolvedValue({
       base_cost_per_million: 0.08,
-      default_endpoint: 'https://pugshop.ru/v1',
+      default_endpoint: 'https://reseler.errorclub.club/v1',
       available_groups: availableGroups,
       subscription: activeSubscription,
     })
@@ -191,6 +204,52 @@ describe('reseller workflow', () => {
     expect(fiftyMillionPackage).toBeChecked()
     expect(screen.getByLabelText('Custom amount')).toHaveValue(50)
     expect(screen.getAllByText('$4.00').length).toBeGreaterThan(0)
+  })
+
+  test('links the client portal and summarizes reseller revenue', async () => {
+    renderReseller()
+
+    const portalLink = await screen.findByRole('link', {
+      name: 'Open reseller panel',
+    })
+    expect(portalLink).toHaveAttribute('href', 'https://reseler.errorclub.club')
+    expect(screen.getAllByText('Issued key value').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Estimated profit').length).toBeGreaterThan(0)
+    expect(screen.getByTestId('reseller-revenue-chart')).toBeVisible()
+    expect(chartRender).toHaveBeenCalled()
+  })
+
+  test('groups keys by quota and filters the key vault', async () => {
+    const twoMillionKey: ResellerKey = {
+      ...existingKey,
+      id: 43,
+      client_label: 'Two Million Client',
+      token_millions: 2,
+      remaining_tokens: 2_000_000,
+      used_tokens: 0,
+      status: 2,
+      cost: 0.16,
+      client_price: 0.29,
+    }
+    resellerApi.getResellerKeys.mockResolvedValue([existingKey, twoMillionKey])
+    const user = userEvent.setup()
+    renderReseller()
+
+    expect(await screen.findByRole('button', { name: /10M/ })).toBeVisible()
+    expect(screen.getByRole('button', { name: /2M/ })).toBeVisible()
+
+    await user.type(
+      screen.getByRole('searchbox', { name: 'Search reseller keys' }),
+      'Two Million'
+    )
+
+    expect(
+      screen.queryByRole('heading', { name: 'Existing Studio' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'Two Million Client' })
+    ).toBeVisible()
+    expect(screen.getByText('Showing 1 of 2 keys')).toBeVisible()
   })
 
   test('sets the total quota of an issued reseller key', async () => {

@@ -925,6 +925,11 @@ For commercial licensing, please contact support@quantumnous.com
   font-size: 0.75rem;
 }
 
+.reseller-key-entry {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 18rem;
+}
+
 @media (min-width: 40rem) {
   .reseller-quote-grid > div + div {
     border-inline-start: 1px solid var(--border);

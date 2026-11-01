@@ -77,9 +77,9 @@ export function ResellerConfigurator(props: ResellerConfiguratorProps) {
   }
 
   return (
-    <Card data-card-hover='false' className='reseller-tool-card h-full'>
+    <Card data-card-hover='false' className='reseller-tool-card'>
       <form
-        className='flex h-full flex-col'
+        className='flex flex-col'
         aria-busy={props.isSubmitting}
         onSubmit={props.form.handleSubmit(props.onSubmit)}
       >
@@ -94,7 +94,7 @@ export function ResellerConfigurator(props: ResellerConfiguratorProps) {
         </CardHeader>
 
         <fieldset className='contents' disabled={props.isSubmitting}>
-          <CardContent className='mt-4 flex flex-1 flex-col gap-5'>
+          <CardContent className='mt-4 flex flex-col gap-5'>
             <div className='grid gap-4 sm:grid-cols-2'>
               <div className='flex flex-col gap-2'>
                 <label

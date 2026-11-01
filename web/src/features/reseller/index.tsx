@@ -17,7 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { CircleAlert, Globe2, RefreshCw, Server } from 'lucide-react'
+import {
+  CircleAlert,
+  ExternalLink,
+  Globe2,
+  PanelTopOpen,
+  RefreshCw,
+  Server,
+} from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -38,10 +45,12 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { FortuneAtmosphere } from '@/features/home/components/fortune-atmosphere'
 import type { ApiKeyGroupOption } from '@/features/keys/components/api-key-group-combobox'
+import { toIntlLocale } from '@/i18n/languages'
 import { getSelf } from '@/lib/api'
 import { useAuthStore, type AuthUser } from '@/stores/auth-store'
 
 import { GothicResellerCards } from './components/gothic-reseller-cards'
+import { ResellerAnalytics } from './components/reseller-analytics'
 import { ResellerConfigurator } from './components/reseller-configurator'
 import { ResellerKeyVault } from './components/reseller-key-vault'
 import { ResellerSubscriptionBand } from './components/reseller-subscription-band'
@@ -58,6 +67,7 @@ import {
 import {
   calculateResellerQuote,
   DEFAULT_RESELLER_ENDPOINT,
+  getResellerPortalUrl,
   RESELLER_BASE_COST_PER_MILLION,
   resellerDraftSchema,
 } from './lib/pricing'
@@ -113,7 +123,7 @@ export function Reseller() {
     control: form.control,
     name: 'markupPercent',
   })
-  const locale = i18n.resolvedLanguage || 'en'
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const moneyFormatter = useMemo(
     () =>
       new Intl.NumberFormat(locale, {
@@ -139,6 +149,7 @@ export function Reseller() {
     configQuery.data?.base_cost_per_million ?? RESELLER_BASE_COST_PER_MILLION
   const configuredEndpoint =
     configQuery.data?.default_endpoint || DEFAULT_RESELLER_ENDPOINT
+  const resellerPortalUrl = getResellerPortalUrl(configuredEndpoint)
   const groupOptions = useMemo<ApiKeyGroupOption[]>(
     () =>
       (configQuery.data?.available_groups ?? []).map((group) => ({
@@ -517,10 +528,57 @@ export function Reseller() {
                 <p className='text-muted-foreground mt-2 text-xs leading-5'>
                   {t('Clients use this address with issued reseller keys.')}
                 </p>
+                {configQuery.data && resellerPortalUrl ? (
+                  <>
+                    <div className='mt-4 flex items-center gap-2'>
+                      <PanelTopOpen
+                        className='text-primary size-4'
+                        aria-hidden='true'
+                      />
+                      <p className='text-sm font-medium'>
+                        {t('Reseller panel')}
+                      </p>
+                    </div>
+                    <div className='reseller-secret-row mt-3'>
+                      <PanelTopOpen
+                        className='text-muted-foreground size-4 shrink-0'
+                        aria-hidden='true'
+                      />
+                      <a
+                        href={resellerPortalUrl}
+                        target='_blank'
+                        rel='noreferrer'
+                        className='hover:text-primary min-w-0 flex-1 truncate text-xs underline-offset-4 hover:underline'
+                      >
+                        {resellerPortalUrl}
+                      </a>
+                      <Button
+                        role='link'
+                        aria-label={t('Open reseller panel')}
+                        variant='ghost'
+                        size='icon-sm'
+                        render={
+                          <a
+                            href={resellerPortalUrl}
+                            target='_blank'
+                            rel='noreferrer'
+                          />
+                        }
+                      >
+                        <ExternalLink aria-hidden='true' />
+                      </Button>
+                    </div>
+                  </>
+                ) : null}
               </div>
             </section>
 
             {subscriptionContent}
+
+            <ResellerAnalytics
+              keys={keysQuery.data ?? []}
+              formatMoney={formatMoney}
+            />
 
             <section aria-labelledby='reseller-packages-title'>
               <div className='mb-4 flex flex-wrap items-end justify-between gap-3'>
@@ -545,8 +603,8 @@ export function Reseller() {
               {packageContent}
             </section>
 
-            <div className='grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]'>
-              {configuratorContent}
+            <div className='grid items-start gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]'>
+              <div className='xl:sticky xl:top-4'>{configuratorContent}</div>
               <ResellerKeyVault
                 keys={keysQuery.data ?? []}
                 formatMoney={formatMoney}

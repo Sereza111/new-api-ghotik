@@ -17,22 +17,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
+  ChevronDown,
   CircleAlert,
-  Eye,
   KeyRound,
   RefreshCw,
-  RotateCw,
-  Server,
+  Search,
+  SearchX,
   ShieldCheck,
-  SlidersHorizontal,
-  Trash2,
 } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
-import { CopyButton } from '@/components/copy-button'
-import { GroupBadge } from '@/components/group-badge'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -45,27 +41,25 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
+import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty'
-import { Progress } from '@/components/ui/progress'
+import { Input } from '@/components/ui/input'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
 
-import type {
-  ResellerKey,
-  ResellerQuotaAdjustmentRequest,
-  ResellerTerm,
-} from '../types'
+import type { ResellerKey, ResellerQuotaAdjustmentRequest } from '../types'
+import { ResellerKeyEntry } from './reseller-key-entry'
 import { ResellerQuotaDialog } from './reseller-quota-dialog'
 
 type ResellerKeyVaultProps = {
@@ -95,11 +89,12 @@ type PendingKeyAction = {
   key: ResellerKey
 }
 
-const TERM_KEYS: Record<ResellerTerm, string> = {
-  unlimited: 'No expiration',
-  '7-days': '7 days',
-  '30-days': '30 days',
-  '90-days': '90 days',
+type ResellerKeyBucket = {
+  tokenMillions: number
+  keys: ResellerKey[]
+  activeCount: number
+  clientValue: number
+  newestCreatedTime: number
 }
 
 const STATUS_KEYS: Record<number, string> = {
@@ -111,24 +106,14 @@ const STATUS_KEYS: Record<number, string> = {
 
 const KEY_SKELETON_IDS = ['key-1', 'key-2', 'key-3']
 
-function formatTokenMillions(tokens: number): string {
-  if (!Number.isFinite(tokens) || tokens <= 0) return '0M'
-  const millions = tokens / 1_000_000
-  return `${Number(millions.toFixed(2))}M`
-}
-
-function getRemainingPercent(item: ResellerKey): number {
-  const total = item.used_tokens + item.remaining_tokens
-  if (total <= 0) return 0
-  return Math.min(100, Math.max(0, (item.remaining_tokens / total) * 100))
-}
-
 export function ResellerKeyVault(props: ResellerKeyVaultProps) {
   const { t } = useTranslation()
   const [pendingAction, setPendingAction] = useState<PendingKeyAction | null>(
     null
   )
   const [quotaKeyId, setQuotaKeyId] = useState<number | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
   const quotaKey = props.keys.find((item) => item.id === quotaKeyId) ?? null
   const isDeleteAction = pendingAction?.type === 'delete'
   const isActionLoading = Boolean(
@@ -159,6 +144,60 @@ export function ResellerKeyVault(props: ResellerKeyVaultProps) {
       : t('Reissuing key...')
   }
 
+  const buckets = useMemo(() => {
+    const normalizedSearch = searchQuery.trim().toLocaleLowerCase()
+    const grouped = new Map<number, ResellerKey[]>()
+
+    for (const key of props.keys) {
+      if (statusFilter !== 'all' && key.status !== Number(statusFilter)) {
+        continue
+      }
+      if (normalizedSearch) {
+        const searchable = [
+          key.client_label,
+          key.group,
+          key.key,
+          key.endpoint,
+          `${key.token_millions}m`,
+        ]
+          .join(' ')
+          .toLocaleLowerCase()
+        if (!searchable.includes(normalizedSearch)) continue
+      }
+
+      const bucket = grouped.get(key.token_millions) ?? []
+      bucket.push(key)
+      grouped.set(key.token_millions, bucket)
+    }
+
+    const result: ResellerKeyBucket[] = []
+    for (const [tokenMillions, keys] of grouped) {
+      keys.sort((a, b) => b.created_time - a.created_time)
+      result.push({
+        tokenMillions,
+        keys,
+        activeCount: keys.filter((key) => key.status === 1).length,
+        clientValue: keys.reduce(
+          (total, key) =>
+            total + (Number.isFinite(key.client_price) ? key.client_price : 0),
+          0
+        ),
+        newestCreatedTime: keys[0]?.created_time ?? 0,
+      })
+    }
+    result.sort(
+      (a, b) =>
+        b.newestCreatedTime - a.newestCreatedTime ||
+        a.tokenMillions - b.tokenMillions
+    )
+    return result
+  }, [props.keys, searchQuery, statusFilter])
+  const filteredKeyCount = buckets.reduce(
+    (total, bucket) => total + bucket.keys.length,
+    0
+  )
+  const filtersActive = searchQuery.trim() !== '' || statusFilter !== 'all'
+
   const handleActionConfirm = async () => {
     if (!pendingAction) return
 
@@ -170,6 +209,11 @@ export function ResellerKeyVault(props: ResellerKeyVaultProps) {
 
   const handleActionDialogOpenChange = (open: boolean) => {
     if (!open && !isActionLoading) setPendingAction(null)
+  }
+
+  const clearFilters = () => {
+    setSearchQuery('')
+    setStatusFilter('all')
   }
 
   let content: ReactNode
@@ -234,218 +278,138 @@ export function ResellerKeyVault(props: ResellerKeyVaultProps) {
     )
   } else {
     content = (
-      <CardContent className='flex flex-col gap-0 px-0'>
-        {props.keys.map((item, index) => {
-          const revealedKey = props.revealedKeys[item.id]
-          const isRevealing = props.revealingKeyId === item.id
-          const isDeleting = props.deletingKeyId === item.id
-          const isReissuing = props.reissuingKeyId === item.id
-          let keyAction: ReactNode
+      <CardContent className='px-0'>
+        <div className='grid gap-2 border-y p-4 sm:grid-cols-[minmax(0,1fr)_11rem]'>
+          <label className='relative block'>
+            <span className='sr-only'>{t('Search reseller keys')}</span>
+            <Search
+              className='text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2'
+              aria-hidden='true'
+            />
+            <Input
+              type='search'
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder={t('Search by client, key, group, or quota')}
+              className='pl-8'
+            />
+          </label>
+          <NativeSelect
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            aria-label={t('Filter by status')}
+            className='w-full'
+          >
+            <NativeSelectOption value='all'>
+              {t('All statuses')}
+            </NativeSelectOption>
+            {Object.entries(STATUS_KEYS).map(([status, label]) => (
+              <NativeSelectOption key={status} value={status}>
+                {t(label)}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </div>
 
-          if (revealedKey) {
-            keyAction = (
-              <CopyButton
-                value={revealedKey}
-                tooltip={t('Copy key')}
-                aria-label={t('Copy key')}
-              />
-            )
-          } else {
-            keyAction = (
-              <Button
-                type='button'
-                variant='ghost'
-                size='sm'
-                disabled={props.revealingKeyId !== null || keyActionIsPending}
-                onClick={() => props.onReveal(item.id)}
+        {filteredKeyCount === 0 ? (
+          <Empty className='min-h-72'>
+            <EmptyHeader>
+              <EmptyMedia variant='icon'>
+                <SearchX aria-hidden='true' />
+              </EmptyMedia>
+              <EmptyTitle>
+                {t('No reseller keys match your filters.')}
+              </EmptyTitle>
+              <EmptyDescription>
+                {t('Try another client name, quota, group, or status.')}
+              </EmptyDescription>
+            </EmptyHeader>
+            <Button type='button' variant='outline' onClick={clearFilters}>
+              {t('Clear filters')}
+            </Button>
+          </Empty>
+        ) : (
+          <div aria-label={t('Keys grouped by quota')}>
+            {buckets.map((bucket, bucketIndex) => (
+              <Collapsible
+                key={`${bucket.tokenMillions}-${bucket.keys[0]?.id ?? 0}-${filtersActive ? 'filtered' : 'all'}`}
+                defaultOpen={bucketIndex === 0 || filtersActive}
+                className='group/key-bucket border-b last:border-b-0'
               >
-                {isRevealing ? (
-                  <Spinner data-icon='inline-start' aria-hidden='true' />
-                ) : (
-                  <Eye data-icon='inline-start' aria-hidden='true' />
-                )}
-                {t('Reveal key')}
-              </Button>
-            )
-          }
-
-          return (
-            <div key={item.id}>
-              {index > 0 ? <Separator /> : null}
-              <article className='flex flex-col gap-4 px-4 py-5'>
-                <header className='flex flex-wrap items-start justify-between gap-3'>
-                  <div className='min-w-0'>
-                    <div className='flex flex-wrap items-center gap-2'>
-                      <h3 className='truncate text-base font-semibold'>
-                        {item.client_label}
-                      </h3>
-                      <Badge variant='secondary'>
-                        {t(STATUS_KEYS[item.status] || 'Unknown')}
-                      </Badge>
-                      <GroupBadge group={item.group} size='sm' />
-                    </div>
-                    <p className='text-muted-foreground mt-1 text-xs'>
-                      {item.token_millions}M {t('Tokens')} ·{' '}
-                      {t(TERM_KEYS[item.term])}
-                    </p>
-                  </div>
-                  <div className='flex shrink-0 items-start gap-1'>
-                    <div className='mr-1 text-right'>
-                      <p className='text-sm font-semibold tabular-nums'>
-                        {props.formatMoney(item.client_price)}
-                      </p>
-                      <p className='text-muted-foreground text-xs'>
-                        {t('Client price')}
-                      </p>
-                    </div>
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <Button
-                            type='button'
-                            variant='ghost'
-                            size='icon-sm'
-                            disabled={
-                              keyActionIsPending ||
-                              props.revealingKeyId !== null
-                            }
-                            aria-label={
-                              isReissuing
-                                ? t('Reissuing key...')
-                                : t('Reissue key')
-                            }
-                            onClick={() =>
-                              setPendingAction({ type: 'reissue', key: item })
-                            }
-                          />
-                        }
-                      >
-                        {isReissuing ? (
-                          <Spinner aria-hidden='true' />
-                        ) : (
-                          <RotateCw aria-hidden='true' />
-                        )}
-                      </TooltipTrigger>
-                      <TooltipContent>{t('Reissue key')}</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <Button
-                            type='button'
-                            variant='ghost'
-                            size='icon-sm'
-                            disabled={
-                              keyActionIsPending ||
-                              props.revealingKeyId !== null
-                            }
-                            aria-label={t('Adjust quota')}
-                            onClick={() => setQuotaKeyId(item.id)}
-                          />
-                        }
-                      >
-                        {props.adjustingKeyId === item.id ? (
-                          <Spinner aria-hidden='true' />
-                        ) : (
-                          <SlidersHorizontal aria-hidden='true' />
-                        )}
-                      </TooltipTrigger>
-                      <TooltipContent>{t('Adjust quota')}</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <Button
-                            type='button'
-                            variant='ghost'
-                            size='icon-sm'
-                            className='text-destructive hover:text-destructive'
-                            disabled={
-                              keyActionIsPending ||
-                              props.revealingKeyId !== null
-                            }
-                            aria-label={
-                              isDeleting
-                                ? t('Deleting key...')
-                                : t('Delete key')
-                            }
-                            onClick={() =>
-                              setPendingAction({ type: 'delete', key: item })
-                            }
-                          />
-                        }
-                      >
-                        {isDeleting ? (
-                          <Spinner aria-hidden='true' />
-                        ) : (
-                          <Trash2 aria-hidden='true' />
-                        )}
-                      </TooltipTrigger>
-                      <TooltipContent>{t('Delete key')}</TooltipContent>
-                    </Tooltip>
-                  </div>
-                </header>
-
-                <div>
-                  <div className='mb-2 flex items-center justify-between gap-3 text-xs'>
-                    <span className='text-muted-foreground'>
-                      {t('Remaining quota')}
+                <CollapsibleTrigger className='group hover:bg-muted/40 flex w-full items-center justify-between gap-4 px-4 py-3 text-left'>
+                  <span className='flex min-w-0 items-center gap-2'>
+                    <span className='font-serif text-lg font-semibold tabular-nums'>
+                      {bucket.tokenMillions}M
                     </span>
-                    <span className='font-medium tabular-nums'>
-                      {formatTokenMillions(item.remaining_tokens)} /{' '}
-                      {item.token_millions}M
+                    <Badge variant='secondary'>
+                      {t('{{count}} keys', { count: bucket.keys.length })}
+                    </Badge>
+                    <span className='text-muted-foreground hidden text-xs sm:inline'>
+                      {t('{{count}} active', { count: bucket.activeCount })}
                     </span>
+                  </span>
+                  <span className='flex shrink-0 items-center gap-3'>
+                    <span className='text-right'>
+                      <span className='block text-xs font-semibold tabular-nums'>
+                        {props.formatMoney(bucket.clientValue)}
+                      </span>
+                      <span className='text-muted-foreground block text-[0.68rem]'>
+                        {t('Issued key value')}
+                      </span>
+                    </span>
+                    <ChevronDown className='text-muted-foreground size-4 transition-transform group-data-[panel-open]:rotate-180' />
+                  </span>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className='border-t'>
+                    {bucket.keys.map((item, index) => (
+                      <div key={item.id}>
+                        {index > 0 ? <Separator /> : null}
+                        <ResellerKeyEntry
+                          item={item}
+                          formatMoney={props.formatMoney}
+                          revealedKey={props.revealedKeys[item.id]}
+                          isRevealing={props.revealingKeyId === item.id}
+                          isDeleting={props.deletingKeyId === item.id}
+                          isReissuing={props.reissuingKeyId === item.id}
+                          isAdjusting={props.adjustingKeyId === item.id}
+                          actionsDisabled={
+                            keyActionIsPending || props.revealingKeyId !== null
+                          }
+                          onReveal={() => props.onReveal(item.id)}
+                          onRequestDelete={() =>
+                            setPendingAction({ type: 'delete', key: item })
+                          }
+                          onRequestReissue={() =>
+                            setPendingAction({ type: 'reissue', key: item })
+                          }
+                          onRequestAdjust={() => setQuotaKeyId(item.id)}
+                        />
+                      </div>
+                    ))}
                   </div>
-                  <Progress
-                    value={getRemainingPercent(item)}
-                    aria-label={t('Remaining quota')}
-                  />
-                </div>
-
-                <div className='grid gap-2'>
-                  <div className='reseller-secret-row'>
-                    <Server
-                      className='text-muted-foreground size-4 shrink-0'
-                      aria-hidden='true'
-                    />
-                    <code className='min-w-0 flex-1 truncate'>
-                      {item.endpoint}
-                    </code>
-                    <CopyButton
-                      value={item.endpoint}
-                      tooltip={t('Copy endpoint')}
-                      aria-label={t('Copy endpoint')}
-                    />
-                  </div>
-                  <div className='reseller-secret-row'>
-                    <KeyRound
-                      className='text-muted-foreground size-4 shrink-0'
-                      aria-hidden='true'
-                    />
-                    <code className='min-w-0 flex-1 truncate'>
-                      {revealedKey || item.key}
-                    </code>
-                    {keyAction}
-                  </div>
-                </div>
-              </article>
-            </div>
-          )
-        })}
+                </CollapsibleContent>
+              </Collapsible>
+            ))}
+          </div>
+        )}
       </CardContent>
     )
   }
 
   return (
     <>
-      <Card data-card-hover='false' className='reseller-tool-card h-full'>
+      <Card data-card-hover='false' className='reseller-tool-card'>
         <CardHeader>
           <CardTitle className='flex items-center gap-2'>
             <ShieldCheck className='text-primary size-5' aria-hidden='true' />
             {t('Reseller keys')}
           </CardTitle>
           <CardDescription aria-live='polite'>
-            {t('Issued keys: {{count}}', { count: props.keys.length })}
+            {t('Showing {{shown}} of {{total}} keys', {
+              shown: filteredKeyCount,
+              total: props.keys.length,
+            })}
           </CardDescription>
           <CardAction>
             <Button

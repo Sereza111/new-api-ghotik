@@ -104,6 +104,17 @@ export function normalizeResellerEndpoint(value: string): string | null {
   }
 }
 
+export function getResellerPortalUrl(value: string): string | null {
+  const endpoint = normalizeResellerEndpoint(value)
+  if (!endpoint) {
+    return null
+  }
+
+  const portal = new URL(endpoint)
+  portal.pathname = portal.pathname.replace(/\/v1\/?$/, '') || '/'
+  return portal.toString().replace(/\/$/, '')
+}
+
 function roundCurrency(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100
 }
