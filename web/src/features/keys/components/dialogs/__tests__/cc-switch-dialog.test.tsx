@@ -33,16 +33,24 @@ beforeEach(() => {
 
 afterEach(() => {
   queryClient.clear()
+  vi.restoreAllMocks()
 })
 
-function renderDialog(models = ['gpt-5.4', 'claude-sonnet-4-6']) {
+function renderDialog(
+  models = ['gpt-5.4', 'claude-sonnet-4-6'],
+  onOpenChange = vi.fn()
+) {
   queryClient.setQueryData(['user-models-ccswitch'], {
     success: true,
     data: models,
   })
   render(
     <QueryClientProvider client={queryClient}>
-      <CCSwitchDialog open onOpenChange={vi.fn()} tokenKey='test-only' />
+      <CCSwitchDialog
+        open
+        onOpenChange={onOpenChange}
+        tokenKey='test-only'
+      />
     </QueryClientProvider>
   )
 }
@@ -124,5 +132,24 @@ describe('CC Switch model selection', () => {
 
     expect(input).toHaveValue('Development')
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+  })
+
+  it('opens the CC Switch protocol in the current tab instead of creating a blank tab', async () => {
+    const onOpenChange = vi.fn()
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    renderDialog(undefined, onOpenChange)
+    const user = userEvent.setup()
+    const input = screen.getByRole('combobox', { name: 'Primary Model' })
+
+    await user.click(input)
+    await user.click(screen.getByRole('option', { name: 'claude-sonnet-4-6' }))
+    await user.click(screen.getByRole('button', { name: 'Open CC Switch' }))
+
+    expect(open).toHaveBeenCalledOnce()
+    expect(open).toHaveBeenCalledWith(
+      expect.stringMatching(/^ccswitch:\/\/v1\/import\?/),
+      '_self'
+    )
+    expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 })
