@@ -372,8 +372,11 @@ func RechargePlatega(providerTradeNo string, paidAmount decimal.Decimal, currenc
 			return ErrPaymentMethodMismatch
 		}
 		expectedAmount := decimal.NewFromFloat(topUp.Money).Round(2)
-		if !expectedAmount.Equal(paidAmount.Round(2)) {
-			return ErrPaymentAmountMismatch
+		// Platega may include its customer-side commission in the callback amount.
+		// The stored order amount is the minimum the merchant must receive; quota is
+		// still credited from topUp.Amount, so an overpayment never increases credit.
+		if paidAmount.Round(2).LessThan(expectedAmount) {
+			return fmt.Errorf("%w: expected at least %s RUB, got %s RUB", ErrPaymentAmountMismatch, expectedAmount, paidAmount.Round(2))
 		}
 
 		var quotaErr error

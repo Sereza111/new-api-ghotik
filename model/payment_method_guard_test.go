@@ -243,7 +243,7 @@ func TestRechargeCryptoPayValidatesAmountAndCreditsExactlyOnce(t *testing.T) {
 	assert.Equal(t, 2*500000, getUserQuotaForPaymentGuardTest(t, user.Id))
 }
 
-func TestRechargePlategaValidatesRUBAmountAndCreditsExactlyOnce(t *testing.T) {
+func TestRechargePlategaRejectsUnderpaymentAndCreditsExactlyOnce(t *testing.T) {
 	truncateTables(t)
 
 	oldQuotaPerUnit := common.QuotaPerUnit
@@ -277,7 +277,7 @@ func TestRechargePlategaValidatesRUBAmountAndCreditsExactlyOnce(t *testing.T) {
 
 	alreadyDone, err := RechargePlatega(
 		order.ProviderTradeNo,
-		decimal.NewFromInt(160),
+		decimal.NewFromFloat(165.92),
 		"RUB",
 		PaymentMethodPlategaSBP,
 		"127.0.0.1",
