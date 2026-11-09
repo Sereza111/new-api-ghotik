@@ -170,12 +170,18 @@ export async function githubOAuthStart(clientId: string, state: string) {
 }
 
 // Get OAuth state for CSRF protection
+export type OAuthLoginProof = {
+  turnstile?: string
+  legalConsent?: boolean
+}
+
 export async function createOAuthAuthorization(
   provider: string,
   intent: 'login' | 'bind' | 'verify',
   operation?: VerificationOperation,
   signal?: AbortSignal,
-  proofToken?: string
+  proofToken?: string,
+  loginProof?: OAuthLoginProof
 ): Promise<{ state: string; authorizationUrl?: string }> {
   const aff = intent === 'login' ? getAffiliateCode() : ''
   const res = await api.post(
@@ -186,6 +192,12 @@ export async function createOAuthAuthorization(
       aff: aff || undefined,
       scope: operation?.scope,
       ...(operation?.context ? { context: operation.context } : {}),
+      ...(intent === 'login'
+        ? {
+            turnstile: loginProof?.turnstile || undefined,
+            legal_consent: loginProof?.legalConsent === true,
+          }
+        : {}),
     },
     {
       skipAuthRefresh: intent === 'login',
@@ -217,15 +229,27 @@ export async function createOAuthFlow(
   provider: string,
   intent: 'login' | 'bind' | 'verify',
   operation?: VerificationOperation,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  loginProof?: OAuthLoginProof
 ): Promise<string> {
-  return (await createOAuthAuthorization(provider, intent, operation, signal))
-    .state
+  return (
+    await createOAuthAuthorization(
+      provider,
+      intent,
+      operation,
+      signal,
+      undefined,
+      loginProof
+    )
+  ).state
 }
 
 // WeChat login by authorization code
-export async function wechatLoginByCode(code: string): Promise<ApiResponse> {
-  const res = await api.get('/api/oauth/wechat', { params: { code } })
+export async function wechatLoginByCode(
+  code: string,
+  state: string
+): Promise<ApiResponse> {
+  const res = await api.get('/api/oauth/wechat', { params: { code, state } })
   return res.data
 }
 

@@ -49,7 +49,14 @@ describe('Telegram bot login', () => {
     const status = {
       telegram_oauth_configured: true,
     } as SystemStatus
-    const { result } = renderHook(() => useOAuthLogin(status))
+    const onConsumed = vi.fn()
+    const { result } = renderHook(() =>
+      useOAuthLogin(status, undefined, {
+        turnstileToken: 'turnstile-response',
+        legalConsentAccepted: true,
+        onConsumed,
+      })
+    )
 
     await act(async () => {
       await result.current.handleTelegramLogin()
@@ -57,7 +64,15 @@ describe('Telegram bot login', () => {
 
     expect(logout).toHaveBeenCalledOnce()
     expect(clearAuthentication).toHaveBeenCalledOnce()
-    expect(createOAuthAuthorization).toHaveBeenCalledWith('telegram', 'login')
+    expect(createOAuthAuthorization).toHaveBeenCalledWith(
+      'telegram',
+      'login',
+      undefined,
+      undefined,
+      undefined,
+      { turnstile: 'turnstile-response', legalConsent: true }
+    )
+    expect(onConsumed).toHaveBeenCalledOnce()
     expect(open).toHaveBeenCalledWith(
       'https://t.me/test_login_bot?start=login_flow-token',
       '_self'

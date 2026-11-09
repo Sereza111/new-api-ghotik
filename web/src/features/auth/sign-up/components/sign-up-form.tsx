@@ -38,7 +38,11 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { register, wechatLoginByCode } from '@/features/auth/api'
+import {
+  createOAuthFlow,
+  register,
+  wechatLoginByCode,
+} from '@/features/auth/api'
 import { LegalConsent } from '@/features/auth/components/legal-consent'
 import { OAuthProviders } from '@/features/auth/components/oauth-providers'
 import { registerFormSchema } from '@/features/auth/constants'
@@ -161,6 +165,12 @@ export function SignUpForm({
 
     if (!validateTurnstile()) return
 
+    const submittedTurnstileToken = turnstileToken
+    if (isTurnstileEnabled) {
+      setTurnstileToken('')
+      setTurnstileWidgetKey((current) => current + 1)
+    }
+
     setIsLoading(true)
     try {
       const res = await register({
@@ -169,7 +179,7 @@ export function SignUpForm({
         email: data.email || undefined,
         verification_code: verificationCode || undefined,
         aff_code: getAffiliateCode(),
-        turnstile: turnstileToken,
+        turnstile: submittedTurnstileToken,
       })
 
       if (res?.success) {
@@ -188,9 +198,17 @@ export function SignUpForm({
   }
 
   async function handleSendVerificationCode() {
-    if (await sendCode(emailValue || '')) {
-      setTurnstileToken('')
-      setTurnstileWidgetKey((current) => current + 1)
+    try {
+      await sendCode(emailValue || '')
+    } catch (error) {
+      handleServerError(
+        AuthOperationError.from(error, t('Failed to send verification email'))
+      )
+    } finally {
+      if (isTurnstileEnabled) {
+        setTurnstileToken('')
+        setTurnstileWidgetKey((current) => current + 1)
+      }
     }
   }
 
@@ -217,9 +235,28 @@ export function SignUpForm({
       return
     }
 
+    if (requiresLegalConsent && !agreedToLegal) {
+      toast.error(legalConsentErrorMessage)
+      return
+    }
+
+    if (!validateTurnstile()) return
+
     setIsWeChatSubmitting(true)
     try {
-      const res = await wechatLoginByCode(wechatCode)
+      let state: string
+      try {
+        state = await createOAuthFlow('wechat', 'login', undefined, undefined, {
+          turnstile: turnstileToken,
+          legalConsent: agreedToLegal,
+        })
+      } finally {
+        if (isTurnstileEnabled) {
+          setTurnstileToken('')
+          setTurnstileWidgetKey((current) => current + 1)
+        }
+      }
+      const res = await wechatLoginByCode(wechatCode, state)
       if (res?.success) {
         handleWeChatDialogChange(false)
         if (await handleLoginResult(res.data)) {
@@ -359,6 +396,7 @@ export function SignUpForm({
               key={turnstileWidgetKey}
               siteKey={turnstileSiteKey}
               onVerify={setTurnstileToken}
+              onExpire={() => setTurnstileToken('')}
             />
           </div>
         )}
@@ -390,7 +428,19 @@ export function SignUpForm({
         {oauthRegisterEnabled && (
           <OAuthProviders
             status={status}
-            disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
+            disabled={
+              isLoading ||
+              (requiresLegalConsent && !agreedToLegal) ||
+              !turnstileReady
+            }
+            turnstileToken={turnstileToken}
+            legalConsentAccepted={agreedToLegal}
+            onLoginProofConsumed={() => {
+              if (isTurnstileEnabled) {
+                setTurnstileToken('')
+                setTurnstileWidgetKey((current) => current + 1)
+              }
+            }}
             onWeChatLogin={hasWeChatLogin ? handleOpenWeChatDialog : undefined}
             isWeChatLoading={isWeChatSubmitting}
             className='pt-2'
@@ -426,7 +476,8 @@ export function SignUpForm({
                 disabled={
                   isWeChatSubmitting ||
                   !wechatCode.trim() ||
-                  (requiresLegalConsent && !agreedToLegal)
+                  (requiresLegalConsent && !agreedToLegal) ||
+                  !turnstileReady
                 }
                 className='gap-2'
               >

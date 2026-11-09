@@ -24,6 +24,8 @@ export const DEFAULT_RESELLER_ENDPOINT = 'https://pugshop.ru/v1'
 export const RESELLER_BASE_COST_PER_MILLION = 0.12
 export const RESELLER_MIN_MILLIONS = 1
 export const RESELLER_MAX_MILLIONS = 1000
+export const RESELLER_MIN_BATCH_SIZE = 1
+export const RESELLER_MAX_BATCH_SIZE = 100
 
 export const RESELLER_PACKAGE_OPTIONS = [
   {
@@ -66,6 +68,11 @@ export const resellerDraftSchema = z.object({
     .int()
     .min(RESELLER_MIN_MILLIONS)
     .max(RESELLER_MAX_MILLIONS),
+  quantity: z
+    .number()
+    .int()
+    .min(RESELLER_MIN_BATCH_SIZE)
+    .max(RESELLER_MAX_BATCH_SIZE),
   markupPercent: z
     .number()
     .refine((value) =>
@@ -144,5 +151,30 @@ export function calculateResellerQuote(
     cost,
     clientPrice,
     profit: roundCurrency(clientPrice - cost),
+  }
+}
+
+export function calculateResellerBatchQuote(
+  tokenMillions: number,
+  markupPercent: number,
+  quantity: number,
+  baseCostPerMillion = RESELLER_BASE_COST_PER_MILLION
+): ResellerQuote {
+  const unitQuote = calculateResellerQuote(
+    tokenMillions,
+    markupPercent,
+    baseCostPerMillion
+  )
+  const safeQuantity = Number.isFinite(quantity)
+    ? Math.min(
+        RESELLER_MAX_BATCH_SIZE,
+        Math.max(RESELLER_MIN_BATCH_SIZE, Math.trunc(quantity))
+      )
+    : RESELLER_MIN_BATCH_SIZE
+
+  return {
+    cost: roundCurrency(unitQuote.cost * safeQuantity),
+    clientPrice: roundCurrency(unitQuote.clientPrice * safeQuantity),
+    profit: roundCurrency(unitQuote.profit * safeQuantity),
   }
 }

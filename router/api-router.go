@@ -312,6 +312,7 @@ func SetApiRouter(router *gin.Engine) {
 			resellerRoute.GET("/keys", controller.GetResellerKeys)
 			resellerRoute.POST("/subscription", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.PurchaseResellerSubscription)
 			resellerRoute.POST("/keys", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.AddResellerKey)
+			resellerRoute.POST("/keys/batch", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.AddResellerKeyBatch)
 			resellerRoute.DELETE("/keys/:id", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.DeleteResellerKey)
 			resellerRoute.POST("/keys/:id/reissue", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.ReissueResellerKey)
 			resellerRoute.POST("/keys/:id/quota", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.AdjustResellerKeyQuota)

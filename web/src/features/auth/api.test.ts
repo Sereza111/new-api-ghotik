@@ -23,11 +23,23 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import { api, type RefreshOutcome } from '@/lib/api'
 import type { AuthBundle } from '@/stores/auth-store'
 
-import { executeLogout } from './api'
+import { executeLogout, wechatLoginByCode } from './api'
 import { useOAuthLogin } from './hooks/use-oauth-login'
 import { consumeOAuthLoginRedirect } from './lib/oauth-callback-mode'
 
 afterEach(() => vi.restoreAllMocks())
+
+test('sends the one-time registration assurance state with a WeChat code', async () => {
+  const get = vi
+    .spyOn(api, 'get')
+    .mockResolvedValue({ data: { success: true, data: {} } })
+
+  await wechatLoginByCode('wechat-code', 'wechat-state')
+
+  expect(get).toHaveBeenCalledWith('/api/oauth/wechat', {
+    params: { code: 'wechat-code', state: 'wechat-state' },
+  })
+})
 
 test.each([true, false])(
   'starts Telegram OAuth only when configuration is ready: %s',
@@ -52,10 +64,16 @@ test.each([true, false])(
     })
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
     const error = vi.spyOn(toast, 'error')
+    const onConsumed = vi.fn()
     const { result } = renderHook(() =>
       useOAuthLogin(
         { telegram_oauth: true, telegram_oauth_configured: configured },
-        '/console/personal'
+        '/console/personal',
+        {
+          turnstileToken: 'turnstile-response',
+          legalConsentAccepted: true,
+          onConsumed,
+        }
       )
     )
     await act(() => result.current.handleTelegramLogin())
@@ -66,9 +84,15 @@ test.each([true, false])(
       ])
       expect(post).toHaveBeenCalledWith(
         '/api/oauth/state',
-        expect.objectContaining({ provider: 'telegram', intent: 'login' }),
+        expect.objectContaining({
+          provider: 'telegram',
+          intent: 'login',
+          turnstile: 'turnstile-response',
+          legal_consent: true,
+        }),
         expect.anything()
       )
+      expect(onConsumed).toHaveBeenCalledOnce()
       expect(open).toHaveBeenCalledWith(
         'https://oauth.telegram.org/auth?server=pkce',
         '_self'
@@ -82,6 +106,7 @@ test.each([true, false])(
       expect(error).toHaveBeenCalledWith(
         'Telegram OAuth is not configured or enabled. Please contact your administrator.'
       )
+      expect(onConsumed).not.toHaveBeenCalled()
     }
   }
 )

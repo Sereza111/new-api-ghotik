@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { describe, expect, test } from 'vitest'
 
 import {
+  calculateResellerBatchQuote,
   calculateResellerQuote,
   getResellerPortalUrl,
   normalizeResellerEndpoint,
@@ -43,6 +44,14 @@ describe('reseller pricing', () => {
     })
   })
 
+  test('calculates total cost, client value, and profit for a batch', () => {
+    expect(calculateResellerBatchQuote(10, 80, 3, 0.08)).toEqual({
+      cost: 2.4,
+      clientPrice: 4.32,
+      profit: 1.92,
+    })
+  })
+
   test('keeps calculations inside the supported token range', () => {
     expect(calculateResellerQuote(Number.NaN, 80).cost).toBe(0.12)
     expect(calculateResellerQuote(RESELLER_MAX_MILLIONS + 1, 80).cost).toBe(120)
@@ -52,6 +61,7 @@ describe('reseller pricing', () => {
     const result = resellerDraftSchema.safeParse({
       clientLabel: 'a'.repeat(51),
       tokenMillions: 10,
+      quantity: 1,
       markupPercent: 80,
       term: 'unlimited',
       group: 'default',
@@ -64,6 +74,7 @@ describe('reseller pricing', () => {
     const result = resellerDraftSchema.safeParse({
       clientLabel: '',
       tokenMillions: 0,
+      quantity: 1,
       markupPercent: 80,
       term: 'unlimited',
       group: 'default',
@@ -71,6 +82,22 @@ describe('reseller pricing', () => {
 
     expect(result.success).toBe(false)
   })
+
+  test.each([0, 101, 1.5])(
+    'rejects an invalid batch size of %s',
+    (quantity) => {
+      const result = resellerDraftSchema.safeParse({
+        clientLabel: '',
+        tokenMillions: 10,
+        quantity,
+        markupPercent: 80,
+        term: 'unlimited',
+        group: 'default',
+      })
+
+      expect(result.success).toBe(false)
+    }
+  )
 
   test('normalizes reseller domains and rejects unsafe addresses', () => {
     expect(normalizeResellerEndpoint('pugshop.ru/')).toBe('https://pugshop.ru')

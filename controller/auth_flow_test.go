@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -344,11 +345,13 @@ func TestSecurityLoginAllPrimaryTransportsRequireAdditionalVerification(t *testi
 			}
 			newSecurityLoginPasskey(t, user.Id)
 			var response *httptest.ResponseRecorder
+			browserCookieName := ""
 			switch transport {
 			case "telegram":
 				require.NoError(t, model.DB.Model(user).Update("telegram_id", "42").Error)
 				state, code := telegram.authorization(t, "login", service.AuthIdentity{}, "", telegramIdentityClaims(42))
-				response = telegramOAuthCallback(state, code, service.AuthIdentity{})
+				browserCookieName = oauthBrowserCookieName(state)
+				response = telegram.callback(state, code, service.AuthIdentity{})
 			case "wechat":
 				require.NoError(t, model.DB.Model(user).Update("wechat_id", "bound-wechat").Error)
 				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -359,7 +362,9 @@ func TestSecurityLoginAllPrimaryTransportsRequireAdditionalVerification(t *testi
 				previousEnabled, previousAddress := common.WeChatAuthEnabled, common.WeChatServerAddress
 				common.WeChatAuthEnabled, common.WeChatServerAddress = true, upstream.URL
 				t.Cleanup(func() { common.WeChatAuthEnabled, common.WeChatServerAddress = previousEnabled, previousAddress })
-				response = securityEnrollmentRequest("GET", "/api/oauth/wechat?code=wechat-code", "", "", service.AuthIdentity{}, WeChatAuth)
+				state, cookie := createBrowserBoundOAuthLoginFlow(t, "wechat", oauthFlowPayload{})
+				browserCookieName = cookie.Name
+				response = securityEnrollmentRequest("GET", "/api/oauth/wechat?code=wechat-code&state="+state, "", "", service.AuthIdentity{}, WeChatAuth, cookie)
 			default:
 				const slug = "unified-login-test"
 				if transport == "custom oauth" {
@@ -381,12 +386,14 @@ func TestSecurityLoginAllPrimaryTransportsRequireAdditionalVerification(t *testi
 					oauth.Register(slug, &boundLoginOAuthProvider{userID: user.Id})
 				}
 				t.Cleanup(func() { oauth.Unregister(slug) })
-				token, _, err := model.CreateAuthFlow(model.AuthFlowCreate{Purpose: model.AuthFlowPurposeOAuth, Provider: slug, Intent: model.AuthFlowIntentLogin, Payload: `{}`, ExpiresAt: time.Now().Add(time.Minute)})
-				require.NoError(t, err)
+				token, cookie := createBrowserBoundOAuthLoginFlow(t, slug, oauthFlowPayload{})
+				browserCookieName = cookie.Name
 				router := gin.New()
 				router.GET("/api/oauth/:provider", HandleOAuth)
 				response = httptest.NewRecorder()
-				router.ServeHTTP(response, httptest.NewRequest("GET", "/api/oauth/"+slug+"?state="+token+"&code=provider-code", nil))
+				request := httptest.NewRequest("GET", "/api/oauth/"+slug+"?state="+token+"&code=provider-code", nil)
+				request.AddCookie(cookie)
+				router.ServeHTTP(response, request)
 			}
 			var result struct {
 				Success bool                   `json:"success"`
@@ -397,12 +404,198 @@ func TestSecurityLoginAllPrimaryTransportsRequireAdditionalVerification(t *testi
 			assert.True(t, result.Data.RequireVerification)
 			assert.Equal(t, []service.VerificationMethodOption{{Method: "passkey", Available: true}}, result.Data.Methods)
 			assert.NotEmpty(t, result.Data.FlowToken)
-			assert.Empty(t, response.Header().Values("Set-Cookie"))
+			bindingCleared := false
+			for _, cookie := range response.Result().Cookies() {
+				if cookie.Name == browserCookieName && cookie.MaxAge < 0 {
+					bindingCleared = true
+				}
+			}
+			assert.True(t, bindingCleared, "the consumed login flow must clear its browser-binding cookie")
 			count, err := model.CountActiveUserSessions(user.Id, time.Now().Unix())
 			require.NoError(t, err)
 			assert.EqualValues(t, 1, count)
 		})
 	}
+}
+
+func TestWeChatRegistrationRequiresOneTimeServerVerifiedAssurance(t *testing.T) {
+	fixture := setupTelegramOAuthTest(t)
+	previousEnabled := common.WeChatAuthEnabled
+	previousAddress := common.WeChatServerAddress
+	previousToken := common.WeChatServerToken
+	var upstreamCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		upstreamCalls.Add(1)
+		assert.Equal(t, "wechat-server-token", request.Header.Get("Authorization"))
+		subject := request.URL.Query().Get("code")
+		if strings.HasPrefix(subject, "race-wechat-") {
+			subject = "race-wechat"
+		}
+		payload, err := common.Marshal(map[string]any{
+			"success": true,
+			"data":    subject,
+		})
+		require.NoError(t, err)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(payload)
+	}))
+	t.Cleanup(func() {
+		upstream.Close()
+		common.WeChatAuthEnabled = previousEnabled
+		common.WeChatServerAddress = previousAddress
+		common.WeChatServerToken = previousToken
+	})
+	common.WeChatAuthEnabled = true
+	common.WeChatServerAddress = upstream.URL
+	common.WeChatServerToken = "wechat-server-token"
+	common.TurnstileCheckEnabled = true
+	fixture.legalConsent = true
+	system_setting.GetLegalSettings().UserAgreement = "wechat terms v1"
+	system_setting.GetLegalSettings().PrivacyPolicy = "wechat privacy"
+	browserCookies := make(map[string]*http.Cookie)
+
+	startFlow := func(turnstileToken string) string {
+		fixture.turnstileToken = turnstileToken
+		request, err := common.Marshal(oauthStateRequest{
+			Provider:     "wechat",
+			Intent:       model.AuthFlowIntentLogin,
+			Turnstile:    turnstileToken,
+			LegalConsent: true,
+		})
+		require.NoError(t, err)
+		response := securityEnrollmentRequest(http.MethodPost, "/api/oauth/state", string(request), "", service.AuthIdentity{}, GenerateOAuthCode)
+		var body securityEnrollmentResponse
+		require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
+		require.True(t, body.Success, response.Body.String())
+		var data struct {
+			FlowToken string `json:"flow_token"`
+		}
+		require.NoError(t, common.Unmarshal(body.Data, &data))
+		require.NotEmpty(t, data.FlowToken)
+		for _, cookie := range response.Result().Cookies() {
+			if cookie.Name == oauthBrowserCookieName(data.FlowToken) {
+				browserCookies[data.FlowToken] = cookie
+			}
+		}
+		require.NotNil(t, browserCookies[data.FlowToken])
+		return data.FlowToken
+	}
+	callback := func(code, state string) (*httptest.ResponseRecorder, securityEnrollmentResponse) {
+		path := "/api/oauth/wechat?code=" + code
+		if state != "" {
+			path += "&state=" + state
+		}
+		response := securityEnrollmentRequest(http.MethodGet, path, "", "", service.AuthIdentity{}, WeChatAuth, browserCookies[state])
+		var body securityEnrollmentResponse
+		require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
+		return response, body
+	}
+	assertUserCount := func(expected int64) {
+		var count int64
+		require.NoError(t, model.DB.Model(&model.User{}).Count(&count).Error)
+		assert.Equal(t, expected, count)
+	}
+
+	_, missing := callback("missing-state-wechat", "")
+	assert.False(t, missing.Success)
+	assert.Zero(t, upstreamCalls.Load())
+	assertUserCount(1)
+
+	missingCookieState := startFlow("wechat-turnstile-missing-cookie")
+	missingCookieResponse := securityEnrollmentRequest(
+		http.MethodGet,
+		"/api/oauth/wechat?code=missing-cookie-wechat&state="+missingCookieState,
+		"", "", service.AuthIdentity{}, WeChatAuth,
+	)
+	assert.Equal(t, http.StatusForbidden, missingCookieResponse.Code)
+	assert.Zero(t, upstreamCalls.Load())
+	missingCookieFlow, err := model.GetAuthFlow(missingCookieState, model.AuthFlowMatch{
+		Purpose: model.AuthFlowPurposeOAuth, Provider: "wechat", Intent: model.AuthFlowIntentLogin,
+	})
+	require.NoError(t, err)
+	assert.Nil(t, missingCookieFlow.ConsumedAt)
+
+	staleState := startFlow("wechat-turnstile-stale")
+	system_setting.GetLegalSettings().UserAgreement = "wechat terms v2"
+	_, stale := callback("stale-wechat", staleState)
+	assert.False(t, stale.Success)
+	_, err = model.GetAuthFlow(staleState, model.AuthFlowMatch{Purpose: model.AuthFlowPurposeOAuth, Provider: "wechat"})
+	assert.ErrorIs(t, err, model.ErrAuthFlowConsumed)
+	assertUserCount(1)
+
+	validState := startFlow("wechat-turnstile-valid")
+	flow, err := model.GetAuthFlow(validState, model.AuthFlowMatch{
+		Purpose: model.AuthFlowPurposeOAuth, Provider: "wechat", Intent: model.AuthFlowIntentLogin,
+	})
+	require.NoError(t, err)
+	assert.NotContains(t, flow.Payload, fixture.turnstileToken)
+	assert.Contains(t, flow.Payload, legalDocumentHash("wechat terms v2"))
+
+	_, created := callback("registered-wechat", validState)
+	require.True(t, created.Success)
+	assertUserCount(2)
+	_, err = model.GetAuthFlow(validState, model.AuthFlowMatch{Purpose: model.AuthFlowPurposeOAuth, Provider: "wechat"})
+	assert.ErrorIs(t, err, model.ErrAuthFlowConsumed)
+
+	_, replayed := callback("second-wechat", validState)
+	assert.False(t, replayed.Success)
+	assertUserCount(2)
+
+	existingState := startFlow("wechat-turnstile-existing")
+	_, existing := callback("registered-wechat", existingState)
+	require.True(t, existing.Success)
+	assertUserCount(2)
+
+	var registered model.User
+	require.NoError(t, model.DB.Where("wechat_id = ?", "registered-wechat").First(&registered).Error)
+	var registeredClaim model.ExternalIdentityClaim
+	require.NoError(t, model.DB.Where("provider = ? AND subject = ?", model.ExternalIdentityProviderWeChat, registered.WeChatId).First(&registeredClaim).Error)
+	assert.Equal(t, registered.Id, registeredClaim.UserId)
+	var audit model.AuditLog
+	require.NoError(t, model.LOG_DB.Where("user_id = ? AND action = ?", registered.Id, "user.oauth_register").First(&audit).Error)
+	auditMetadata, err := common.Marshal(audit.Other)
+	require.NoError(t, err)
+	assert.Contains(t, string(auditMetadata), legalDocumentHash("wechat privacy"))
+	assert.NotContains(t, string(auditMetadata), fixture.turnstileToken)
+
+	raceStates := []string{
+		startFlow("wechat-turnstile-race-one"),
+		startFlow("wechat-turnstile-race-two"),
+	}
+	start := make(chan struct{})
+	responses := make(chan *httptest.ResponseRecorder, len(raceStates))
+	var workers sync.WaitGroup
+	for index, raceState := range raceStates {
+		workers.Add(1)
+		go func(index int, raceState string) {
+			defer workers.Done()
+			<-start
+			responses <- securityEnrollmentRequest(
+				http.MethodGet,
+				fmt.Sprintf("/api/oauth/wechat?code=race-wechat-%d&state=%s", index, raceState),
+				"", "", service.AuthIdentity{}, WeChatAuth, browserCookies[raceState],
+			)
+		}(index, raceState)
+	}
+	close(start)
+	workers.Wait()
+	close(responses)
+	raceSuccesses := 0
+	for response := range responses {
+		var body securityEnrollmentResponse
+		require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
+		if body.Success {
+			raceSuccesses++
+		}
+	}
+	assert.GreaterOrEqual(t, raceSuccesses, 1)
+	var raceUsers []model.User
+	require.NoError(t, model.DB.Where("wechat_id = ?", "race-wechat").Find(&raceUsers).Error)
+	require.Len(t, raceUsers, 1)
+	var raceClaims []model.ExternalIdentityClaim
+	require.NoError(t, model.DB.Where("provider = ? AND subject = ?", model.ExternalIdentityProviderWeChat, "race-wechat").Find(&raceClaims).Error)
+	require.Len(t, raceClaims, 1)
+	assert.Equal(t, raceUsers[0].Id, raceClaims[0].UserId)
 }
 
 func TestSecurityLoginPasskeyCannotCompleteAnotherChallenge(t *testing.T) {
@@ -659,7 +852,14 @@ func setupAuthFlowControllerTest(t *testing.T) *authFlowTestOAuthProvider {
 	previousType := common.MainDatabaseType()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.AuthFlow{}, &model.User{}, &model.UserSession{}, &model.AuditLog{}))
+	require.NoError(t, db.AutoMigrate(
+		&model.AuthFlow{},
+		&model.User{},
+		&model.UserSession{},
+		&model.TwoFA{},
+		&model.PasskeyCredential{},
+		&model.AuditLog{},
+	))
 	model.DB, model.LOG_DB = db, db
 	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
 	provider := &authFlowTestOAuthProvider{}
@@ -671,6 +871,41 @@ func setupAuthFlowControllerTest(t *testing.T) *authFlowTestOAuthProvider {
 		common.SetMainDatabaseType(previousType)
 	})
 	return provider
+}
+
+func createBrowserBoundOAuthLoginFlow(t *testing.T, provider string, payload oauthFlowPayload) (string, *http.Cookie) {
+	t.Helper()
+	secret, err := common.GenerateRandomCharsKey(48)
+	require.NoError(t, err)
+	payload.BrowserBindingHash = oauthBrowserBindingHash(secret)
+	encoded, err := common.Marshal(payload)
+	require.NoError(t, err)
+	state, _, err := model.CreateAuthFlow(model.AuthFlowCreate{
+		Purpose:   model.AuthFlowPurposeOAuth,
+		Provider:  provider,
+		Intent:    model.AuthFlowIntentLogin,
+		Payload:   string(encoded),
+		ExpiresAt: time.Now().Add(time.Minute),
+	})
+	require.NoError(t, err)
+	return state, &http.Cookie{Name: oauthBrowserCookieName(state), Value: secret}
+}
+
+func requireOAuthBrowserBindingCleared(t *testing.T, response *httptest.ResponseRecorder) {
+	t.Helper()
+	setCookieHeaders := response.Header().Values("Set-Cookie")
+	require.Len(t, setCookieHeaders, 1)
+	assert.Contains(t, setCookieHeaders[0], "Max-Age=0")
+
+	cookies := response.Result().Cookies()
+	require.Len(t, cookies, 1)
+	cookie := cookies[0]
+	assert.True(t, strings.HasPrefix(cookie.Name, oauthBrowserCookiePrefix))
+	assert.Empty(t, cookie.Value)
+	assert.Equal(t, -1, cookie.MaxAge)
+	assert.Equal(t, oauthBrowserCookiePath, cookie.Path)
+	assert.True(t, cookie.HttpOnly)
+	assert.Equal(t, http.SameSiteLaxMode, cookie.SameSite)
 }
 
 func TestGenerateOAuthCodeCarriesAffiliateInLoginFlow(t *testing.T) {
@@ -698,8 +933,62 @@ func TestGenerateOAuthCodeCarriesAffiliateInLoginFlow(t *testing.T) {
 	var payload oauthFlowPayload
 	require.NoError(t, common.UnmarshalJsonStr(flow.Payload, &payload))
 	assert.Equal(t, "invite-code", payload.AffiliateCode)
+	require.NotEmpty(t, payload.BrowserBindingHash)
+	var browserCookie *http.Cookie
+	for _, cookie := range recorder.Result().Cookies() {
+		if cookie.Name == oauthBrowserCookieName(response.Data.FlowToken) {
+			browserCookie = cookie
+			break
+		}
+	}
+	require.NotNil(t, browserCookie)
+	assert.Equal(t, oauthBrowserCookiePath, browserCookie.Path)
+	assert.Empty(t, browserCookie.Domain)
+	assert.True(t, browserCookie.HttpOnly)
+	assert.Equal(t, common.SessionCookieSecure, browserCookie.Secure)
+	assert.Equal(t, http.SameSiteLaxMode, browserCookie.SameSite)
+	assert.Greater(t, browserCookie.MaxAge, 0)
+	assert.NotContains(t, flow.Payload, browserCookie.Value)
+	assert.Equal(t, payload.BrowserBindingHash, oauthBrowserBindingHash(browserCookie.Value))
 	assert.Zero(t, flow.UserId)
 	assert.Empty(t, flow.SessionId)
+}
+
+func TestOAuthLoginRejectsMissingOrMismatchedBrowserBindingBeforeProviderExchange(t *testing.T) {
+	provider := setupAuthFlowControllerTest(t)
+	router := gin.New()
+	router.GET("/api/oauth/:provider", HandleOAuth)
+
+	for _, test := range []struct {
+		name   string
+		cookie func(*http.Cookie) *http.Cookie
+	}{
+		{name: "missing cookie", cookie: func(*http.Cookie) *http.Cookie { return nil }},
+		{name: "mismatched cookie", cookie: func(cookie *http.Cookie) *http.Cookie {
+			return &http.Cookie{Name: cookie.Name, Value: "different-browser-secret"}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			provider.exchangeCalls = 0
+			provider.userInfoCalls = 0
+			state, expectedCookie := createBrowserBoundOAuthLoginFlow(t, "auth-flow-test", oauthFlowPayload{})
+			request := httptest.NewRequest(http.MethodGet, "/api/oauth/auth-flow-test?state="+state+"&code=test", nil)
+			if cookie := test.cookie(expectedCookie); cookie != nil {
+				request.AddCookie(cookie)
+			}
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+
+			assert.Equal(t, http.StatusForbidden, response.Code)
+			assert.Zero(t, provider.exchangeCalls)
+			assert.Zero(t, provider.userInfoCalls)
+			flow, err := model.GetAuthFlow(state, model.AuthFlowMatch{
+				Purpose: model.AuthFlowPurposeOAuth, Provider: "auth-flow-test", Intent: model.AuthFlowIntentLogin,
+			})
+			require.NoError(t, err)
+			assert.Nil(t, flow.ConsumedAt)
+		})
+	}
 }
 
 func TestGenerateOAuthCodeBindsFlowToAuthenticatedSession(t *testing.T) {
@@ -737,15 +1026,12 @@ func TestOAuthLoginConsumesFlowOnlyAfterProviderIdentity(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			provider.exchangeErr = test.exchangeErr
 			provider.userInfoErr = test.userInfoErr
-			token, _, err := model.CreateAuthFlow(model.AuthFlowCreate{
-				Purpose: model.AuthFlowPurposeOAuth, Provider: "auth-flow-test", Intent: model.AuthFlowIntentLogin,
-				Payload: `{}`, ExpiresAt: time.Now().Add(time.Minute),
-			})
-			require.NoError(t, err)
+			token, cookie := createBrowserBoundOAuthLoginFlow(t, "auth-flow-test", oauthFlowPayload{})
 
 			router := gin.New()
 			router.GET("/api/oauth/:provider", HandleOAuth)
 			request := httptest.NewRequest(http.MethodGet, "/api/oauth/auth-flow-test?state="+token+"&code=test", nil)
+			request.AddCookie(cookie)
 			response := httptest.NewRecorder()
 			router.ServeHTTP(response, request)
 
@@ -763,33 +1049,39 @@ func TestOAuthLoginConsumesFlowAfterProviderIdentityAndOnProviderError(t *testin
 
 	provider.exchangeErr = nil
 	provider.userInfoErr = nil
-	successToken, _, err := model.CreateAuthFlow(model.AuthFlowCreate{
-		Purpose: model.AuthFlowPurposeOAuth, Provider: "auth-flow-test", Intent: model.AuthFlowIntentLogin,
-		Payload: `{invalid`, ExpiresAt: time.Now().Add(time.Minute),
+	legal := system_setting.GetLegalSettings()
+	successToken, successCookie := createBrowserBoundOAuthLoginFlow(t, "auth-flow-test", oauthFlowPayload{
+		RegistrationAssurance: &oauthRegistrationAssurance{
+			LegalConsent: true, UserAgreementHash: legalDocumentHash(legal.UserAgreement), PrivacyPolicyHash: legalDocumentHash(legal.PrivacyPolicy),
+		},
 	})
-	require.NoError(t, err)
 	router := gin.New()
 	router.GET("/api/oauth/:provider", HandleOAuth)
 	request := httptest.NewRequest(http.MethodGet, "/api/oauth/auth-flow-test?state="+successToken+"&code=test", nil)
+	request.AddCookie(successCookie)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
-	_, err = model.GetAuthFlow(successToken, model.AuthFlowMatch{Purpose: model.AuthFlowPurposeOAuth})
+	_, err := model.GetAuthFlow(successToken, model.AuthFlowMatch{Purpose: model.AuthFlowPurposeOAuth})
 	assert.ErrorIs(t, err, model.ErrAuthFlowConsumed)
 	assert.Equal(t, 1, provider.exchangeCalls)
 	assert.Equal(t, 1, provider.userInfoCalls)
 
-	providerErrorToken, _, err := model.CreateAuthFlow(model.AuthFlowCreate{
-		Purpose: model.AuthFlowPurposeOAuth, Provider: "auth-flow-test", Intent: model.AuthFlowIntentLogin,
-		Payload: `{}`, ExpiresAt: time.Now().Add(time.Minute),
-	})
-	require.NoError(t, err)
+	providerErrorToken, providerErrorCookie := createBrowserBoundOAuthLoginFlow(t, "auth-flow-test", oauthFlowPayload{})
 	request = httptest.NewRequest(http.MethodGet, "/api/oauth/auth-flow-test?state="+providerErrorToken+"&error=access_denied", nil)
+	request.AddCookie(providerErrorCookie)
 	response = httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	_, err = model.GetAuthFlow(providerErrorToken, model.AuthFlowMatch{Purpose: model.AuthFlowPurposeOAuth})
 	assert.ErrorIs(t, err, model.ErrAuthFlowConsumed)
 	assert.Equal(t, 1, provider.exchangeCalls)
 	assert.Equal(t, 1, provider.userInfoCalls)
+	cleared := false
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == providerErrorCookie.Name && cookie.MaxAge < 0 {
+			cleared = true
+		}
+	}
+	assert.True(t, cleared)
 }
 
 func TestOAuthBindProviderErrorConsumesSessionBoundFlow(t *testing.T) {
@@ -858,12 +1150,19 @@ func legacyGitHubOAuthLogin(t *testing.T, provider *legacyGitHubOAuthProvider) *
 	const slug = "github-legacy-login-test"
 	oauth.Register(slug, provider)
 	t.Cleanup(func() { oauth.Unregister(slug) })
-	token, _, err := model.CreateAuthFlow(model.AuthFlowCreate{Purpose: model.AuthFlowPurposeOAuth, Provider: slug, Intent: model.AuthFlowIntentLogin, Payload: `{}`, ExpiresAt: time.Now().Add(time.Minute)})
-	require.NoError(t, err)
+	legal := system_setting.GetLegalSettings()
+	payload := oauthFlowPayload{RegistrationAssurance: &oauthRegistrationAssurance{
+		LegalConsent:      true,
+		UserAgreementHash: legalDocumentHash(legal.UserAgreement),
+		PrivacyPolicyHash: legalDocumentHash(legal.PrivacyPolicy),
+	}}
+	token, cookie := createBrowserBoundOAuthLoginFlow(t, slug, payload)
 	router := gin.New()
 	router.GET("/api/oauth/:provider", HandleOAuth)
 	response := httptest.NewRecorder()
-	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/oauth/"+slug+"?state="+token+"&code=provider-code", nil))
+	request := httptest.NewRequest(http.MethodGet, "/api/oauth/"+slug+"?state="+token+"&code=provider-code", nil)
+	request.AddCookie(cookie)
+	router.ServeHTTP(response, request)
 	return response
 }
 
@@ -980,7 +1279,7 @@ func TestOAuthLoginLegacyGitHubBindingRequiresAccountEvidence(t *testing.T) {
 				assert.Equal(t, created.Id, result.Data.User.Id)
 				return
 			}
-			assert.Empty(t, response.Header().Values("Set-Cookie"))
+			requireOAuthBrowserBindingCleared(t, response)
 			if test.expectAuditParams != "" {
 				assert.Equal(t, declined, result.Message)
 			}
@@ -1006,7 +1305,7 @@ func TestOAuthLoginLegacyGitHubBindingMigratesAfterLoginVerification(t *testing.
 			require.True(t, challenge.Success, response.Body.String())
 			require.True(t, challenge.Data.RequireVerification)
 			assert.Equal(t, []service.VerificationMethodOption{{Method: "2fa", Available: true}}, challenge.Data.Methods)
-			assert.Empty(t, response.Header().Values("Set-Cookie"))
+			requireOAuthBrowserBindingCleared(t, response)
 			assert.Zero(t, provider.verifiedEmailCalls, "a second factor is checked before the provider emails")
 			var reloaded model.User
 			require.NoError(t, model.DB.First(&reloaded, existing.Id).Error)

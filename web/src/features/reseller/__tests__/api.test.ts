@@ -20,6 +20,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import {
   adjustResellerKeyQuota,
+  createResellerKeyBatch,
   createResellerKey,
   deleteResellerKey,
   getResellerConfig,
@@ -28,7 +29,11 @@ import {
   reissueResellerKey,
   revealResellerKey,
 } from '../api'
-import type { CreateResellerKeyRequest, ResellerKey } from '../types'
+import type {
+  CreateResellerKeyBatchRequest,
+  CreateResellerKeyRequest,
+  ResellerKey,
+} from '../types'
 
 const apiMock = vi.hoisted(() => ({
   delete: vi.fn(),
@@ -144,6 +149,41 @@ describe('reseller API', () => {
       '/api/reseller/keys',
       request,
       requestConfig
+    )
+  })
+
+  test('creates an exact reseller key batch with one request', async () => {
+    const request: CreateResellerKeyBatchRequest = {
+      client_label: 'FunPay',
+      group: 'GPT',
+      token_millions: 25,
+      quantity: 3,
+      markup_percent: 80,
+      term: '30-days',
+      request_id: 'api-test-batch-1',
+    }
+    const batch = Array.from({ length: 3 }, (_, index) => ({
+      ...resellerKey,
+      id: resellerKey.id + index,
+      client_label: `FunPay #${index + 1}`,
+      key: `sk-batch-${index + 1}`,
+    }))
+    apiMock.post.mockResolvedValue({
+      data: { success: true, data: batch },
+    })
+
+    await expect(createResellerKeyBatch(request)).resolves.toEqual(batch)
+    expect(apiMock.post).toHaveBeenCalledWith(
+      '/api/reseller/keys/batch',
+      request,
+      requestConfig
+    )
+
+    apiMock.post.mockResolvedValue({
+      data: { success: true, data: batch.slice(0, 2) },
+    })
+    await expect(createResellerKeyBatch(request)).rejects.toThrow(
+      'Failed to issue reseller key batch'
     )
   })
 

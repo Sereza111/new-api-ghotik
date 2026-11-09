@@ -36,7 +36,7 @@ var (
 	ErrResellerSubscriptionAlreadyActive      = errors.New("reseller subscription is already active")
 	ErrResellerSubscriptionRequired           = errors.New("an active reseller subscription is required")
 	ErrResellerSubscriptionWalletInsufficient = errors.New("insufficient balance to purchase reseller subscription")
-	ErrResellerTokenLimitReached              = errors.New("maximum API key limit reached")
+	ErrResellerTokenLimitReached              = ErrTokenLimitReached
 )
 
 // ResellerSubscription is an entitlement ledger, not an API quota plan.

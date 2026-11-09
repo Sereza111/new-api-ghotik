@@ -40,7 +40,9 @@ import {
 
 import {
   RESELLER_MARKUP_OPTIONS,
+  RESELLER_MAX_BATCH_SIZE,
   RESELLER_MAX_MILLIONS,
+  RESELLER_MIN_BATCH_SIZE,
   RESELLER_MIN_MILLIONS,
 } from '../lib/pricing'
 import type { ResellerDraftValues, ResellerQuote } from '../types'
@@ -66,11 +68,21 @@ export function ResellerConfigurator(props: ResellerConfiguratorProps) {
   const { t } = useTranslation()
   const errors = props.form.formState.errors
   const markupPercent = props.form.watch('markupPercent')
+  const quantity = props.form.watch('quantity')
+  const displayQuantity = Number.isFinite(quantity)
+    ? quantity
+    : RESELLER_MIN_BATCH_SIZE
   let issueIcon = <KeyRound data-icon='inline-start' aria-hidden='true' />
-  let issueLabel = t('Issue reseller key')
+  let issueLabel =
+    displayQuantity === 1
+      ? t('Issue reseller key')
+      : t('Issue {{count}} keys', { count: displayQuantity })
   if (props.isSubmitting) {
     issueIcon = <Spinner data-icon='inline-start' aria-hidden='true' />
-    issueLabel = t('Issuing key...')
+    issueLabel =
+      displayQuantity === 1
+        ? t('Issuing key...')
+        : t('Issuing {{count}} keys...', { count: displayQuantity })
   } else if (!props.canIssue) {
     issueIcon = <LockKeyhole data-icon='inline-start' aria-hidden='true' />
     issueLabel = t('Subscription required')
@@ -95,7 +107,7 @@ export function ResellerConfigurator(props: ResellerConfiguratorProps) {
 
         <fieldset className='contents' disabled={props.isSubmitting}>
           <CardContent className='mt-4 flex flex-col gap-5'>
-            <div className='grid gap-4 sm:grid-cols-2'>
+            <div className='grid gap-4 sm:grid-cols-3'>
               <div className='flex flex-col gap-2'>
                 <label
                   htmlFor='reseller-client-label'
@@ -145,6 +157,36 @@ export function ResellerConfigurator(props: ResellerConfiguratorProps) {
                     {t('Enter between 1 and 1000 million tokens.')}
                   </p>
                 ) : null}
+              </div>
+
+              <div className='flex flex-col gap-2'>
+                <label
+                  htmlFor='reseller-key-quantity'
+                  className='text-sm font-medium'
+                >
+                  {t('Number of keys')}
+                </label>
+                <Input
+                  id='reseller-key-quantity'
+                  type='number'
+                  min={RESELLER_MIN_BATCH_SIZE}
+                  max={RESELLER_MAX_BATCH_SIZE}
+                  step={1}
+                  className='tabular-nums'
+                  aria-invalid={Boolean(errors.quantity)}
+                  {...props.form.register('quantity', {
+                    valueAsNumber: true,
+                  })}
+                />
+                {errors.quantity ? (
+                  <p className='text-destructive text-xs'>
+                    {t('Enter between 1 and 100 keys.')}
+                  </p>
+                ) : (
+                  <p className='text-muted-foreground text-xs leading-5'>
+                    {t('All keys use the same package and group.')}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -239,15 +281,15 @@ export function ResellerConfigurator(props: ResellerConfiguratorProps) {
 
             <dl className='reseller-quote-grid grid overflow-hidden sm:grid-cols-3'>
               <div>
-                <dt>{t('Cost')}</dt>
+                <dt>{t('Total cost')}</dt>
                 <dd>{props.formatMoney(props.quote.cost)}</dd>
               </div>
               <div>
-                <dt>{t('Client price')}</dt>
+                <dt>{t('Total client value')}</dt>
                 <dd>{props.formatMoney(props.quote.clientPrice)}</dd>
               </div>
               <div>
-                <dt>{t('Profit')}</dt>
+                <dt>{t('Total profit')}</dt>
                 <dd>{props.formatMoney(props.quote.profit)}</dd>
               </div>
             </dl>

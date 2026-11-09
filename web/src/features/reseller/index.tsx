@@ -51,12 +51,13 @@ import { useAuthStore, type AuthUser } from '@/stores/auth-store'
 
 import { GothicResellerCards } from './components/gothic-reseller-cards'
 import { ResellerAnalytics } from './components/reseller-analytics'
+import { ResellerBatchResultDialog } from './components/reseller-batch-result-dialog'
 import { ResellerConfigurator } from './components/reseller-configurator'
 import { ResellerKeyVault } from './components/reseller-key-vault'
 import { ResellerSubscriptionBand } from './components/reseller-subscription-band'
 import {
   useAdjustResellerKeyQuota,
-  useCreateResellerKey,
+  useCreateResellerKeyBatch,
   useDeleteResellerKey,
   usePurchaseResellerSubscription,
   useReissueResellerKey,
@@ -65,7 +66,7 @@ import {
   useRevealResellerKey,
 } from './hooks/use-reseller'
 import {
-  calculateResellerQuote,
+  calculateResellerBatchQuote,
   DEFAULT_RESELLER_ENDPOINT,
   getResellerPortalUrl,
   RESELLER_BASE_COST_PER_MILLION,
@@ -73,6 +74,7 @@ import {
 } from './lib/pricing'
 import type {
   ResellerDraftValues,
+  ResellerKey,
   ResellerQuotaAdjustmentRequest,
 } from './types'
 
@@ -80,6 +82,7 @@ const DEFAULT_DRAFT: ResellerDraftValues = {
   clientLabel: '',
   group: '',
   tokenMillions: 10,
+  quantity: 1,
   markupPercent: 80,
   term: 'unlimited',
 }
@@ -97,7 +100,7 @@ export function Reseller() {
   const setUser = useAuthStore((state) => state.auth.setUser)
   const configQuery = useResellerConfig()
   const keysQuery = useResellerKeys()
-  const createKeyMutation = useCreateResellerKey()
+  const createKeyBatchMutation = useCreateResellerKeyBatch()
   const purchaseSubscriptionMutation = usePurchaseResellerSubscription()
   const deleteKeyMutation = useDeleteResellerKey()
   const reissueKeyMutation = useReissueResellerKey()
@@ -110,6 +113,7 @@ export function Reseller() {
   } | null>(null)
   const pendingSubscriptionRequest = useRef<string | null>(null)
   const [revealedKeys, setRevealedKeys] = useState<Record<number, string>>({})
+  const [issuedBatch, setIssuedBatch] = useState<ResellerKey[] | null>(null)
   const [subscriptionClock, setSubscriptionClock] = useState(() => Date.now())
   const form = useForm<ResellerDraftValues>({
     resolver: zodResolver(resellerDraftSchema),
@@ -122,6 +126,10 @@ export function Reseller() {
   const markupPercent = useWatch({
     control: form.control,
     name: 'markupPercent',
+  })
+  const quantity = useWatch({
+    control: form.control,
+    name: 'quantity',
   })
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const moneyFormatter = useMemo(
@@ -179,9 +187,10 @@ export function Reseller() {
   const adjustingKeyId = adjustQuotaMutation.isPending
     ? (adjustQuotaMutation.variables?.id ?? null)
     : null
-  const quote = calculateResellerQuote(
+  const quote = calculateResellerBatchQuote(
     tokenMillions,
     markupPercent,
+    quantity,
     baseCostPerMillion
   )
 
@@ -227,12 +236,15 @@ export function Reseller() {
     const keyNumber = (keysQuery.data?.length ?? 0) + 1
     const clientLabel =
       values.clientLabel.trim() ||
-      t('Client key {{number}}', { number: keyNumber })
+      (values.quantity === 1
+        ? t('Client key {{number}}', { number: keyNumber })
+        : t('Client batch {{number}}', { number: keyNumber }))
 
     const requestPayload = {
       client_label: clientLabel,
       group: values.group,
       token_millions: values.tokenMillions,
+      quantity: values.quantity,
       markup_percent: values.markupPercent,
       term: values.term,
     }
@@ -247,24 +259,33 @@ export function Reseller() {
     }
 
     try {
-      const createdKey = await createKeyMutation.mutateAsync({
+      const createdKeys = await createKeyBatchMutation.mutateAsync({
         ...requestPayload,
         request_id: issueRequest.id,
       })
 
       pendingIssueRequest.current = null
-      setRevealedKeys((current) => ({
-        ...current,
-        [createdKey.id]: createdKey.key,
-      }))
+      setRevealedKeys((current) => {
+        const next = { ...current }
+        for (const createdKey of createdKeys) {
+          next[createdKey.id] = createdKey.key
+        }
+        return next
+      })
+      setIssuedBatch(createdKeys)
+      createKeyBatchMutation.reset()
       form.reset({ ...values, clientLabel: '' })
       void refreshAuthenticatedUser()
-      toast.success(t('Reseller key issued'))
+      toast.success(
+        values.quantity === 1
+          ? t('Reseller key issued')
+          : t('{{count}} reseller keys issued', { count: values.quantity })
+      )
     } catch (error) {
       toast.error(
         error instanceof Error
           ? t(error.message)
-          : t('Failed to issue reseller key')
+          : t('Failed to issue reseller key batch')
       )
     }
   }
@@ -449,7 +470,7 @@ export function Reseller() {
         quote={quote}
         formatMoney={formatMoney}
         onSubmit={handleIssueKey}
-        isSubmitting={createKeyMutation.isPending}
+        isSubmitting={createKeyBatchMutation.isPending}
         groupOptions={groupOptions}
         canIssue={canIssue}
       />
@@ -630,6 +651,12 @@ export function Reseller() {
             </div>
           </div>
         </div>
+        {issuedBatch ? (
+          <ResellerBatchResultDialog
+            keys={issuedBatch}
+            onClose={() => setIssuedBatch(null)}
+          />
+        ) : null}
       </SectionPageLayout.Content>
     </SectionPageLayout>
   )

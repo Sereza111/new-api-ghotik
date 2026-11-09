@@ -20,6 +20,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
   adjustResellerKeyQuota,
+  createResellerKeyBatch,
   createResellerKey,
   deleteResellerKey,
   getResellerConfig,
@@ -29,6 +30,7 @@ import {
   revealResellerKey,
 } from '../api'
 import type {
+  CreateResellerKeyBatchRequest,
   CreateResellerKeyRequest,
   PurchaseResellerSubscriptionRequest,
   ResellerConfig,
@@ -63,15 +65,19 @@ export function useCreateResellerKey() {
   return useMutation({
     mutationFn: (request: CreateResellerKeyRequest) =>
       createResellerKey(request),
-    onSuccess: (createdKey) => {
-      queryClient.setQueryData<ResellerKey[]>(
-        resellerQueryKeys.keys,
-        (currentKeys) => [
-          createdKey,
-          ...(currentKeys ?? []).filter((item) => item.id !== createdKey.id),
-        ]
-      )
-    },
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: resellerQueryKeys.keys }),
+  })
+}
+
+export function useCreateResellerKeyBatch() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (request: CreateResellerKeyBatchRequest) =>
+      createResellerKeyBatch(request),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: resellerQueryKeys.keys }),
   })
 }
 

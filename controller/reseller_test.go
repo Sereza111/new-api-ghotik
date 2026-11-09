@@ -121,6 +121,125 @@ func TestAddResellerKeyCreatesUsableToken(t *testing.T) {
 	assert.Equal(t, 7_000_000, owner.Quota)
 }
 
+func TestAddResellerKeyBatchCreatesNumberedKeys(t *testing.T) {
+	db := setupResellerControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.User{}))
+	originalSettings := operation_setting.GetResellerSetting()
+	t.Cleanup(func() { operation_setting.SetResellerSetting(originalSettings) })
+	originalGroups := setting.UserUsableGroups2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(originalGroups))
+	})
+	previousQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 500_000
+	t.Cleanup(func() { common.QuotaPerUnit = previousQuotaPerUnit })
+	require.NoError(t, db.Create(&model.User{
+		Id:       70,
+		Username: "batch-reseller-owner",
+		Status:   common.UserStatusEnabled,
+		Quota:    5_000_000,
+	}).Error)
+	seedActiveResellerSubscription(t, db, 70)
+	request := map[string]any{
+		"client_label":   "FunPay",
+		"token_millions": 10,
+		"markup_percent": 80,
+		"term":           "30-days",
+		"endpoint":       "https://pugshop.ru/v1",
+		"request_id":     "controller-batch-create-1",
+		"group":          "default",
+		"quantity":       3,
+	}
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/reseller/keys/batch", request, 70)
+	ctx.Set("group", "default")
+
+	AddResellerKeyBatch(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+	var created []resellerKeyResponse
+	require.NoError(t, common.Unmarshal(response.Data, &created))
+	require.Len(t, created, 3)
+	seenKeys := make(map[string]struct{}, len(created))
+	for index, item := range created {
+		assert.Equal(t, "FunPay #"+strconv.Itoa(index+1), item.ClientLabel)
+		assert.Equal(t, 10, item.TokenMillions)
+		assert.Equal(t, 10_000_000, item.RemainingTokens)
+		assert.Equal(t, 1.2, item.Cost)
+		assert.Equal(t, 2.16, item.ClientPrice)
+		assert.True(t, strings.HasPrefix(item.Key, "sk-rsl_"))
+		seenKeys[item.Key] = struct{}{}
+	}
+	assert.Len(t, seenKeys, 3)
+
+	var tokenCount int64
+	require.NoError(t, db.Model(&model.Token{}).Where("user_id = ?", 70).Count(&tokenCount).Error)
+	assert.EqualValues(t, 3, tokenCount)
+	var metadataCount int64
+	require.NoError(t, db.Model(&model.ResellerKey{}).Where("user_id = ?", 70).Count(&metadataCount).Error)
+	assert.EqualValues(t, 3, metadataCount)
+	var owner model.User
+	require.NoError(t, db.First(&owner, 70).Error)
+	assert.Equal(t, 3_200_000, owner.Quota)
+
+	changedSettings := originalSettings
+	changedSettings.Endpoint = "https://changed-reseller.example/v1"
+	operation_setting.SetResellerSetting(changedSettings)
+	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{}`))
+	replayContext, replayRecorder := newAuthenticatedContext(t, http.MethodPost, "/api/reseller/keys/batch", request, 70)
+	replayContext.Set("group", "default")
+	AddResellerKeyBatch(replayContext)
+	replayResponse := decodeAPIResponse(t, replayRecorder)
+	require.True(t, replayResponse.Success, replayResponse.Message)
+	var replay []resellerKeyResponse
+	require.NoError(t, common.Unmarshal(replayResponse.Data, &replay))
+	require.Len(t, replay, len(created))
+	for index := range replay {
+		assert.Equal(t, created[index].Id, replay[index].Id)
+		assert.Equal(t, created[index].Key, replay[index].Key)
+	}
+
+	conflictingRequest := make(map[string]any, len(request))
+	for key, value := range request {
+		conflictingRequest[key] = value
+	}
+	conflictingRequest["token_millions"] = 11
+	conflictContext, conflictRecorder := newAuthenticatedContext(t, http.MethodPost, "/api/reseller/keys/batch", conflictingRequest, 70)
+	conflictContext.Set("group", "default")
+	AddResellerKeyBatch(conflictContext)
+	assert.Equal(t, http.StatusConflict, conflictRecorder.Code)
+	conflictResponse := decodeAPIResponse(t, conflictRecorder)
+	assert.False(t, conflictResponse.Success)
+	assert.Contains(t, conflictResponse.Message, "conflicts with an existing issuance")
+
+	require.NoError(t, db.First(&owner, 70).Error)
+	assert.Equal(t, 3_200_000, owner.Quota, "replay and conflict must not debit the wallet")
+	require.NoError(t, db.Model(&model.Token{}).Where("user_id = ?", 70).Count(&tokenCount).Error)
+	assert.EqualValues(t, 3, tokenCount)
+}
+
+func TestAddResellerKeyBatchValidatesQuantity(t *testing.T) {
+	for _, quantity := range []int{0, model.MaxResellerBatchSize + 1} {
+		t.Run(strconv.Itoa(quantity), func(t *testing.T) {
+			ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/reseller/keys/batch", map[string]any{
+				"client_label":   "FunPay",
+				"token_millions": 10,
+				"markup_percent": 80,
+				"term":           "30-days",
+				"request_id":     "controller-batch-invalid-" + strconv.Itoa(quantity),
+				"group":          "default",
+				"quantity":       quantity,
+			}, 70)
+
+			AddResellerKeyBatch(ctx)
+
+			response := decodeAPIResponse(t, recorder)
+			assert.False(t, response.Success)
+			assert.Contains(t, response.Message, "batch quantity must be between 1 and 100")
+		})
+	}
+}
+
 func TestAddResellerKeyRejectsInsufficientWalletBalance(t *testing.T) {
 	db := setupResellerControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.User{}))

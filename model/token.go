@@ -18,6 +18,8 @@ const (
 	TokenQuotaModeTokens = "tokens"
 )
 
+var ErrTokenLimitReached = errors.New("maximum API key limit reached")
+
 type Token struct {
 	Id                 int            `json:"id"`
 	UserId             int            `json:"user_id" gorm:"index"`
@@ -355,7 +357,7 @@ func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 	return token, nil
 }
 
-func (token *Token) Insert() error {
+func normalizeTokenForInsert(token *Token) error {
 	mode, ok := NormalizeTokenQuotaMode(token.QuotaMode)
 	if !ok {
 		return errors.New("invalid token quota mode")
@@ -364,7 +366,39 @@ func (token *Token) Insert() error {
 		mode = TokenQuotaModeTokens
 	}
 	token.QuotaMode = mode
+	return nil
+}
+
+func (token *Token) Insert() error {
+	if err := normalizeTokenForInsert(token); err != nil {
+		return err
+	}
 	return DB.Create(token).Error
+}
+
+// InsertWithLimit serializes ordinary token creation with reseller batch
+// issuance on the owning user row so both paths enforce one shared limit.
+func (token *Token) InsertWithLimit(maxTokens int) error {
+	if err := normalizeTokenForInsert(token); err != nil {
+		return err
+	}
+	if token.UserId <= 0 || maxTokens <= 0 {
+		return ErrTokenLimitReached
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var owner User
+		if err := lockForUpdate(tx).Select("id").Where("id = ?", token.UserId).First(&owner).Error; err != nil {
+			return err
+		}
+		var tokenCount int64
+		if err := tx.Model(&Token{}).Where("user_id = ?", token.UserId).Count(&tokenCount).Error; err != nil {
+			return err
+		}
+		if tokenCount >= int64(maxTokens) {
+			return ErrTokenLimitReached
+		}
+		return tx.Create(token).Error
+	})
 }
 
 // Update Make sure your token's fields is completed, because this will update non-zero values

@@ -54,6 +54,19 @@ type resellerKeyRequest struct {
 	Group         string `json:"group"`
 }
 
+type resellerKeyBatchRequest struct {
+	resellerKeyRequest
+	Quantity int `json:"quantity"`
+}
+
+type resellerKeyIssuePlan struct {
+	request     resellerKeyRequest
+	requestID   string
+	tokens      []model.Token
+	metadata    []model.ResellerKey
+	walletQuota int
+}
+
 type resellerKeyResponse struct {
 	Id                 int     `json:"id"`
 	ClientLabel        string  `json:"client_label"`
@@ -416,108 +429,22 @@ func AddResellerKey(c *gin.Context) {
 	userID := c.GetInt("id")
 	existingRecord, err := model.GetResellerKeyByRequestID(userID, requestID)
 	if err != nil {
-		common.ApiError(c, err)
+		writeResellerIssueError(c, err)
 		return
 	}
 	if existingRecord != nil {
 		common.ApiSuccess(c, buildResellerKeyResponse(&existingRecord.Token, &existingRecord.Metadata, true))
 		return
 	}
-
-	request.ClientLabel = strings.TrimSpace(request.ClientLabel)
-	if utf8.RuneCountInString(request.ClientLabel) > 50 {
-		resellerBadRequest(c, "client label cannot exceed 50 characters")
-		return
-	}
-	if request.TokenMillions < resellerMinTokenMillions || request.TokenMillions > resellerMaxTokenMillions {
-		resellerBadRequest(c, "token amount must be between 1 and 1000 million")
-		return
-	}
-	if !isResellerMarkupAllowed(request.MarkupPercent) {
-		resellerBadRequest(c, "invalid reseller markup")
-		return
-	}
-	request.Group = strings.TrimSpace(request.Group)
-	userGroup, err := getTokenRequestUserGroup(c)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	if !isResellerGroupAvailable(userGroup, request.Group) {
-		resellerBadRequest(c, "a concrete available routing group is required")
-		return
-	}
-
-	now := common.GetTimestamp()
-	expiredTime, ok := resellerExpiration(request.Term, now)
+	plan, ok := prepareResellerKeyIssue(c, request, requestID, 1)
 	if !ok {
-		resellerBadRequest(c, "invalid reseller key duration")
 		return
 	}
-	settings := operation_setting.GetResellerSetting()
-	baseCostPerMillion := decimal.NewFromFloat(settings.BaseCostPerMillion).Round(2)
-	purchaseCost := decimal.NewFromInt(int64(request.TokenMillions)).Mul(baseCostPerMillion).Round(2)
-	walletQuota, err := common.WalletQuotaFromDecimalStrict(purchaseCost.Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
-	if err != nil || walletQuota <= 0 {
-		if err == nil {
-			err = fmt.Errorf("reseller package cost is too small")
-		}
-		common.ApiError(c, err)
-		return
-	}
-	endpoint := strings.TrimRight(settings.Endpoint, "/")
-	if requestedEndpoint := strings.TrimRight(strings.TrimSpace(request.Endpoint), "/"); requestedEndpoint != "" && requestedEndpoint != endpoint {
-		resellerBadRequest(c, "reseller endpoint is managed by the administrator")
-		return
-	}
-
-	count, err := model.CountUserTokens(userID)
+	_, record, err := model.CreatePrepaidResellerTokenWithRequestID(
+		&plan.tokens[0], &plan.metadata[0], plan.walletQuota, plan.requestID,
+	)
 	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-
-	key, err := model.NewResellerTokenKey()
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	clientLabel := request.ClientLabel
-	if clientLabel == "" {
-		clientLabel = fmt.Sprintf("Reseller key %d", count+1)
-	}
-	token := model.Token{
-		UserId:         userID,
-		Key:            key,
-		Status:         common.TokenStatusEnabled,
-		Name:           clientLabel,
-		CreatedTime:    now,
-		AccessedTime:   now,
-		ExpiredTime:    expiredTime,
-		RemainQuota:    request.TokenMillions * 1_000_000,
-		UnlimitedQuota: false,
-		QuotaMode:      model.TokenQuotaModeTokens,
-		AllowIps:       common.GetPointer(""),
-		Group:          request.Group,
-	}
-	metadata := model.ResellerKey{
-		UserId:             token.UserId,
-		TokenMillions:      request.TokenMillions,
-		MarkupPercent:      request.MarkupPercent,
-		BaseCostPerMillion: baseCostPerMillion.StringFixed(2),
-		Endpoint:           endpoint,
-		CreatedTime:        now,
-	}
-	_, record, err := model.CreatePrepaidResellerTokenWithRequestID(&token, &metadata, walletQuota, requestID)
-	if err != nil {
-		switch {
-		case errors.Is(err, model.ErrResellerSubscriptionRequired):
-			resellerStatusError(c, http.StatusForbidden, err.Error())
-		case errors.Is(err, model.ErrResellerTokenLimitReached):
-			resellerBadRequest(c, "Maximum API key limit reached")
-		default:
-			common.ApiError(c, err)
-		}
+		writeResellerIssueError(c, err)
 		return
 	}
 	if record == nil {
@@ -526,8 +453,211 @@ func AddResellerKey(c *gin.Context) {
 	}
 	// A repeated request_id returns the original record without another debit;
 	// expose the raw secret only through this authenticated POST replay.
-	response := buildResellerKeyResponse(&record.Token, &record.Metadata, true)
-	common.ApiSuccess(c, response)
+	common.ApiSuccess(c, buildResellerKeyResponse(&record.Token, &record.Metadata, true))
+}
+
+func AddResellerKeyBatch(c *gin.Context) {
+	request := resellerKeyBatchRequest{}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		resellerBadRequest(c, "invalid reseller key batch request")
+		return
+	}
+	if request.Quantity < 1 || request.Quantity > model.MaxResellerBatchSize {
+		resellerBadRequest(c, "batch quantity must be between 1 and 100")
+		return
+	}
+	requestID, ok := normalizeResellerRequestID(c, request.RequestId)
+	if !ok {
+		resellerBadRequest(c, "request_id is required and must be a printable value of at most 128 characters")
+		return
+	}
+	request.ClientLabel = strings.TrimSpace(request.ClientLabel)
+	request.Group = strings.TrimSpace(request.Group)
+	request.Endpoint = strings.TrimRight(strings.TrimSpace(request.Endpoint), "/")
+	request.Term = strings.TrimSpace(request.Term)
+	payload, err := common.Marshal(struct {
+		ClientLabel   string `json:"client_label"`
+		TokenMillions int    `json:"token_millions"`
+		MarkupPercent int    `json:"markup_percent"`
+		Term          string `json:"term"`
+		Endpoint      string `json:"endpoint"`
+		Group         string `json:"group"`
+		Quantity      int    `json:"quantity"`
+	}{
+		ClientLabel: request.ClientLabel, TokenMillions: request.TokenMillions,
+		MarkupPercent: request.MarkupPercent, Term: request.Term, Endpoint: request.Endpoint,
+		Group: request.Group, Quantity: request.Quantity,
+	})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	userID := c.GetInt("id")
+	if userID <= 0 {
+		common.ApiErrorMsg(c, "invalid reseller account")
+		return
+	}
+	existing, err := model.GetResellerKeyBatchByRequestID(userID, requestID, string(payload), request.Quantity)
+	if err != nil {
+		writeResellerIssueError(c, err)
+		return
+	}
+	if len(existing) > 0 {
+		responses := make([]resellerKeyResponse, 0, len(existing))
+		for index := range existing {
+			responses = append(responses, buildResellerKeyResponse(&existing[index].Token, &existing[index].Metadata, true))
+		}
+		common.ApiSuccess(c, responses)
+		return
+	}
+	plan, ok := prepareResellerKeyIssue(c, request.resellerKeyRequest, requestID, request.Quantity)
+	if !ok {
+		return
+	}
+	created, records, err := model.CreatePrepaidResellerTokenBatchWithRequestID(
+		plan.tokens, plan.metadata, plan.walletQuota, plan.requestID, string(payload),
+	)
+	if err != nil {
+		writeResellerIssueError(c, err)
+		return
+	}
+	if len(records) == 0 {
+		common.ApiErrorMsg(c, "insufficient balance to issue reseller key batch")
+		return
+	}
+	responses := make([]resellerKeyResponse, 0, len(records))
+	for index := range records {
+		responses = append(responses, buildResellerKeyResponse(&records[index].Token, &records[index].Metadata, true))
+	}
+	if created {
+		model.RecordLog(c.GetInt("id"), model.LogTypeManage, common.NewMessage(
+			"Issued {{count}} reseller keys with {{tokens}} million tokens each",
+			map[string]any{"count": strconv.Itoa(len(records)), "tokens": strconv.Itoa(plan.request.TokenMillions)}))
+	}
+	common.ApiSuccess(c, responses)
+}
+
+func prepareResellerKeyIssue(c *gin.Context, request resellerKeyRequest, requestID string, quantity int) (*resellerKeyIssuePlan, bool) {
+	userID := c.GetInt("id")
+	if userID <= 0 {
+		common.ApiErrorMsg(c, "invalid reseller account")
+		return nil, false
+	}
+	request.ClientLabel = strings.TrimSpace(request.ClientLabel)
+	if utf8.RuneCountInString(request.ClientLabel) > 50 {
+		resellerBadRequest(c, "client label cannot exceed 50 characters")
+		return nil, false
+	}
+	if request.TokenMillions < resellerMinTokenMillions || request.TokenMillions > resellerMaxTokenMillions {
+		resellerBadRequest(c, "token amount must be between 1 and 1000 million")
+		return nil, false
+	}
+	if !isResellerMarkupAllowed(request.MarkupPercent) {
+		resellerBadRequest(c, "invalid reseller markup")
+		return nil, false
+	}
+	request.Group = strings.TrimSpace(request.Group)
+	userGroup, err := getTokenRequestUserGroup(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return nil, false
+	}
+	if !isResellerGroupAvailable(userGroup, request.Group) {
+		resellerBadRequest(c, "a concrete available routing group is required")
+		return nil, false
+	}
+
+	now := common.GetTimestamp()
+	expiredTime, ok := resellerExpiration(request.Term, now)
+	if !ok {
+		resellerBadRequest(c, "invalid reseller key duration")
+		return nil, false
+	}
+	settings := operation_setting.GetResellerSetting()
+	baseCostPerMillion := decimal.NewFromFloat(settings.BaseCostPerMillion).Round(2)
+	purchaseCost := decimal.NewFromInt(int64(request.TokenMillions)).Mul(baseCostPerMillion).Round(2)
+	totalPurchaseCost := purchaseCost.Mul(decimal.NewFromInt(int64(quantity)))
+	walletQuota, err := common.WalletQuotaFromDecimalStrict(totalPurchaseCost.Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
+	if err != nil || walletQuota <= 0 {
+		if err == nil {
+			err = fmt.Errorf("reseller package cost is too small")
+		}
+		common.ApiError(c, err)
+		return nil, false
+	}
+	endpoint := strings.TrimRight(settings.Endpoint, "/")
+	if requestedEndpoint := strings.TrimRight(strings.TrimSpace(request.Endpoint), "/"); requestedEndpoint != "" && requestedEndpoint != endpoint {
+		resellerBadRequest(c, "reseller endpoint is managed by the administrator")
+		return nil, false
+	}
+
+	tokens := make([]model.Token, 0, quantity)
+	metadata := make([]model.ResellerKey, 0, quantity)
+	for index := 0; index < quantity; index++ {
+		key, keyErr := model.NewResellerTokenKey()
+		if keyErr != nil {
+			common.ApiError(c, keyErr)
+			return nil, false
+		}
+		clientLabel := resellerBatchClientLabel(request.ClientLabel, index+1, quantity)
+		token := model.Token{
+			UserId:         userID,
+			Key:            key,
+			Status:         common.TokenStatusEnabled,
+			Name:           clientLabel,
+			CreatedTime:    now,
+			AccessedTime:   now,
+			ExpiredTime:    expiredTime,
+			RemainQuota:    request.TokenMillions * 1_000_000,
+			UnlimitedQuota: false,
+			QuotaMode:      model.TokenQuotaModeTokens,
+			AllowIps:       common.GetPointer(""),
+			Group:          request.Group,
+		}
+		tokens = append(tokens, token)
+		metadata = append(metadata, model.ResellerKey{
+			UserId:             userID,
+			TokenMillions:      request.TokenMillions,
+			MarkupPercent:      request.MarkupPercent,
+			BaseCostPerMillion: baseCostPerMillion.StringFixed(2),
+			Endpoint:           endpoint,
+			CreatedTime:        now,
+		})
+	}
+	return &resellerKeyIssuePlan{
+		request: request, requestID: requestID, tokens: tokens, metadata: metadata, walletQuota: walletQuota,
+	}, true
+}
+
+func resellerBatchClientLabel(prefix string, itemNumber int, quantity int) string {
+	if prefix == "" {
+		return ""
+	}
+	if quantity == 1 {
+		return prefix
+	}
+	suffix := fmt.Sprintf(" #%d", itemNumber)
+	maxPrefixRunes := 50 - utf8.RuneCountInString(suffix)
+	prefixRunes := []rune(prefix)
+	if len(prefixRunes) > maxPrefixRunes {
+		prefixRunes = prefixRunes[:maxPrefixRunes]
+	}
+	return string(prefixRunes) + suffix
+}
+
+func writeResellerIssueError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, model.ErrResellerSubscriptionRequired):
+		resellerStatusError(c, http.StatusForbidden, err.Error())
+	case errors.Is(err, model.ErrResellerBatchRequestConflict):
+		resellerStatusError(c, http.StatusConflict, err.Error())
+	case errors.Is(err, model.ErrResellerRequestIDReserved):
+		resellerBadRequest(c, err.Error())
+	case errors.Is(err, model.ErrResellerTokenLimitReached):
+		resellerBadRequest(c, "Maximum API key limit reached")
+	default:
+		common.ApiError(c, err)
+	}
 }
 
 func normalizeResellerRequestID(c *gin.Context, bodyValue string) (string, bool) {

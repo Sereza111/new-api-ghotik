@@ -62,6 +62,22 @@ func WeChatAuth(c *gin.Context) {
 		return
 	}
 	code := c.Query("code")
+	state := strings.TrimSpace(c.Query("state"))
+	pendingFlow, err := model.GetAuthFlow(state, model.AuthFlowMatch{
+		Purpose:  model.AuthFlowPurposeOAuth,
+		Provider: "wechat",
+		Intent:   model.AuthFlowIntentLogin,
+	})
+	if err != nil {
+		writeAccountStatusError(c, http.StatusForbidden, "State parameter is empty or mismatched")
+		return
+	}
+	var pendingPayload oauthFlowPayload
+	if err := common.UnmarshalJsonStr(pendingFlow.Payload, &pendingPayload); err != nil ||
+		!verifyOAuthBrowserBinding(c, state, pendingPayload.BrowserBindingHash) {
+		writeAccountStatusError(c, http.StatusForbidden, "State parameter is empty or mismatched")
+		return
+	}
 	wechatId, err := getWeChatIdByCode(code)
 	if err != nil {
 		common.ApiError(c, err)
@@ -71,6 +87,15 @@ func WeChatAuth(c *gin.Context) {
 		WeChatId: wechatId,
 	}
 	if model.IsWeChatIdAlreadyTaken(wechatId) {
+		if _, err := model.ConsumeAuthFlow(state, model.AuthFlowMatch{
+			Purpose:  model.AuthFlowPurposeOAuth,
+			Provider: "wechat",
+			Intent:   model.AuthFlowIntentLogin,
+		}); err != nil {
+			writeAccountStatusError(c, http.StatusForbidden, "State parameter is empty or mismatched")
+			return
+		}
+		clearOAuthBrowserBindingCookie(c, state)
 		err := user.FillUserByWeChatId()
 		if err != nil {
 			common.ApiError(c, err)
@@ -81,20 +106,65 @@ func WeChatAuth(c *gin.Context) {
 			return
 		}
 	} else {
-		if common.RegisterEnabled {
-			user.Username = "wechat_" + strconv.Itoa(model.GetMaxUserId()+1)
-			user.DisplayName = "WeChat User"
-			user.Role = common.RoleCommonUser
-			user.Status = common.UserStatusEnabled
-
-			if err := user.Insert(0); err != nil {
-				common.ApiError(c, err)
+		if !common.RegisterEnabled {
+			if _, err := model.ConsumeAuthFlow(state, model.AuthFlowMatch{
+				Purpose: model.AuthFlowPurposeOAuth, Provider: "wechat", Intent: model.AuthFlowIntentLogin,
+			}); err != nil {
+				writeAccountStatusError(c, http.StatusForbidden, "State parameter is empty or mismatched")
 				return
 			}
-		} else {
+			clearOAuthBrowserBindingCookie(c, state)
 			common.ApiErrorT(c, "New user registration has been disabled by administrator")
 			return
 		}
+		user.Username = "wechat_" + strconv.Itoa(model.GetMaxUserId()+1)
+		user.DisplayName = "WeChat User"
+		user.Role = common.RoleCommonUser
+		user.Status = common.UserStatusEnabled
+		var assurance *oauthRegistrationAssurance
+		registrationRejected := false
+		_, err := model.ConsumeAuthFlowWithAction(state, model.AuthFlowMatch{
+			Purpose:  model.AuthFlowPurposeOAuth,
+			Provider: "wechat",
+			Intent:   model.AuthFlowIntentLogin,
+		}, func(tx *gorm.DB, flow *model.AuthFlow) error {
+			var payload oauthFlowPayload
+			if err := common.UnmarshalJsonStr(flow.Payload, &payload); err != nil {
+				registrationRejected = true
+				return nil
+			}
+			if err := validateOAuthRegistrationAssurance(payload.RegistrationAssurance); err != nil {
+				registrationRejected = true
+				return nil
+			}
+			assurance = payload.RegistrationAssurance
+			if err := user.InsertWithTx(tx, 0); err != nil {
+				return err
+			}
+			return model.ClaimExternalIdentityWithTx(tx, model.ExternalIdentityProviderWeChat, wechatId, user.Id)
+		})
+		if err != nil {
+			if errors.Is(err, model.ErrExternalIdentityAlreadyClaimed) {
+				if _, consumeErr := model.ConsumeAuthFlow(state, model.AuthFlowMatch{
+					Purpose: model.AuthFlowPurposeOAuth, Provider: "wechat", Intent: model.AuthFlowIntentLogin,
+				}); consumeErr == nil || errors.Is(consumeErr, model.ErrAuthFlowConsumed) {
+					clearOAuthBrowserBindingCookie(c, state)
+				}
+				common.ApiErrorT(c, "Please restart sign-in and complete registration verification")
+				return
+			}
+			common.SysLog(common.LogText("WeChat registration transaction failed: %v", err))
+			common.ApiErrorT(c, "Database error, please contact the administrator")
+			return
+		}
+		if registrationRejected || assurance == nil {
+			clearOAuthBrowserBindingCookie(c, state)
+			common.ApiErrorT(c, "Please restart sign-in and complete registration verification")
+			return
+		}
+		clearOAuthBrowserBindingCookie(c, state)
+		user.FinalizeOAuthUserCreation(0)
+		recordOAuthRegistrationAudit(c, &user, "WeChat", assurance)
 	}
 
 	if user.Status != common.UserStatusEnabled {
@@ -147,8 +217,15 @@ func WeChatBind(c *gin.Context) {
 	}
 	// 只更新绑定列，避免完整用户快照覆盖并发的封禁、降权或分组变更。
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := model.ClaimExternalIdentityWithTx(tx, model.ExternalIdentityProviderWeChat, wechatId, identity.UserID); err != nil {
+			return err
+		}
 		return model.UpdateUserBindColumnForSessionWithTx(tx, identity, "wechat_id", wechatId)
 	}); err != nil {
+		if errors.Is(err, model.ErrExternalIdentityAlreadyClaimed) {
+			common.ApiErrorT(c, "This {{provider}} account has already been bound", providerParams("WeChat"))
+			return
+		}
 		writeSecurityOperationError(c, err)
 		return
 	}

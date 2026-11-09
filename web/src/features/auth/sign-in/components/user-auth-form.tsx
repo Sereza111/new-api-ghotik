@@ -39,7 +39,11 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { login, wechatLoginByCode } from '@/features/auth/api'
+import {
+  createOAuthFlow,
+  login,
+  wechatLoginByCode,
+} from '@/features/auth/api'
 import { LegalConsent } from '@/features/auth/components/legal-consent'
 import { OAuthProviders } from '@/features/auth/components/oauth-providers'
 import { loginFormSchema } from '@/features/auth/constants'
@@ -226,7 +230,25 @@ export function UserAuthForm({
 
     setIsWeChatSubmitting(true)
     try {
-      const res = await wechatLoginByCode(wechatCode)
+      let state: string
+      try {
+        state = await createOAuthFlow(
+          'wechat',
+          'login',
+          undefined,
+          undefined,
+          {
+            turnstile: turnstileToken,
+            legalConsent: agreedToLegal,
+          }
+        )
+      } finally {
+        if (isTurnstileEnabled) {
+          setTurnstileToken('')
+          setTurnstileWidgetKey((current) => current + 1)
+        }
+      }
+      const res = await wechatLoginByCode(wechatCode, state)
       if (res?.success) {
         handleWeChatDialogChange(false)
         if (await handleLoginResult(res.data, redirectTo)) {
@@ -339,7 +361,15 @@ export function UserAuthForm({
       <OAuthProviders
         status={status}
         redirectTo={redirectTo}
-        disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
+        disabled={isLoading}
+        turnstileToken={turnstileToken}
+        legalConsentAccepted={agreedToLegal}
+        onLoginProofConsumed={() => {
+          if (isTurnstileEnabled) {
+            setTurnstileToken('')
+            setTurnstileWidgetKey((current) => current + 1)
+          }
+        }}
         onWeChatLogin={hasWeChatLogin ? handleOpenWeChatDialog : undefined}
         isWeChatLoading={isWeChatSubmitting}
       />
@@ -408,19 +438,19 @@ export function UserAuthForm({
               {isLoading ? <Loader2 className='animate-spin' /> : <LogIn />}
               {t('Sign in')}
             </Button>
-
-            {/* Turnstile */}
-            {isTurnstileEnabled && (
-              <div className='mt-2'>
-                <Turnstile
-                  key={turnstileWidgetKey}
-                  siteKey={turnstileSiteKey}
-                  onVerify={setTurnstileToken}
-                  onExpire={() => setTurnstileToken('')}
-                />
-              </div>
-            )}
           </>
+        )}
+
+        {/* Turnstile protects both password and OAuth login initialization. */}
+        {isTurnstileEnabled && (
+          <div className='mt-2'>
+            <Turnstile
+              key={turnstileWidgetKey}
+              siteKey={turnstileSiteKey}
+              onVerify={setTurnstileToken}
+              onExpire={() => setTurnstileToken('')}
+            />
+          </div>
         )}
 
         <LegalConsent
@@ -462,9 +492,7 @@ export function UserAuthForm({
                 type='button'
                 onClick={handleWeChatLogin}
                 disabled={
-                  isWeChatSubmitting ||
-                  !wechatCode.trim() ||
-                  (requiresLegalConsent && !agreedToLegal)
+                  isWeChatSubmitting || !wechatCode.trim()
                 }
                 className='gap-2'
               >

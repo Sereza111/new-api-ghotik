@@ -76,7 +76,7 @@ func setupSecurityEnrollmentTest(t *testing.T) (*model.User, service.AuthIdentit
 	var version string
 	require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
 	t.Logf("database: %s %s", dialect, version)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.TwoFA{}, &model.TwoFABackupCode{}, &model.PasskeyCredential{}, &model.AuthFlow{}, &model.UserOAuthBinding{}, &model.Option{}, &model.UserAccessToken{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.TwoFA{}, &model.TwoFABackupCode{}, &model.PasskeyCredential{}, &model.AuthFlow{}, &model.UserOAuthBinding{}, &model.ExternalIdentityClaim{}, &model.Option{}, &model.UserAccessToken{}))
 	require.NoError(t, logDB.AutoMigrate(&model.AuditLog{}))
 	model.DB, model.LOG_DB = db, logDB
 	require.NoError(t, model.EnsureLegacyAccessTokenRetireAt(time.Now().Unix()))
@@ -102,6 +102,10 @@ func setupSecurityEnrollmentTest(t *testing.T) (*model.User, service.AuthIdentit
 		if err == nil {
 			_ = connection.Close()
 		}
+		logConnection, err := logDB.DB()
+		if err == nil {
+			_ = logConnection.Close()
+		}
 	})
 	password, err := common.Password2Hash("enrollment-password")
 	require.NoError(t, err)
@@ -115,10 +119,15 @@ func setupSecurityEnrollmentTest(t *testing.T) (*model.User, service.AuthIdentit
 	return user, identity
 }
 
-func securityEnrollmentRequest(method, path, body, proof string, identity service.AuthIdentity, handler gin.HandlerFunc) *httptest.ResponseRecorder {
+func securityEnrollmentRequest(method, path, body, proof string, identity service.AuthIdentity, handler gin.HandlerFunc, cookies ...*http.Cookie) *httptest.ResponseRecorder {
 	response := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(response)
 	c.Request = httptest.NewRequest(method, path, strings.NewReader(body))
+	for _, cookie := range cookies {
+		if cookie != nil {
+			c.Request.AddCookie(cookie)
+		}
+	}
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Request.Header.Set("X-Security-Proof", proof)
 	c.Set("id", identity.UserID)
@@ -1686,11 +1695,11 @@ func TestSecurityEnrollmentTelegramAndWeChatFirstFactor(t *testing.T) {
 					user, identity = fixture.user, fixture.identity
 					require.NoError(t, model.DB.Model(user).Updates(map[string]any{"password": "", "telegram_id": "42"}).Error)
 					state, code := fixture.authorization(t, "verify", identity, scope, telegramIdentityClaims(99))
-					mismatch := telegramOAuthCallback(state, code, identity)
+					mismatch := fixture.callback(state, code, identity)
 					assert.Contains(t, mismatch.Body.String(), "OAUTH_ACCOUNT_MISMATCH")
 					assert.NotContains(t, mismatch.Body.String(), "proof_token")
 					state, code = fixture.authorization(t, "verify", identity, scope, telegramIdentityClaims(42))
-					response = telegramOAuthCallback(state, code, identity)
+					response = fixture.callback(state, code, identity)
 					method = service.VerificationMethodOAuth
 				} else {
 					user, identity = setupSecurityEnrollmentTest(t)
@@ -1831,7 +1840,7 @@ func TestSecurityEnrollmentRejectsChangedFirstFactorPolicy(t *testing.T) {
 				if provider == "telegram" {
 					require.NoError(t, model.DB.Model(user).Update("telegram_id", "42").Error)
 					state, code := fixture.authorization(t, "verify", identity, "2fa.setup", telegramIdentityClaims(42))
-					response := telegramOAuthCallback(state, code, identity)
+					response := fixture.callback(state, code, identity)
 					var body securityEnrollmentResponse
 					require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
 					require.True(t, body.Success, response.Body.String())

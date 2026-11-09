@@ -26,6 +26,7 @@ import type { ResellerKey } from '../types'
 
 const resellerApi = vi.hoisted(() => ({
   adjustResellerKeyQuota: vi.fn(),
+  createResellerKeyBatch: vi.fn(),
   createResellerKey: vi.fn(),
   deleteResellerKey: vi.fn(),
   getResellerConfig: vi.fn(),
@@ -133,6 +134,7 @@ function renderReseller() {
 describe('reseller workflow', () => {
   beforeEach(() => {
     resellerApi.adjustResellerKeyQuota.mockReset()
+    resellerApi.createResellerKeyBatch.mockReset()
     resellerApi.createResellerKey.mockReset()
     resellerApi.deleteResellerKey.mockReset()
     resellerApi.getResellerConfig.mockReset()
@@ -149,7 +151,7 @@ describe('reseller workflow', () => {
       subscription: activeSubscription,
     })
     resellerApi.getResellerKeys.mockResolvedValue([existingKey])
-    resellerApi.createResellerKey.mockResolvedValue(createdKey)
+    resellerApi.createResellerKeyBatch.mockResolvedValue([createdKey])
     resellerApi.deleteResellerKey.mockResolvedValue(undefined)
     resellerApi.purchaseResellerSubscription.mockResolvedValue(
       activeSubscription
@@ -401,6 +403,9 @@ describe('reseller workflow', () => {
   })
 
   test('issues a persistent key with the configured address and server price', async () => {
+    resellerApi.getResellerKeys
+      .mockResolvedValueOnce([existingKey])
+      .mockResolvedValue([createdKey, existingKey])
     const user = userEvent.setup()
     renderReseller()
 
@@ -417,20 +422,140 @@ describe('reseller workflow', () => {
     await user.click(screen.getByRole('button', { name: 'Issue reseller key' }))
 
     await waitFor(() => {
-      expect(resellerApi.createResellerKey).toHaveBeenCalledWith({
+      expect(resellerApi.createResellerKeyBatch).toHaveBeenCalledWith({
         client_label: 'North Studio',
         group: 'GPT',
         token_millions: 25,
+        quantity: 1,
         markup_percent: 80,
         term: '30-days',
         request_id: expect.any(String),
       })
     })
+    const resultDialog = screen.getByRole('dialog', {
+      name: 'Reseller keys issued',
+    })
+    expect(resultDialog).toBeVisible()
+    expect(within(resultDialog).getByText('sk-new-full-key')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Done' }))
+
     expect(screen.getByRole('heading', { name: 'North Studio' })).toBeVisible()
     expect(screen.getByText('sk-new-full-key')).toBeVisible()
     expect(screen.getByText('25M / 25M')).toBeVisible()
     expect(screen.getAllByText('$3.60').length).toBeGreaterThan(0)
     await waitFor(() => expect(appApi.getSelf).toHaveBeenCalledOnce())
+  })
+
+  test('issues, copies, downloads, and caches a reseller key batch', async () => {
+    const createdBatch = Array.from({ length: 3 }, (_, index) => ({
+      ...createdKey,
+      id: createdKey.id + index,
+      client_label: `FunPay #${index + 1}`,
+      token_millions: 10,
+      remaining_tokens: 10_000_000,
+      term: 'unlimited' as const,
+      key: `sk-batch-key-${index + 1}`,
+      cost: 0.8,
+      client_price: 1.44,
+    }))
+    resellerApi.createResellerKeyBatch.mockResolvedValue(createdBatch)
+    resellerApi.getResellerKeys
+      .mockResolvedValueOnce([existingKey])
+      .mockResolvedValue([...createdBatch, existingKey])
+    const createObjectURL = vi.fn(() => 'blob:reseller-keys')
+    const revokeObjectURL = vi.fn()
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: createObjectURL,
+    })
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: revokeObjectURL,
+    })
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => undefined)
+    const clipboardWrite = vi
+      .spyOn(navigator.clipboard, 'writeText')
+      .mockResolvedValue()
+    const user = userEvent.setup()
+    renderReseller()
+
+    await screen.findByRole('button', { name: 'Issue reseller key' })
+    await user.click(screen.getByRole('combobox', { name: 'Group' }))
+    await user.click(screen.getByText('OpenAI models'))
+    await user.type(screen.getByLabelText('Client label'), 'FunPay')
+    await user.clear(screen.getByLabelText('Number of keys'))
+    await user.type(screen.getByLabelText('Number of keys'), '3')
+
+    expect(screen.getByText('Total cost').nextSibling).toHaveTextContent(
+      '$2.40'
+    )
+    expect(
+      screen.getByText('Total client value').nextSibling
+    ).toHaveTextContent('$4.32')
+    await user.click(screen.getByRole('button', { name: 'Issue 3 keys' }))
+
+    await waitFor(() => {
+      expect(resellerApi.createResellerKeyBatch).toHaveBeenCalledWith({
+        client_label: 'FunPay',
+        group: 'GPT',
+        token_millions: 10,
+        quantity: 3,
+        markup_percent: 80,
+        term: 'unlimited',
+        request_id: expect.any(String),
+      })
+    })
+    const resultDialog = await screen.findByRole('dialog')
+    expect(
+      within(resultDialog).getByRole('heading', {
+        name: 'Reseller keys issued',
+      })
+    ).toBeVisible()
+    for (const item of createdBatch) {
+      expect(within(resultDialog).getByText(item.key)).toBeVisible()
+    }
+
+    await user.click(
+      within(resultDialog).getByRole('button', { name: 'Copy all keys' })
+    )
+    expect(clipboardWrite).toHaveBeenCalledWith(
+      createdBatch.map((item) => item.key).join('\n')
+    )
+
+    await user.click(
+      within(resultDialog).getByRole('button', { name: 'Download TXT' })
+    )
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob))
+    expect(anchorClick).toHaveBeenCalledOnce()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:reseller-keys')
+
+    await user.click(within(resultDialog).getByRole('button', { name: 'Done' }))
+    for (const item of createdBatch) {
+      expect(
+        await screen.findByRole('heading', { name: item.client_label })
+      ).toBeVisible()
+      expect(screen.getByText(item.key)).toBeVisible()
+    }
+
+    anchorClick.mockRestore()
+    clipboardWrite.mockRestore()
+    Reflect.deleteProperty(URL, 'createObjectURL')
+    Reflect.deleteProperty(URL, 'revokeObjectURL')
+  })
+
+  test('keeps the issue action readable while the quantity field is empty', async () => {
+    const user = userEvent.setup()
+    renderReseller()
+
+    await screen.findByRole('button', { name: 'Issue reseller key' })
+    await user.clear(screen.getByLabelText('Number of keys'))
+
+    expect(
+      screen.getByRole('button', { name: 'Issue reseller key' })
+    ).toBeVisible()
+    expect(screen.queryByText(/NaN/)).not.toBeInTheDocument()
   })
 
   test('requires a concrete group before issuing a reseller key', async () => {
@@ -444,7 +569,7 @@ describe('reseller workflow', () => {
     expect(
       await screen.findByText('Select a group for the reseller key.')
     ).toBeVisible()
-    expect(resellerApi.createResellerKey).not.toHaveBeenCalled()
+    expect(resellerApi.createResellerKeyBatch).not.toHaveBeenCalled()
   })
 
   test('keeps the reseller catalog visible while issuance is subscription-gated', async () => {
@@ -618,9 +743,9 @@ describe('reseller workflow', () => {
   })
 
   test('shows a pending state while a key is being issued', async () => {
-    let resolveCreate: ((value: ResellerKey) => void) | undefined
-    resellerApi.createResellerKey.mockReturnValue(
-      new Promise<ResellerKey>((resolve) => {
+    let resolveCreate: ((value: ResellerKey[]) => void) | undefined
+    resellerApi.createResellerKeyBatch.mockReturnValue(
+      new Promise<ResellerKey[]>((resolve) => {
         resolveCreate = resolve
       })
     )
@@ -636,15 +761,15 @@ describe('reseller workflow', () => {
       screen.getByRole('button', { name: 'Issuing key...' })
     ).toBeDisabled()
 
-    resolveCreate?.(createdKey)
+    resolveCreate?.([createdKey])
     expect(await screen.findByText('sk-new-full-key')).toBeVisible()
   })
 
   test('reuses an issuance id only while retrying the same draft', async () => {
-    resellerApi.createResellerKey
+    resellerApi.createResellerKeyBatch
       .mockRejectedValueOnce(new Error('temporary failure'))
       .mockRejectedValueOnce(new Error('temporary failure'))
-      .mockResolvedValueOnce(createdKey)
+      .mockResolvedValueOnce([createdKey])
     const user = userEvent.setup()
     renderReseller()
 
@@ -655,16 +780,16 @@ describe('reseller workflow', () => {
     await user.click(screen.getByText('OpenAI models'))
     await user.click(issueButton)
     await waitFor(() =>
-      expect(resellerApi.createResellerKey).toHaveBeenCalledTimes(1)
+      expect(resellerApi.createResellerKeyBatch).toHaveBeenCalledTimes(1)
     )
     const firstRequestId =
-      resellerApi.createResellerKey.mock.calls[0][0].request_id
+      resellerApi.createResellerKeyBatch.mock.calls[0][0].request_id
 
     await user.click(issueButton)
     await waitFor(() =>
-      expect(resellerApi.createResellerKey).toHaveBeenCalledTimes(2)
+      expect(resellerApi.createResellerKeyBatch).toHaveBeenCalledTimes(2)
     )
-    expect(resellerApi.createResellerKey.mock.calls[1][0].request_id).toBe(
+    expect(resellerApi.createResellerKeyBatch.mock.calls[1][0].request_id).toBe(
       firstRequestId
     )
 
@@ -672,10 +797,10 @@ describe('reseller workflow', () => {
     await user.type(screen.getByLabelText('Custom amount'), '25')
     await user.click(issueButton)
     await waitFor(() =>
-      expect(resellerApi.createResellerKey).toHaveBeenCalledTimes(3)
+      expect(resellerApi.createResellerKeyBatch).toHaveBeenCalledTimes(3)
     )
-    expect(resellerApi.createResellerKey.mock.calls[2][0].request_id).not.toBe(
-      firstRequestId
-    )
+    expect(
+      resellerApi.createResellerKeyBatch.mock.calls[2][0].request_id
+    ).not.toBe(firstRequestId)
   })
 })

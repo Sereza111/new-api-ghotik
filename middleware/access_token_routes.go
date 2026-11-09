@@ -266,6 +266,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/reseller/keys":              accessTokenScopeRule("wallet:read"),
 	"POST /api/reseller/subscription":     accessTokenScopeRule("wallet:write"),
 	"POST /api/reseller/keys":             accessTokenScopeRule("wallet:write"),
+	"POST /api/reseller/keys/batch":       accessTokenScopeRule("wallet:write"),
 	"DELETE /api/reseller/keys/:id":       accessTokenScopeRule("wallet:write"),
 	"POST /api/reseller/keys/:id/reissue": accessTokenScopeRule("wallet:write"),
 	"POST /api/reseller/keys/:id/quota":   accessTokenScopeRule("wallet:write"),

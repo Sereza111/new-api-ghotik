@@ -322,7 +322,7 @@ func Register(c *gin.Context) {
 		if setting.DefaultUseAutoGroup {
 			token.Group = "auto"
 		}
-		if err := token.Insert(); err != nil {
+		if err := token.InsertWithLimit(operation_setting.GetMaxUserTokens()); err != nil {
 			common.ApiErrorT(c, "Failed to create default token")
 			return
 		}

@@ -1,8 +1,11 @@
 package controller
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
@@ -15,26 +18,98 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
-const oauthAuthFlowTTL = 10 * time.Minute
+const (
+	oauthAuthFlowTTL             = 10 * time.Minute
+	oauthBrowserCookiePrefix     = "new_api_oauth_browser_"
+	oauthBrowserCookiePath       = "/api/oauth/"
+	oauthBrowserBindingKeyPrefix = "oauth-browser-v1:"
+)
 
 type oauthStateRequest struct {
-	Provider string          `json:"provider"`
-	Intent   string          `json:"intent"`
-	Aff      string          `json:"aff,omitempty"`
-	Scope    string          `json:"scope,omitempty"`
-	Context  json.RawMessage `json:"context,omitempty"`
+	Provider     string          `json:"provider"`
+	Intent       string          `json:"intent"`
+	Aff          string          `json:"aff,omitempty"`
+	Scope        string          `json:"scope,omitempty"`
+	Context      json.RawMessage `json:"context,omitempty"`
+	Turnstile    string          `json:"turnstile,omitempty"`
+	LegalConsent bool            `json:"legal_consent,omitempty"`
+}
+
+type oauthRegistrationAssurance struct {
+	TurnstileRequired bool   `json:"turnstile_required"`
+	TurnstileVerified bool   `json:"turnstile_verified"`
+	LegalConsent      bool   `json:"legal_consent"`
+	UserAgreementHash string `json:"user_agreement_hash,omitempty"`
+	PrivacyPolicyHash string `json:"privacy_policy_hash,omitempty"`
 }
 
 type oauthFlowPayload struct {
-	AffiliateCode   string                         `json:"affiliate_code,omitempty"`
-	Verification    *service.OAuthVerificationFlow `json:"verification,omitempty"`
-	Telegram        *oauth.TelegramOAuthFlow       `json:"telegram,omitempty"`
-	SessionIdentity *service.AuthIdentity          `json:"session_identity,omitempty"`
-	Authorization   *model.AuthFlowAuthorization   `json:"authorization,omitempty"`
+	AffiliateCode         string                         `json:"affiliate_code,omitempty"`
+	BrowserBindingHash    string                         `json:"browser_binding_hash,omitempty"`
+	RegistrationAssurance *oauthRegistrationAssurance    `json:"registration_assurance,omitempty"`
+	Verification          *service.OAuthVerificationFlow `json:"verification,omitempty"`
+	Telegram              *oauth.TelegramOAuthFlow       `json:"telegram,omitempty"`
+	SessionIdentity       *service.AuthIdentity          `json:"session_identity,omitempty"`
+	Authorization         *model.AuthFlowAuthorization   `json:"authorization,omitempty"`
+}
+
+func legalDocumentHash(content string) string {
+	if content == "" {
+		return ""
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
+}
+
+func oauthBrowserBindingHash(secret string) string {
+	return common.GenerateHMACWithKey([]byte(oauthBrowserBindingKeyPrefix+common.SessionSecret), secret)
+}
+
+func oauthBrowserCookieName(state string) string {
+	digest := sha256.Sum256([]byte(state))
+	return oauthBrowserCookiePrefix + fmt.Sprintf("%x", digest[:16])
+}
+
+func setOAuthBrowserBindingCookie(c *gin.Context, state, secret string, expiresAt time.Time) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     oauthBrowserCookieName(state),
+		Value:    secret,
+		Path:     oauthBrowserCookiePath,
+		MaxAge:   max(int(time.Until(expiresAt)/time.Second), 1),
+		Expires:  expiresAt,
+		HttpOnly: true,
+		Secure:   common.SessionCookieSecure,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func clearOAuthBrowserBindingCookie(c *gin.Context, state string) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     oauthBrowserCookieName(state),
+		Value:    "",
+		Path:     oauthBrowserCookiePath,
+		MaxAge:   -1,
+		Expires:  time.Unix(1, 0),
+		HttpOnly: true,
+		Secure:   common.SessionCookieSecure,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func verifyOAuthBrowserBinding(c *gin.Context, state, expectedHash string) bool {
+	if state == "" || expectedHash == "" {
+		return false
+	}
+	cookie, err := c.Request.Cookie(oauthBrowserCookieName(state))
+	if err != nil || cookie.Value == "" {
+		return false
+	}
+	actualHash := oauthBrowserBindingHash(cookie.Value)
+	return hmac.Equal([]byte(actualHash), []byte(expectedHash))
 }
 
 // providerParams returns the params of messages that name the OAuth provider.
@@ -52,7 +127,8 @@ func GenerateOAuthCode(c *gin.Context) {
 	request.Provider = strings.TrimSpace(request.Provider)
 	request.Intent = strings.TrimSpace(request.Intent)
 	request.Aff = strings.TrimSpace(request.Aff)
-	if oauth.GetProvider(request.Provider) == nil ||
+	isWeChatLogin := request.Provider == "wechat" && request.Intent == model.AuthFlowIntentLogin
+	if (oauth.GetProvider(request.Provider) == nil && !isWeChatLogin) ||
 		(request.Intent != model.AuthFlowIntentLogin && request.Intent != model.AuthFlowIntentBind && request.Intent != model.AuthFlowIntentVerify) ||
 		len(request.Aff) > 32 ||
 		(request.Intent != model.AuthFlowIntentLogin && request.Aff != "") ||
@@ -60,9 +136,39 @@ func GenerateOAuthCode(c *gin.Context) {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
+	if isWeChatLogin && !common.WeChatAuthEnabled {
+		common.ApiErrorT(c, "{{provider}} login and registration has not been enabled by administrator", providerParams("WeChat"))
+		return
+	}
 	userID := 0
 	sessionID := ""
 	flowPayload := oauthFlowPayload{AffiliateCode: request.Aff}
+	browserBindingSecret := ""
+	if request.Intent == model.AuthFlowIntentLogin {
+		var err error
+		browserBindingSecret, err = common.GenerateRandomCharsKey(48)
+		if err != nil {
+			writeSecurityOperationError(c, err)
+			return
+		}
+		flowPayload.BrowserBindingHash = oauthBrowserBindingHash(browserBindingSecret)
+		turnstileRequired := common.TurnstileCheckEnabled
+		turnstileVerified := false
+		if turnstileRequired {
+			if !middleware.VerifyTurnstileToken(c, request.Turnstile, true) {
+				return
+			}
+			turnstileVerified = true
+		}
+		legal := system_setting.GetLegalSettings()
+		flowPayload.RegistrationAssurance = &oauthRegistrationAssurance{
+			TurnstileRequired: turnstileRequired,
+			TurnstileVerified: turnstileVerified,
+			LegalConsent:      request.LegalConsent,
+			UserAgreementHash: legalDocumentHash(legal.UserAgreement),
+			PrivacyPolicyHash: legalDocumentHash(legal.PrivacyPolicy),
+		}
+	}
 	bindingStarted := false
 	if request.Provider == "telegram" {
 		telegramFlow, err := oauth.NewTelegramOAuthFlow()
@@ -130,6 +236,9 @@ func GenerateOAuthCode(c *gin.Context) {
 		writeSecurityOperationError(c, err)
 		return
 	}
+	if request.Intent == model.AuthFlowIntentLogin {
+		setOAuthBrowserBindingCookie(c, state, browserBindingSecret, expiresAt)
+	}
 	bindingStarted = request.Intent == model.AuthFlowIntentBind
 	data := gin.H{"flow_token": state, "expires_at": expiresAt.Unix()}
 	if flowPayload.Telegram != nil {
@@ -160,6 +269,14 @@ func HandleOAuth(c *gin.Context) {
 	if err != nil {
 		writeAccountStatusError(c, http.StatusForbidden, "State parameter is empty or mismatched")
 		return
+	}
+	if pendingFlow.Intent == model.AuthFlowIntentLogin {
+		var payload oauthFlowPayload
+		if err := common.UnmarshalJsonStr(pendingFlow.Payload, &payload); err != nil ||
+			!verifyOAuthBrowserBinding(c, state, payload.BrowserBindingHash) {
+			writeAccountStatusError(c, http.StatusForbidden, "State parameter is empty or mismatched")
+			return
+		}
 	}
 
 	consumeMatch := model.AuthFlowMatch{
@@ -243,6 +360,9 @@ func HandleOAuth(c *gin.Context) {
 		if errorDescription == "" {
 			errorDescription = errorCode
 		}
+		if pendingFlow.Intent == model.AuthFlowIntentLogin {
+			clearOAuthBrowserBindingCookie(c, state)
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": errorDescription,
@@ -280,6 +400,9 @@ func HandleOAuth(c *gin.Context) {
 		writeAccountStatusError(c, http.StatusForbidden, "State parameter is empty or mismatched")
 		return
 	}
+	if flow.Intent == model.AuthFlowIntentLogin {
+		clearOAuthBrowserBindingCookie(c, state)
+	}
 
 	switch flow.Intent {
 	case model.AuthFlowIntentLogin:
@@ -312,7 +435,7 @@ func handleOAuthLogin(c *gin.Context, provider oauth.Provider, oauthUser *oauth.
 		writeSecurityOperationError(c, err)
 		return
 	}
-	user, migration, err := findOrCreateOAuthUser(c, provider, oauthUser, token, payload.AffiliateCode)
+	user, migration, err := findOrCreateOAuthUser(c, provider, oauthUser, token, payload.AffiliateCode, payload.RegistrationAssurance)
 	if err != nil {
 		if errors.Is(err, model.ErrEmailAlreadyTaken) {
 			common.ApiErrorT(c, "Email address is already in use")
@@ -323,6 +446,8 @@ func handleOAuthLogin(c *gin.Context, provider oauth.Provider, oauthUser *oauth.
 			common.ApiErrorT(c, "User has been deleted")
 		case *OAuthRegistrationDisabledError:
 			common.ApiErrorT(c, "New user registration has been disabled by administrator")
+		case *OAuthRegistrationAssuranceError:
+			common.ApiErrorT(c, "Please restart sign-in and complete registration verification")
 		case *OAuthEmailAlreadyTakenError:
 			common.ApiErrorT(c, "Email address is already in use")
 		case *OAuthLegacyBindingNotConfirmedError:
@@ -396,19 +521,16 @@ func handleOAuthBind(c *gin.Context, providerName string, provider oauth.Provide
 // findOrCreateOAuthUser finds the existing user or creates a new one. For a
 // legacy GitHub binding that still waits for the login verification, it also
 // returns the rewrite to carry into the challenge.
-func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *oauth.OAuthUser, token *oauth.OAuthToken, affiliateCode string) (*model.User, *service.LegacyGitHubMigration, error) {
+func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *oauth.OAuthUser, token *oauth.OAuthToken, affiliateCode string, assurance *oauthRegistrationAssurance) (*model.User, *service.LegacyGitHubMigration, error) {
 	user := &model.User{}
-	if provider.ProviderUserIDColumn() == "telegram_id" {
-		err := provider.FillUserByProviderID(user, oauthUser.ProviderUserID)
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil, oauth.ErrTelegramAccountNotBound
-		}
-		return user, nil, err
-	}
+	isTelegram := provider.ProviderUserIDColumn() == "telegram_id"
 
 	// Check if user already exists with new ID
 	if provider.IsUserIDTaken(oauthUser.ProviderUserID) {
 		err := provider.FillUserByProviderID(user, oauthUser.ProviderUserID)
+		if isTelegram && errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, &OAuthUserDeletedError{}
+		}
 		if err != nil {
 			return nil, nil, err
 		}
@@ -473,6 +595,13 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 			}
 			return user, nil, nil
 		}
+	}
+
+	// Existing OAuth identities can still sign in without accepting newly added
+	// terms. New identities must carry the human-verification and legal-consent
+	// snapshot issued with this one-time OAuth flow.
+	if err := validateOAuthRegistrationAssurance(assurance); err != nil {
+		return nil, nil, err
 	}
 
 	// User doesn't exist, create new user if registration is enabled
@@ -552,6 +681,12 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 				return err
 			}
 
+			if isTelegram {
+				if err := model.ClaimExternalIdentityWithTx(tx, model.ExternalIdentityProviderTelegram, oauthUser.ProviderUserID, user.Id); err != nil {
+					return err
+				}
+			}
+
 			// Set the provider user ID on the user model and update
 			provider.SetProviderUserID(user, oauthUser.ProviderUserID)
 			if err := tx.Model(user).Updates(map[string]any{
@@ -574,8 +709,53 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		// Perform post-transaction tasks
 		user.FinalizeOAuthUserCreation(inviterId)
 	}
+	recordOAuthRegistrationAudit(c, user, provider.GetName(), assurance)
 
 	return user, nil, nil
+}
+
+func validateOAuthRegistrationAssurance(assurance *oauthRegistrationAssurance) error {
+	if assurance == nil ||
+		(assurance.TurnstileRequired && !assurance.TurnstileVerified) ||
+		(common.TurnstileCheckEnabled && !assurance.TurnstileVerified) {
+		return &OAuthRegistrationAssuranceError{}
+	}
+	legal := system_setting.GetLegalSettings()
+	currentUserAgreementHash := legalDocumentHash(legal.UserAgreement)
+	currentPrivacyPolicyHash := legalDocumentHash(legal.PrivacyPolicy)
+	if (currentUserAgreementHash != "" && (!assurance.LegalConsent || assurance.UserAgreementHash != currentUserAgreementHash)) ||
+		(currentPrivacyPolicyHash != "" && (!assurance.LegalConsent || assurance.PrivacyPolicyHash != currentPrivacyPolicyHash)) {
+		return &OAuthRegistrationAssuranceError{}
+	}
+	return nil
+}
+
+func recordOAuthRegistrationAudit(c *gin.Context, user *model.User, provider string, assurance *oauthRegistrationAssurance) {
+	params := map[string]any{
+		"provider":               provider,
+		"legal_consent_accepted": assurance.LegalConsent,
+		"user_agreement_hash":    assurance.UserAgreementHash,
+		"privacy_policy_hash":    assurance.PrivacyPolicyHash,
+		"turnstile_required":     assurance.TurnstileRequired,
+		"turnstile_verified":     assurance.TurnstileVerified,
+	}
+	model.RecordOperationAuditLog(
+		user.Id,
+		user.Role,
+		"OAuth registration completed with server-verified registration checks",
+		c.ClientIP(),
+		"user.oauth_register",
+		params,
+		nil,
+		&model.AuditRequestInfo{
+			Method:  c.Request.Method,
+			Route:   c.FullPath(),
+			Path:    c.FullPath(),
+			Status:  c.Writer.Status(),
+			Success: true,
+		},
+		c,
+	)
 }
 
 // recordLegacyGitHubBindingAudit records the outcome of a legacy GitHub binding
@@ -599,6 +779,12 @@ type OAuthRegistrationDisabledError struct{}
 
 func (e *OAuthRegistrationDisabledError) Error() string {
 	return "registration is disabled"
+}
+
+type OAuthRegistrationAssuranceError struct{}
+
+func (e *OAuthRegistrationAssuranceError) Error() string {
+	return "registration assurance is missing or stale"
 }
 
 type OAuthEmailAlreadyTakenError struct{}

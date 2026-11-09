@@ -29,6 +29,7 @@ export type ResellerDraftValues = {
   clientLabel: string
   group: string
   tokenMillions: number
+  quantity: number
   markupPercent: number
   term: ResellerTerm
 }
@@ -87,6 +88,10 @@ export type CreateResellerKeyRequest = {
   markup_percent: number
   term: ResellerTerm
   request_id: string
+}
+
+export type CreateResellerKeyBatchRequest = CreateResellerKeyRequest & {
+  quantity: number
 }
 
 export type PurchaseResellerSubscriptionRequest = {

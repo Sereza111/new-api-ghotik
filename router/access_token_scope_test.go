@@ -141,6 +141,10 @@ func TestAccessTokenRouteRulesCoverEveryDashboardRoute(t *testing.T) {
 		assert.Equal(t, "scope", rule.Kind(), key)
 		assert.Equal(t, service.AccessTokenScopeOf(permission), rule.Scope(), key)
 	}
+	batchRule, ok := middleware.AccessTokenRouteRule("POST /api/reseller/keys/batch")
+	require.True(t, ok)
+	assert.Equal(t, "scope", batchRule.Kind())
+	assert.Equal(t, "wallet:write", batchRule.Scope())
 }
 
 func TestAccessTokenCatalogCoversEveryPermission(t *testing.T) {

@@ -22,6 +22,7 @@ import { api } from '@/lib/api'
 
 import { normalizeResellerEndpoint } from './lib/pricing'
 import type {
+  CreateResellerKeyBatchRequest,
   CreateResellerKeyRequest,
   PurchaseResellerSubscriptionRequest,
   ResellerApiResponse,
@@ -135,6 +136,30 @@ export async function createResellerKey(
   }
 
   return response.data.data
+}
+
+export async function createResellerKeyBatch(
+  request: CreateResellerKeyBatchRequest
+): Promise<ResellerKey[]> {
+  const response = await api.post<ResellerApiResponse<ResellerKey[]>>(
+    '/api/reseller/keys/batch',
+    request,
+    REQUEST_CONFIG
+  )
+  const keys = response.data.data
+
+  if (
+    !response.data.success ||
+    !Array.isArray(keys) ||
+    keys.length !== request.quantity ||
+    keys.some((key) => !key?.key)
+  ) {
+    throw new Error(
+      response.data.message || 'Failed to issue reseller key batch'
+    )
+  }
+
+  return keys
 }
 
 export async function deleteResellerKey(id: number): Promise<void> {

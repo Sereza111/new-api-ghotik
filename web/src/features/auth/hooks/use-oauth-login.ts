@@ -25,7 +25,7 @@ import { handleServerError } from '@/lib/handle-server-error'
 import { AuthOperationError } from '@/lib/secure-verification'
 import { createServerError } from '@/lib/server-error-message'
 
-import { createOAuthAuthorization, createOAuthFlow, logout } from '../api'
+import { createOAuthAuthorization, logout } from '../api'
 import {
   buildGitHubOAuthUrl,
   buildDiscordOAuthUrl,
@@ -40,7 +40,12 @@ import type { SystemStatus, CustomOAuthProviderInfo } from '../types'
  */
 export function useOAuthLogin(
   status: SystemStatus | null,
-  redirectTo?: string
+  redirectTo?: string,
+  loginProof?: {
+    turnstileToken?: string
+    legalConsentAccepted?: boolean
+    onConsumed?: () => void
+  }
 ) {
   const { t } = useTranslation()
   const [isLoading, setIsLoading] = useState(false)
@@ -66,6 +71,24 @@ export function useOAuthLogin(
     clearAuthentication()
   }
 
+  const initializeOAuthLogin = async (provider: string) => {
+    try {
+      return await createOAuthAuthorization(
+        provider,
+        'login',
+        undefined,
+        undefined,
+        undefined,
+        {
+          turnstile: loginProof?.turnstileToken,
+          legalConsent: loginProof?.legalConsentAccepted,
+        }
+      )
+    } finally {
+      loginProof?.onConsumed?.()
+    }
+  }
+
   const handleGitHubLogin = async () => {
     if (!status?.github_client_id) return
     if (githubButtonDisabled) return
@@ -88,10 +111,13 @@ export function useOAuthLogin(
 
     try {
       await resetSession()
-      const state = await createOAuthFlow('github', 'login')
-      rememberOAuthLoginRedirect(state, redirectTo)
+      const authorization = await initializeOAuthLogin('github')
+      rememberOAuthLoginRedirect(authorization.state, redirectTo)
 
-      const url = buildGitHubOAuthUrl(status.github_client_id, state)
+      const url = buildGitHubOAuthUrl(
+        status.github_client_id,
+        authorization.state
+      )
       window.open(url, '_self')
     } catch (error) {
       handleServerError(
@@ -112,10 +138,13 @@ export function useOAuthLogin(
     setIsLoading(true)
     try {
       await resetSession()
-      const state = await createOAuthFlow('discord', 'login')
-      rememberOAuthLoginRedirect(state, redirectTo)
+      const authorization = await initializeOAuthLogin('discord')
+      rememberOAuthLoginRedirect(authorization.state, redirectTo)
 
-      const url = buildDiscordOAuthUrl(status.discord_client_id, state)
+      const url = buildDiscordOAuthUrl(
+        status.discord_client_id,
+        authorization.state
+      )
       window.open(url, '_self')
     } catch (error) {
       handleServerError(
@@ -132,13 +161,13 @@ export function useOAuthLogin(
     setIsLoading(true)
     try {
       await resetSession()
-      const state = await createOAuthFlow('oidc', 'login')
-      rememberOAuthLoginRedirect(state, redirectTo)
+      const authorization = await initializeOAuthLogin('oidc')
+      rememberOAuthLoginRedirect(authorization.state, redirectTo)
 
       const url = buildOIDCOAuthUrl(
         status.oidc_authorization_endpoint,
         status.oidc_client_id,
-        state
+        authorization.state
       )
       window.open(url, '_self')
     } catch (error) {
@@ -156,10 +185,13 @@ export function useOAuthLogin(
     setIsLoading(true)
     try {
       await resetSession()
-      const state = await createOAuthFlow('linuxdo', 'login')
-      rememberOAuthLoginRedirect(state, redirectTo)
+      const authorization = await initializeOAuthLogin('linuxdo')
+      rememberOAuthLoginRedirect(authorization.state, redirectTo)
 
-      const url = buildLinuxDOOAuthUrl(status.linuxdo_client_id, state)
+      const url = buildLinuxDOOAuthUrl(
+        status.linuxdo_client_id,
+        authorization.state
+      )
       window.open(url, '_self')
     } catch (error) {
       handleServerError(
@@ -181,7 +213,7 @@ export function useOAuthLogin(
     }
     setIsLoading(true)
     try {
-      const authorization = await createOAuthAuthorization('telegram', 'login')
+      const authorization = await initializeOAuthLogin('telegram')
       if (!authorization.authorizationUrl) {
         throw new AuthOperationError('Failed to initialize OAuth')
       }
@@ -201,15 +233,15 @@ export function useOAuthLogin(
     setIsLoading(true)
     try {
       await resetSession()
-      const state = await createOAuthFlow(provider.slug, 'login')
-      rememberOAuthLoginRedirect(state, redirectTo)
+      const authorization = await initializeOAuthLogin(provider.slug)
+      rememberOAuthLoginRedirect(authorization.state, redirectTo)
 
       const redirectUri = `${window.location.origin}/oauth/${provider.slug}`
       const url = new URL(provider.authorization_endpoint)
       url.searchParams.set('client_id', provider.client_id)
       url.searchParams.set('redirect_uri', redirectUri)
       url.searchParams.set('response_type', 'code')
-      url.searchParams.set('state', state)
+      url.searchParams.set('state', authorization.state)
       if (provider.scopes) {
         url.searchParams.set('scope', provider.scopes)
       }

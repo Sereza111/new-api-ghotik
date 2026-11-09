@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 package model
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strconv"
@@ -44,6 +45,8 @@ var (
 	ErrResellerQuotaKeyExpired           = errors.New("expired reseller key quota cannot be increased")
 	ErrResellerQuotaPurchaseRequired     = errors.New("reseller quota increase requires an authorized purchase")
 	ErrResellerQuotaWalletInsufficient   = errors.New("insufficient balance to increase reseller quota")
+	ErrResellerBatchRequestConflict      = errors.New("reseller batch request conflicts with an existing issuance")
+	ErrResellerRequestIDReserved         = errors.New("reseller request id uses a reserved internal prefix")
 	errResellerWalletInsufficient        = errors.New("reseller wallet quota is insufficient")
 )
 
@@ -51,6 +54,8 @@ const (
 	ResellerQuotaAdjustmentAdd      = "add"
 	ResellerQuotaAdjustmentSubtract = "subtract"
 	ResellerQuotaAdjustmentSet      = "set"
+	MaxResellerBatchSize            = 100
+	resellerBatchRequestIDPrefix    = "batch:"
 )
 
 // ResellerKey stores commercial terms separately from the token secret.
@@ -426,7 +431,21 @@ func GetAllUserResellerKeys(userId int) ([]ResellerKeyWithToken, error) {
 }
 
 func GetResellerKeyByRequestID(userId int, requestID string) (*ResellerKeyWithToken, error) {
-	return getResellerKeyByRequestID(DB, userId, requestID)
+	requestID = strings.TrimSpace(requestID)
+	record, err := getResellerKeyByRequestID(DB, userId, requestID)
+	if err == nil && record != nil {
+		if cacheErr := invalidateUserCache(userId); cacheErr != nil {
+			common.SysLog("failed to invalidate user quota cache after reseller replay lookup: " + cacheErr.Error())
+		}
+		return record, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if strings.HasPrefix(requestID, resellerBatchRequestIDPrefix) {
+		return nil, ErrResellerRequestIDReserved
+	}
+	return nil, nil
 }
 
 // DeleteResellerToken permanently removes a reseller key and its commercial
@@ -530,33 +549,40 @@ func CreatePrepaidResellerToken(token *Token, metadata *ResellerKey, walletQuota
 	return created, err
 }
 
+func validateResellerTokenPurchase(token *Token, metadata *ResellerKey) error {
+	if token == nil || metadata == nil {
+		return errors.New("reseller token and metadata are required")
+	}
+	if token.UserId <= 0 || metadata.UserId != token.UserId || !IsResellerTokenKey(token.Key) || token.Group == "" || token.Group == "auto" {
+		return errors.New("invalid reseller token ownership")
+	}
+	if token.Id != 0 {
+		return errors.New("reseller token id must be empty")
+	}
+	if token.UnlimitedQuota || metadata.TokenMillions <= 0 || metadata.TokenMillions > int(^uint(0)>>1)/1_000_000 ||
+		token.RemainQuota != metadata.TokenMillions*1_000_000 || token.UsedQuota != 0 {
+		return errors.New("invalid reseller token allocation")
+	}
+	token.QuotaMode = TokenQuotaModeTokens
+	if metadata.MarkupPercent <= 0 || metadata.BaseCostPerMillion == "" || metadata.Endpoint == "" || metadata.CreatedTime != token.CreatedTime {
+		return errors.New("invalid reseller commercial metadata")
+	}
+	return nil
+}
+
 // CreatePrepaidResellerTokenWithRequestID atomically issues a prepaid key and
 // optionally makes the operation idempotent.  When requestID is repeated for
 // the same owner, the original token/metadata are returned without another
 // wallet debit.  The caller can safely replay the full secret in that case.
 func CreatePrepaidResellerTokenWithRequestID(token *Token, metadata *ResellerKey, walletQuota int, requestID string) (bool, *ResellerKeyWithToken, error) {
-	if token == nil || metadata == nil {
-		return false, nil, errors.New("reseller token and metadata are required")
+	if err := validateResellerTokenPurchase(token, metadata); err != nil {
+		return false, nil, err
 	}
 	if walletQuota <= 0 {
 		return false, nil, errors.New("reseller wallet quota must be positive")
 	}
 	if err := common.ValidateWalletQuota(walletQuota); err != nil {
 		return false, nil, err
-	}
-	if token.UserId <= 0 || metadata.UserId != token.UserId || !IsResellerTokenKey(token.Key) || token.Group == "" || token.Group == "auto" {
-		return false, nil, errors.New("invalid reseller token ownership")
-	}
-	if token.Id != 0 {
-		return false, nil, errors.New("reseller token id must be empty")
-	}
-	if token.UnlimitedQuota || metadata.TokenMillions <= 0 || metadata.TokenMillions > int(^uint(0)>>1)/1_000_000 ||
-		token.RemainQuota != metadata.TokenMillions*1_000_000 || token.UsedQuota != 0 {
-		return false, nil, errors.New("invalid reseller token allocation")
-	}
-	token.QuotaMode = TokenQuotaModeTokens
-	if metadata.MarkupPercent <= 0 || metadata.BaseCostPerMillion == "" || metadata.Endpoint == "" || metadata.CreatedTime != token.CreatedTime {
-		return false, nil, errors.New("invalid reseller commercial metadata")
 	}
 	requestID = strings.TrimSpace(requestID)
 	if utf8.RuneCountInString(requestID) > 128 || strings.ContainsAny(requestID, "\r\n") {
@@ -580,6 +606,9 @@ func CreatePrepaidResellerTokenWithRequestID(token *Token, metadata *ResellerKey
 				createdRecord = existingRecord
 				return nil
 			}
+			if strings.HasPrefix(requestID, resellerBatchRequestIDPrefix) {
+				return ErrResellerRequestIDReserved
+			}
 			requestIDCopy := requestID
 			metadata.RequestId = &requestIDCopy
 		}
@@ -598,6 +627,9 @@ func CreatePrepaidResellerTokenWithRequestID(token *Token, metadata *ResellerKey
 		}
 		if tokenCount >= int64(operation_setting.GetMaxUserTokens()) {
 			return ErrResellerTokenLimitReached
+		}
+		if strings.TrimSpace(token.Name) == "" {
+			token.Name = fmt.Sprintf("Reseller key %d", tokenCount+1)
 		}
 
 		result := tx.Model(&User{}).
@@ -626,12 +658,182 @@ func CreatePrepaidResellerTokenWithRequestID(token *Token, metadata *ResellerKey
 		}
 		return false, nil, err
 	}
-	if createdRecord != nil && createdRecord.Token.Id == token.Id {
+	if createdRecord != nil {
 		if cacheErr := invalidateUserCache(token.UserId); cacheErr != nil {
-			common.SysLog("failed to invalidate user quota cache after reseller purchase: " + cacheErr.Error())
+			common.SysLog("failed to invalidate user quota cache after reseller purchase or replay: " + cacheErr.Error())
 		}
 	}
 	return createdRecord != nil && createdRecord.Token.Id == token.Id, createdRecord, nil
+}
+
+func resellerBatchRequestIDs(ownerID int, requestID string, idempotencyPayload string, quantity int) (string, []string) {
+	requestDigest := base64.RawStdEncoding.EncodeToString(common.Sha256Raw([]byte(strconv.Itoa(ownerID) + ":" + requestID)))
+	payloadDigest := base64.RawStdEncoding.EncodeToString(common.Sha256Raw([]byte(idempotencyPayload)))
+	requestPrefix := resellerBatchRequestIDPrefix + requestDigest + ":"
+	requestIDs := make([]string, quantity)
+	for index := range requestIDs {
+		requestIDs[index] = requestPrefix + payloadDigest + fmt.Sprintf(":%03d:%03d", quantity, index+1)
+	}
+	return requestPrefix, requestIDs
+}
+
+func getResellerKeyBatchByRequestID(db *gorm.DB, ownerID int, requestID string, idempotencyPayload string, quantity int) ([]ResellerKeyWithToken, error) {
+	if db == nil || ownerID <= 0 || requestID == "" || idempotencyPayload == "" || quantity < 1 || quantity > MaxResellerBatchSize {
+		return nil, errors.New("invalid reseller batch idempotency lookup")
+	}
+	requestPrefix, batchRequestIDs := resellerBatchRequestIDs(ownerID, requestID, idempotencyPayload, quantity)
+	var existing []ResellerKey
+	if err := db.Where("user_id = ? AND request_id LIKE ?", ownerID, requestPrefix+"%").Find(&existing).Error; err != nil {
+		return nil, err
+	}
+	if len(existing) == 0 {
+		return nil, nil
+	}
+	if len(existing) != quantity {
+		return nil, ErrResellerBatchRequestConflict
+	}
+	byRequestID := make(map[string]ResellerKey, len(existing))
+	for _, item := range existing {
+		if item.RequestId == nil {
+			return nil, ErrResellerBatchRequestConflict
+		}
+		byRequestID[*item.RequestId] = item
+	}
+	result := make([]ResellerKeyWithToken, 0, quantity)
+	for _, itemRequestID := range batchRequestIDs {
+		item, ok := byRequestID[itemRequestID]
+		if !ok {
+			return nil, ErrResellerBatchRequestConflict
+		}
+		var token Token
+		if err := db.Where("id = ? AND user_id = ?", item.TokenId, ownerID).First(&token).Error; err != nil {
+			return nil, err
+		}
+		if !IsResellerTokenKey(token.Key) {
+			return nil, ErrResellerBatchRequestConflict
+		}
+		result = append(result, ResellerKeyWithToken{Metadata: item, Token: token})
+	}
+	return result, nil
+}
+
+// GetResellerKeyBatchByRequestID returns the original batch before mutable
+// group and pricing validation, so a client can recover an ambiguous response.
+func GetResellerKeyBatchByRequestID(ownerID int, requestID string, idempotencyPayload string, quantity int) ([]ResellerKeyWithToken, error) {
+	records, err := getResellerKeyBatchByRequestID(DB, ownerID, strings.TrimSpace(requestID), idempotencyPayload, quantity)
+	if err == nil && len(records) > 0 {
+		if cacheErr := invalidateUserCache(ownerID); cacheErr != nil {
+			common.SysLog("failed to invalidate user quota cache after reseller batch replay lookup: " + cacheErr.Error())
+		}
+	}
+	return records, err
+}
+
+// CreatePrepaidResellerTokenBatchWithRequestID issues an entire reseller key
+// batch in one transaction. A repeated request ID and payload return the
+// original batch; changing either the payload or size is a conflict.
+func CreatePrepaidResellerTokenBatchWithRequestID(tokens []Token, metadata []ResellerKey, walletQuota int, requestID string, idempotencyPayload string) (bool, []ResellerKeyWithToken, error) {
+	if len(tokens) == 0 || len(tokens) != len(metadata) || len(tokens) > MaxResellerBatchSize {
+		return false, nil, errors.New("reseller batch size must be between 1 and 100")
+	}
+	if walletQuota <= 0 {
+		return false, nil, errors.New("reseller wallet quota must be positive")
+	}
+	if err := common.ValidateWalletQuota(walletQuota); err != nil {
+		return false, nil, err
+	}
+	ownerID := tokens[0].UserId
+	for index := range tokens {
+		if err := validateResellerTokenPurchase(&tokens[index], &metadata[index]); err != nil {
+			return false, nil, err
+		}
+		if tokens[index].UserId != ownerID {
+			return false, nil, errors.New("reseller batch owners must match")
+		}
+	}
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" || idempotencyPayload == "" || utf8.RuneCountInString(requestID) > 128 || strings.ContainsAny(requestID, "\r\n") {
+		return false, nil, errors.New("invalid reseller request id")
+	}
+	_, batchRequestIDs := resellerBatchRequestIDs(ownerID, requestID, idempotencyPayload, len(tokens))
+
+	insufficientBalance := false
+	created := false
+	result := make([]ResellerKeyWithToken, 0, len(tokens))
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var owner User
+		if err := lockForUpdate(tx).Where("id = ?", ownerID).First(&owner).Error; err != nil {
+			return err
+		}
+
+		existing, err := getResellerKeyBatchByRequestID(tx, ownerID, requestID, idempotencyPayload, len(tokens))
+		if err != nil {
+			return err
+		}
+		if len(existing) > 0 {
+			result = append(result, existing...)
+			return nil
+		}
+
+		activeSubscription, err := getActiveResellerSubscriptionAt(tx, ownerID, common.GetTimestamp())
+		if err != nil {
+			return err
+		}
+		if activeSubscription == nil {
+			return ErrResellerSubscriptionRequired
+		}
+
+		var tokenCount int64
+		if err := tx.Model(&Token{}).Where("user_id = ?", ownerID).Count(&tokenCount).Error; err != nil {
+			return err
+		}
+		if tokenCount+int64(len(tokens)) > int64(operation_setting.GetMaxUserTokens()) {
+			return ErrResellerTokenLimitReached
+		}
+		for index := range tokens {
+			if strings.TrimSpace(tokens[index].Name) == "" {
+				tokens[index].Name = fmt.Sprintf("Reseller key %d", tokenCount+int64(index)+1)
+			}
+		}
+
+		debit := tx.Model(&User{}).
+			Where("id = ? AND quota >= ?", ownerID, walletQuota).
+			Update("quota", gorm.Expr("quota - ?", walletQuota))
+		if debit.Error != nil {
+			return debit.Error
+		}
+		if debit.RowsAffected != 1 {
+			insufficientBalance = true
+			return errResellerWalletInsufficient
+		}
+
+		for index := range tokens {
+			if err := tx.Create(&tokens[index]).Error; err != nil {
+				return err
+			}
+			requestIDCopy := batchRequestIDs[index]
+			metadata[index].TokenId = tokens[index].Id
+			metadata[index].RequestId = &requestIDCopy
+			if err := tx.Create(&metadata[index]).Error; err != nil {
+				return err
+			}
+			result = append(result, ResellerKeyWithToken{Metadata: metadata[index], Token: tokens[index]})
+		}
+		created = true
+		return nil
+	})
+	if err != nil {
+		if insufficientBalance {
+			return false, nil, nil
+		}
+		return false, nil, err
+	}
+	if len(result) > 0 {
+		if cacheErr := invalidateUserCache(ownerID); cacheErr != nil {
+			common.SysLog("failed to invalidate user quota cache after reseller batch purchase or replay: " + cacheErr.Error())
+		}
+	}
+	return created, result, nil
 }
 
 func reserveResellerTokenQuota(id int, key string, quota int) (bool, error) {

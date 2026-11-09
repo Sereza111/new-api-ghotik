@@ -17,9 +17,12 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -640,6 +643,9 @@ func TestTokenAllowUserQuotaQueryOnCreateAndUpdate(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := setupTokenControllerTestDB(t)
+			require.NoError(t, db.Create(&model.User{
+				Id: 1, Username: "quota-query-user", Status: common.UserStatusEnabled,
+			}).Error)
 			body := map[string]any{"name": "quota-query", "expired_time": -1, "unlimited_quota": true, "status": common.TokenStatusEnabled}
 			if tc.field != nil {
 				body["allow_user_quota_query"] = tc.field
@@ -672,6 +678,44 @@ func TestTokenAllowUserQuotaQueryOnCreateAndUpdate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRegisterDefaultTokenHonorsUserTokenLimit(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	require.NoError(t, i18n.Init())
+
+	previousRegisterEnabled := common.RegisterEnabled
+	previousPasswordRegisterEnabled := common.PasswordRegisterEnabled
+	previousEmailVerificationEnabled := common.EmailVerificationEnabled
+	previousGenerateDefaultToken := constant.GenerateDefaultToken
+	previousMaxTokens := operation_setting.GetTokenSetting().MaxUserTokens
+	common.RegisterEnabled = true
+	common.PasswordRegisterEnabled = true
+	common.EmailVerificationEnabled = false
+	constant.GenerateDefaultToken = true
+	operation_setting.GetTokenSetting().MaxUserTokens = 0
+	t.Cleanup(func() {
+		common.RegisterEnabled = previousRegisterEnabled
+		common.PasswordRegisterEnabled = previousPasswordRegisterEnabled
+		common.EmailVerificationEnabled = previousEmailVerificationEnabled
+		constant.GenerateDefaultToken = previousGenerateDefaultToken
+		operation_setting.GetTokenSetting().MaxUserTokens = previousMaxTokens
+	})
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/user/register", map[string]any{
+		"username": "default-limit",
+		"password": "strong-password",
+	}, 0)
+	Register(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	assert.False(t, response.Success)
+	assert.Equal(t, "Failed to create default token", response.Message)
+	var registeredUser model.User
+	require.NoError(t, db.Where("username = ?", "default-limit").First(&registeredUser).Error)
+	var tokenCount int64
+	require.NoError(t, db.Model(&model.Token{}).Where("user_id = ?", registeredUser.Id).Count(&tokenCount).Error)
+	assert.Zero(t, tokenCount)
 }
 
 func TestGetTokenUsageFollowsTheUserQuotaSwitchAndIPWhitelist(t *testing.T) {

@@ -7,16 +7,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
 	"github.com/QuantumNous/new-api/service"
@@ -29,7 +32,10 @@ import (
 	"gorm.io/gorm"
 )
 
-type telegramTestTransport struct{ target *url.URL }
+type telegramTestTransport struct {
+	target *url.URL
+	base   http.RoundTripper
+}
 
 func (transport telegramTestTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	if request.URL.Host != "oauth.telegram.org" {
@@ -37,7 +43,13 @@ func (transport telegramTestTransport) RoundTrip(request *http.Request) (*http.R
 	}
 	clone := request.Clone(request.Context())
 	clone.URL.Scheme, clone.URL.Host = transport.target.Scheme, transport.target.Host
-	return http.DefaultTransport.RoundTrip(clone)
+	return transport.base.RoundTrip(clone)
+}
+
+type telegramRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (roundTrip telegramRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return roundTrip(request)
 }
 
 type telegramTestGrant struct {
@@ -47,30 +59,45 @@ type telegramTestGrant struct {
 }
 
 type telegramOAuthFixture struct {
-	user        *model.User
-	identity    service.AuthIdentity
-	client      *http.Client
-	key         *rsa.PrivateKey
-	mutex       sync.Mutex
-	grants      map[string]telegramTestGrant
-	tokenStatus int
-	jwksStatus  int
+	user             *model.User
+	identity         service.AuthIdentity
+	client           *http.Client
+	key              *rsa.PrivateKey
+	mutex            sync.Mutex
+	grants           map[string]telegramTestGrant
+	browserCookies   map[string]*http.Cookie
+	tokenStatus      int
+	jwksStatus       int
+	turnstileToken   string
+	turnstileSuccess bool
+	legalConsent     bool
 }
 
 func setupTelegramOAuthTest(t *testing.T) *telegramOAuthFixture {
 	t.Helper()
 	user, identity := setupSecurityEnrollmentTest(t)
+	logConnection, err := model.LOG_DB.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = logConnection.Close() })
 	require.NoError(t, model.DB.AutoMigrate(&model.ExternalIdentityClaim{}, &model.Option{}))
 	previousEnabled := common.TelegramOAuthEnabled
 	previousSettings := *system_setting.GetTelegramSettings()
 	previousAddress := system_setting.ServerAddress
 	previousProvider := oauth.GetProvider("telegram")
+	previousRegisterEnabled := common.RegisterEnabled
+	previousTurnstileEnabled := common.TurnstileCheckEnabled
+	previousTurnstileSecret := common.TurnstileSecretKey
+	previousLegalSettings := *system_setting.GetLegalSettings()
 	common.OptionMapRWMutex.Lock()
 	previousOptions := common.OptionMap
 	common.OptionMap = make(map[string]string)
 	maps.Copy(common.OptionMap, previousOptions)
 	common.OptionMapRWMutex.Unlock()
 	common.TelegramOAuthEnabled = true
+	common.RegisterEnabled = true
+	common.TurnstileCheckEnabled = false
+	common.TurnstileSecretKey = "turnstile-test-secret"
+	*system_setting.GetLegalSettings() = system_setting.LegalSettings{}
 	*system_setting.GetTelegramSettings() = system_setting.TelegramSettings{ClientID: "12345", ClientSecret: "telegram-client-secret"}
 	system_setting.ServerAddress = "https://example.com"
 	t.Cleanup(func() {
@@ -78,6 +105,10 @@ func setupTelegramOAuthTest(t *testing.T) *telegramOAuthFixture {
 		common.OptionMap = previousOptions
 		common.OptionMapRWMutex.Unlock()
 		common.TelegramOAuthEnabled = previousEnabled
+		common.RegisterEnabled = previousRegisterEnabled
+		common.TurnstileCheckEnabled = previousTurnstileEnabled
+		common.TurnstileSecretKey = previousTurnstileSecret
+		*system_setting.GetLegalSettings() = previousLegalSettings
 		*system_setting.GetTelegramSettings() = previousSettings
 		system_setting.ServerAddress = previousAddress
 		oauth.Register("telegram", previousProvider)
@@ -85,7 +116,38 @@ func setupTelegramOAuthTest(t *testing.T) *telegramOAuthFixture {
 	})
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
-	fixture := &telegramOAuthFixture{user: user, identity: identity, key: key, grants: map[string]telegramTestGrant{}}
+	fixture := &telegramOAuthFixture{
+		user: user, identity: identity, key: key,
+		grants: map[string]telegramTestGrant{}, browserCookies: map[string]*http.Cookie{}, turnstileSuccess: true,
+	}
+	baseTransport := http.DefaultTransport
+	http.DefaultTransport = telegramRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Host != "challenges.cloudflare.com" {
+			return baseTransport.RoundTrip(request)
+		}
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			return nil, err
+		}
+		form, err := url.ParseQuery(string(body))
+		if err != nil {
+			return nil, err
+		}
+		fixture.mutex.Lock()
+		success := fixture.turnstileSuccess && form.Get("response") == fixture.turnstileToken
+		fixture.mutex.Unlock()
+		payload, err := common.Marshal(map[string]any{"success": success})
+		if err != nil {
+			return nil, err
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(string(payload))),
+			Request:    request,
+		}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = baseTransport })
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		fixture.mutex.Lock()
 		defer fixture.mutex.Unlock()
@@ -146,20 +208,14 @@ func setupTelegramOAuthTest(t *testing.T) *telegramOAuthFixture {
 	t.Cleanup(server.Close)
 	target, err := url.Parse(server.URL)
 	require.NoError(t, err)
-	fixture.client = &http.Client{Transport: telegramTestTransport{target: target}, Timeout: 5 * time.Second}
+	fixture.client = &http.Client{Transport: telegramTestTransport{target: target, base: baseTransport}, Timeout: 5 * time.Second}
 	oauth.Register("telegram", oauth.NewTelegramProvider(fixture.client))
 	return fixture
 }
 
 func (fixture *telegramOAuthFixture) authorization(t *testing.T, intent string, identity service.AuthIdentity, scope string, claims jwt.MapClaims) (string, string) {
 	t.Helper()
-	request, err := common.Marshal(oauthStateRequest{Provider: "telegram", Intent: intent, Scope: scope})
-	require.NoError(t, err)
-	proof := ""
-	if intent == "bind" {
-		proof = issueSecurityEnrollmentProof(t, identity, service.VerificationOperation{Scope: service.VerificationScopeAccountBind, Context: []byte(`{"provider":"telegram"}`)}, service.VerificationMethodPassword)
-	}
-	response := securityEnrollmentRequest("POST", "/api/oauth/state", string(request), proof, identity, GenerateOAuthCode)
+	response := fixture.authorizationResponse(t, intent, identity, scope)
 	var body securityEnrollmentResponse
 	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
 	require.True(t, body.Success, response.Body.String())
@@ -179,8 +235,28 @@ func (fixture *telegramOAuthFixture) authorization(t *testing.T, intent string, 
 	code := "code-" + data.State
 	fixture.mutex.Lock()
 	fixture.grants[code] = telegramTestGrant{challenge: authorizationURL.Query().Get("code_challenge"), claims: claims, key: fixture.key}
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == oauthBrowserCookieName(data.State) {
+			fixture.browserCookies[data.State] = cookie
+		}
+	}
 	fixture.mutex.Unlock()
 	return data.State, code
+}
+
+func (fixture *telegramOAuthFixture) authorizationResponse(t *testing.T, intent string, identity service.AuthIdentity, scope string) *httptest.ResponseRecorder {
+	t.Helper()
+	request, err := common.Marshal(oauthStateRequest{
+		Provider: "telegram", Intent: intent, Scope: scope,
+		Turnstile: fixture.turnstileToken, LegalConsent: fixture.legalConsent,
+	})
+	require.NoError(t, err)
+	proof := ""
+	if intent == "bind" {
+		proof = issueSecurityEnrollmentProof(t, identity, service.VerificationOperation{Scope: service.VerificationScopeAccountBind, Context: []byte(`{"provider":"telegram"}`)}, service.VerificationMethodPassword)
+	}
+	response := securityEnrollmentRequest("POST", "/api/oauth/state", string(request), proof, identity, GenerateOAuthCode)
+	return response
 }
 
 func telegramIdentityClaims(id any) jwt.MapClaims {
@@ -191,22 +267,28 @@ func telegramIdentityClaims(id any) jwt.MapClaims {
 	}
 }
 
-func telegramOAuthCallback(state, code string, identity service.AuthIdentity) *httptest.ResponseRecorder {
+func (fixture *telegramOAuthFixture) callback(state, code string, identity service.AuthIdentity) *httptest.ResponseRecorder {
 	path := "/api/oauth/telegram?" + url.Values{"state": {state}, "code": {code}}.Encode()
+	fixture.mutex.Lock()
+	cookie := fixture.browserCookies[state]
+	fixture.mutex.Unlock()
 	return securityEnrollmentRequest("GET", path, "", "", identity, func(c *gin.Context) {
 		c.Params = gin.Params{{Key: "provider", Value: "telegram"}}
 		HandleOAuth(c)
-	})
+	}, cookie)
 }
 
 func TestTelegramOAuthPreservesExistingAccountAndBinding(t *testing.T) {
 	fixture := setupTelegramOAuthTest(t)
+	common.TurnstileCheckEnabled = true
+	fixture.turnstileToken = "existing-user-turnstile"
+	system_setting.GetLegalSettings().UserAgreement = "current terms"
 	const telegramID = "1234567890123456"
 	require.NoError(t, model.DB.Model(fixture.user).Update("telegram_id", telegramID).Error)
 	require.NoError(t, model.InitializeExternalIdentityClaims())
 	require.NoError(t, model.InitializeExternalIdentityClaims())
 	state, code := fixture.authorization(t, "login", service.AuthIdentity{}, "", telegramIdentityClaims(json.Number(telegramID)))
-	response := telegramOAuthCallback(state, code, service.AuthIdentity{})
+	response := fixture.callback(state, code, service.AuthIdentity{})
 	var body securityEnrollmentResponse
 	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
 	require.True(t, body.Success, response.Body.String())
@@ -223,14 +305,213 @@ func TestTelegramOAuthPreservesExistingAccountAndBinding(t *testing.T) {
 	var claim model.ExternalIdentityClaim
 	require.NoError(t, model.DB.Where("provider = ? AND subject = ?", "telegram", telegramID).First(&claim).Error)
 	assert.Equal(t, stored.Id, claim.UserId)
-	replay := telegramOAuthCallback(state, code, service.AuthIdentity{})
+	replay := fixture.callback(state, code, service.AuthIdentity{})
 	assert.Equal(t, http.StatusForbidden, replay.Code)
-	state, code = fixture.authorization(t, "login", service.AuthIdentity{}, "", telegramIdentityClaims(999))
-	response = telegramOAuthCallback(state, code, service.AuthIdentity{})
-	assert.Contains(t, response.Body.String(), "TELEGRAM_ACCOUNT_NOT_BOUND")
-	var count int64
-	require.NoError(t, model.DB.Model(&model.User{}).Count(&count).Error)
-	assert.EqualValues(t, 1, count)
+}
+
+func TestOAuthLoginStateRequiresServerVerifiedTurnstile(t *testing.T) {
+	t.Run("honors the caller snapshot when settings change", func(t *testing.T) {
+		fixture := setupTelegramOAuthTest(t)
+		fixture.turnstileToken = "snapshot-required-turnstile"
+		fixture.turnstileSuccess = false
+		common.TurnstileCheckEnabled = false
+		response := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(response)
+		c.Request = httptest.NewRequest(http.MethodPost, "/api/oauth/state", nil)
+
+		assert.False(t, middleware.VerifyTurnstileToken(c, fixture.turnstileToken, true))
+		assert.NotContains(t, response.Body.String(), fixture.turnstileToken)
+	})
+
+	t.Run("rejects a missing response before creating state", func(t *testing.T) {
+		fixture := setupTelegramOAuthTest(t)
+		common.TurnstileCheckEnabled = true
+		response := fixture.authorizationResponse(t, "login", service.AuthIdentity{}, "")
+		var body securityEnrollmentResponse
+		require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
+		assert.False(t, body.Success)
+		if fixture.turnstileToken != "" {
+			assert.NotContains(t, response.Body.String(), fixture.turnstileToken)
+		}
+
+		var flows int64
+		require.NoError(t, model.DB.Model(&model.AuthFlow{}).Count(&flows).Error)
+		assert.Zero(t, flows)
+	})
+
+	t.Run("rejects a provider-declined response before creating state", func(t *testing.T) {
+		fixture := setupTelegramOAuthTest(t)
+		common.TurnstileCheckEnabled = true
+		fixture.turnstileToken = "invalid-turnstile"
+		fixture.turnstileSuccess = false
+		response := fixture.authorizationResponse(t, "login", service.AuthIdentity{}, "")
+		var body securityEnrollmentResponse
+		require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
+		assert.False(t, body.Success)
+		assert.NotContains(t, response.Body.String(), fixture.turnstileToken)
+
+		var flows int64
+		require.NoError(t, model.DB.Model(&model.AuthFlow{}).Count(&flows).Error)
+		assert.Zero(t, flows)
+	})
+}
+
+func TestTelegramOAuthRegistrationIsAtomicAndReplaySafe(t *testing.T) {
+	t.Run("creates user and durable identity claim", func(t *testing.T) {
+		fixture := setupTelegramOAuthTest(t)
+		common.TurnstileCheckEnabled = true
+		fixture.turnstileToken = "new-user-turnstile"
+		fixture.legalConsent = true
+		system_setting.GetLegalSettings().UserAgreement = "registration terms"
+		system_setting.GetLegalSettings().PrivacyPolicy = "registration privacy"
+		state, code := fixture.authorization(t, "login", service.AuthIdentity{}, "", telegramIdentityClaims(999))
+		flow, err := model.GetAuthFlow(state, model.AuthFlowMatch{
+			Purpose: model.AuthFlowPurposeOAuth, Provider: "telegram", Intent: model.AuthFlowIntentLogin,
+		})
+		require.NoError(t, err)
+		assert.NotContains(t, flow.Payload, fixture.turnstileToken)
+		assert.Contains(t, flow.Payload, legalDocumentHash("registration terms"))
+		response := fixture.callback(state, code, service.AuthIdentity{})
+		var body securityEnrollmentResponse
+		require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
+		require.True(t, body.Success, response.Body.String())
+
+		stored, err := model.GetUserByTelegramID("999")
+		require.NoError(t, err)
+		assert.Equal(t, "telegram-user", stored.Username)
+		assert.Equal(t, "Telegram User", stored.DisplayName)
+		assert.Equal(t, common.UserStatusEnabled, stored.Status)
+
+		var claim model.ExternalIdentityClaim
+		require.NoError(t, model.DB.Where("provider = ? AND subject = ?", model.ExternalIdentityProviderTelegram, "999").First(&claim).Error)
+		assert.Equal(t, stored.Id, claim.UserId)
+		assert.Equal(t, http.StatusForbidden, fixture.callback(state, code, service.AuthIdentity{}).Code)
+
+		var users, claims int64
+		require.NoError(t, model.DB.Model(&model.User{}).Count(&users).Error)
+		require.NoError(t, model.DB.Model(&model.ExternalIdentityClaim{}).Where("provider = ? AND subject = ?", model.ExternalIdentityProviderTelegram, "999").Count(&claims).Error)
+		assert.EqualValues(t, 2, users)
+		assert.EqualValues(t, 1, claims)
+
+		var audit model.AuditLog
+		require.NoError(t, model.LOG_DB.Where("user_id = ? AND action = ?", stored.Id, "user.oauth_register").First(&audit).Error)
+		assert.Equal(t, model.AuditCategorySecurity, audit.Category)
+		auditMetadata, err := common.Marshal(audit.Other)
+		require.NoError(t, err)
+		assert.Contains(t, string(auditMetadata), legalDocumentHash("registration privacy"))
+		assert.NotContains(t, string(auditMetadata), fixture.turnstileToken)
+	})
+
+	t.Run("rejects an unknown identity when assurance is missing", func(t *testing.T) {
+		fixture := setupTelegramOAuthTest(t)
+		state, code := fixture.authorization(t, "login", service.AuthIdentity{}, "", telegramIdentityClaims(999))
+		flow, err := model.GetAuthFlow(state, model.AuthFlowMatch{
+			Purpose: model.AuthFlowPurposeOAuth, Provider: "telegram", Intent: model.AuthFlowIntentLogin,
+		})
+		require.NoError(t, err)
+		var payload oauthFlowPayload
+		require.NoError(t, common.UnmarshalJsonStr(flow.Payload, &payload))
+		payload.RegistrationAssurance = nil
+		encoded, err := common.Marshal(payload)
+		require.NoError(t, err)
+		require.NoError(t, model.DB.Model(flow).Update("payload", string(encoded)).Error)
+
+		response := fixture.callback(state, code, service.AuthIdentity{})
+		assert.Contains(t, response.Body.String(), `"success":false`)
+		var users int64
+		require.NoError(t, model.DB.Model(&model.User{}).Count(&users).Error)
+		assert.EqualValues(t, 1, users)
+	})
+
+	t.Run("rejects missing consent without creating an account", func(t *testing.T) {
+		fixture := setupTelegramOAuthTest(t)
+		system_setting.GetLegalSettings().UserAgreement = "registration terms"
+		state, code := fixture.authorization(t, "login", service.AuthIdentity{}, "", telegramIdentityClaims(999))
+		response := fixture.callback(state, code, service.AuthIdentity{})
+		assert.Contains(t, response.Body.String(), `"success":false`)
+
+		var users, claims int64
+		require.NoError(t, model.DB.Model(&model.User{}).Count(&users).Error)
+		require.NoError(t, model.DB.Model(&model.ExternalIdentityClaim{}).Count(&claims).Error)
+		assert.EqualValues(t, 1, users)
+		assert.Zero(t, claims)
+	})
+
+	t.Run("rejects consent captured for stale documents", func(t *testing.T) {
+		fixture := setupTelegramOAuthTest(t)
+		fixture.legalConsent = true
+		system_setting.GetLegalSettings().PrivacyPolicy = "privacy v1"
+		state, code := fixture.authorization(t, "login", service.AuthIdentity{}, "", telegramIdentityClaims(999))
+		system_setting.GetLegalSettings().PrivacyPolicy = "privacy v2"
+		response := fixture.callback(state, code, service.AuthIdentity{})
+		assert.Contains(t, response.Body.String(), `"success":false`)
+
+		var users, claims int64
+		require.NoError(t, model.DB.Model(&model.User{}).Count(&users).Error)
+		require.NoError(t, model.DB.Model(&model.ExternalIdentityClaim{}).Count(&claims).Error)
+		assert.EqualValues(t, 1, users)
+		assert.Zero(t, claims)
+	})
+
+	t.Run("honors disabled registration", func(t *testing.T) {
+		fixture := setupTelegramOAuthTest(t)
+		state, code := fixture.authorization(t, "login", service.AuthIdentity{}, "", telegramIdentityClaims(999))
+		common.RegisterEnabled = false
+		response := fixture.callback(state, code, service.AuthIdentity{})
+		assert.Contains(t, response.Body.String(), `"success":false`)
+
+		var users, claims int64
+		require.NoError(t, model.DB.Model(&model.User{}).Count(&users).Error)
+		require.NoError(t, model.DB.Model(&model.ExternalIdentityClaim{}).Count(&claims).Error)
+		assert.EqualValues(t, 1, users)
+		assert.Zero(t, claims)
+	})
+
+	t.Run("does not revive a deleted identity", func(t *testing.T) {
+		fixture := setupTelegramOAuthTest(t)
+		owner := &model.User{Username: "deleted-owner", AffCode: "deleted-owner", Status: common.UserStatusEnabled, AuthVersion: 1, TelegramId: "777"}
+		require.NoError(t, model.DB.Create(owner).Error)
+		require.NoError(t, model.InitializeExternalIdentityClaims())
+		require.NoError(t, model.DB.Delete(owner).Error)
+
+		var before int64
+		require.NoError(t, model.DB.Unscoped().Model(&model.User{}).Count(&before).Error)
+		state, code := fixture.authorization(t, "login", service.AuthIdentity{}, "", telegramIdentityClaims(777))
+		response := fixture.callback(state, code, service.AuthIdentity{})
+		assert.Contains(t, response.Body.String(), `"success":false`)
+
+		var after int64
+		require.NoError(t, model.DB.Unscoped().Model(&model.User{}).Count(&after).Error)
+		assert.Equal(t, before, after)
+		var claim model.ExternalIdentityClaim
+		require.NoError(t, model.DB.Where("provider = ? AND subject = ?", model.ExternalIdentityProviderTelegram, "777").First(&claim).Error)
+		assert.Equal(t, owner.Id, claim.UserId)
+	})
+
+	t.Run("rolls back user insert when identity is already claimed", func(t *testing.T) {
+		fixture := setupTelegramOAuthTest(t)
+		owner := &model.User{Username: "claim-owner", AffCode: "claim-owner", Status: common.UserStatusEnabled, AuthVersion: 1}
+		require.NoError(t, model.DB.Create(owner).Error)
+		require.NoError(t, model.DB.Transaction(func(tx *gorm.DB) error {
+			return model.ClaimExternalIdentityWithTx(tx, model.ExternalIdentityProviderTelegram, "888", owner.Id)
+		}))
+
+		var before int64
+		require.NoError(t, model.DB.Model(&model.User{}).Count(&before).Error)
+		state, code := fixture.authorization(t, "login", service.AuthIdentity{}, "", telegramIdentityClaims(888))
+		response := fixture.callback(state, code, service.AuthIdentity{})
+		assert.Contains(t, response.Body.String(), "TELEGRAM_BIND_ALREADY_BOUND")
+
+		var after int64
+		require.NoError(t, model.DB.Model(&model.User{}).Count(&after).Error)
+		assert.Equal(t, before, after)
+		var claim model.ExternalIdentityClaim
+		require.NoError(t, model.DB.Where("provider = ? AND subject = ?", model.ExternalIdentityProviderTelegram, "888").First(&claim).Error)
+		assert.Equal(t, owner.Id, claim.UserId)
+		var telegramOwners int64
+		require.NoError(t, model.DB.Model(&model.User{}).Where("telegram_id = ?", "888").Count(&telegramOwners).Error)
+		assert.Zero(t, telegramOwners)
+	})
 }
 
 func TestTelegramOAuthRejectsInvalidTokens(t *testing.T) {
@@ -253,7 +534,7 @@ func TestTelegramOAuthRejectsInvalidTokens(t *testing.T) {
 			claims := telegramIdentityClaims(42)
 			test.change(claims)
 			state, code := fixture.authorization(t, "login", service.AuthIdentity{}, "", claims)
-			response := telegramOAuthCallback(state, code, service.AuthIdentity{})
+			response := fixture.callback(state, code, service.AuthIdentity{})
 			assert.Contains(t, response.Body.String(), "TELEGRAM_OAUTH_FAILED")
 			assert.NotContains(t, response.Body.String(), "access_token")
 		})
@@ -265,14 +546,14 @@ func TestTelegramOAuthRejectsInvalidTokens(t *testing.T) {
 		grant := fixture.grants[code]
 		grant.key = otherKey
 		fixture.grants[code] = grant
-		assert.Contains(t, telegramOAuthCallback(state, code, service.AuthIdentity{}).Body.String(), "TELEGRAM_OAUTH_FAILED")
+		assert.Contains(t, fixture.callback(state, code, service.AuthIdentity{}).Body.String(), "TELEGRAM_OAUTH_FAILED")
 	})
 	t.Run("PKCE", func(t *testing.T) {
 		state, code := fixture.authorization(t, "login", service.AuthIdentity{}, "", telegramIdentityClaims(42))
 		grant := fixture.grants[code]
 		grant.challenge = "wrong-challenge"
 		fixture.grants[code] = grant
-		assert.Contains(t, telegramOAuthCallback(state, code, service.AuthIdentity{}).Body.String(), "TELEGRAM_OAUTH_FAILED")
+		assert.Contains(t, fixture.callback(state, code, service.AuthIdentity{}).Body.String(), "TELEGRAM_OAUTH_FAILED")
 	})
 	for _, endpoint := range []string{"token", "jwks"} {
 		t.Run(endpoint+" unavailable", func(t *testing.T) {
@@ -283,7 +564,7 @@ func TestTelegramOAuthRejectsInvalidTokens(t *testing.T) {
 			} else {
 				fixture.jwksStatus = 503
 			}
-			response := telegramOAuthCallback(state, code, service.AuthIdentity{})
+			response := fixture.callback(state, code, service.AuthIdentity{})
 			assert.Contains(t, response.Body.String(), "TELEGRAM_OAUTH_FAILED")
 			fixture.tokenStatus, fixture.jwksStatus = 0, 0
 		})
@@ -299,14 +580,14 @@ func TestTelegramOAuthBindingIsAtomicAndSessionBound(t *testing.T) {
 	require.NoError(t, err)
 	otherIdentity, err := service.ParseAccessToken(otherBundle.AccessToken)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusForbidden, telegramOAuthCallback(state, code, otherIdentity).Code)
+	assert.Equal(t, http.StatusForbidden, fixture.callback(state, code, otherIdentity).Code)
 	failure := errors.New("private Telegram bind storage failure")
 	require.NoError(t, model.DB.Callback().Update().Before("gorm:update").Register("telegram_bind_failure", func(tx *gorm.DB) {
 		if tx.Statement.Table == "users" {
 			tx.AddError(failure)
 		}
 	}))
-	response := telegramOAuthCallback(state, code, fixture.identity)
+	response := fixture.callback(state, code, fixture.identity)
 	assert.Equal(t, http.StatusInternalServerError, response.Code)
 	assert.NotContains(t, response.Body.String(), "private")
 	require.NoError(t, model.DB.Callback().Update().Remove("telegram_bind_failure"))
@@ -316,7 +597,7 @@ func TestTelegramOAuthBindingIsAtomicAndSessionBound(t *testing.T) {
 	require.NoError(t, model.DB.Model(&model.ExternalIdentityClaim{}).Count(&claimCount).Error)
 	assert.Zero(t, claimCount)
 	state, code = fixture.authorization(t, "bind", fixture.identity, "", telegramIdentityClaims(42))
-	response = telegramOAuthCallback(state, code, fixture.identity)
+	response = fixture.callback(state, code, fixture.identity)
 	assert.Contains(t, response.Body.String(), `"success":true`)
 	stored, err := model.GetUserById(fixture.user.Id, false)
 	require.NoError(t, err)
@@ -324,7 +605,7 @@ func TestTelegramOAuthBindingIsAtomicAndSessionBound(t *testing.T) {
 	assert.Equal(t, fixture.user.Role, stored.Role)
 	assert.Equal(t, fixture.user.Status, stored.Status)
 	assert.Equal(t, fixture.user.AuthVersion, stored.AuthVersion)
-	assert.Equal(t, http.StatusForbidden, telegramOAuthCallback(state, code, fixture.identity).Code)
+	assert.Equal(t, http.StatusForbidden, fixture.callback(state, code, fixture.identity).Code)
 }
 
 func TestTelegramOAuthBindingRejectsChangedAccountsAndDuplicateOwnership(t *testing.T) {
@@ -348,7 +629,7 @@ func TestTelegramOAuthBindingRejectsChangedAccountsAndDuplicateOwnership(t *test
 				require.NoError(t, model.DB.Create(owner).Error)
 				require.NoError(t, model.InitializeExternalIdentityClaims())
 			}
-			response := telegramOAuthCallback(state, code, fixture.identity)
+			response := fixture.callback(state, code, fixture.identity)
 			assert.Contains(t, response.Body.String(), `"success":false`)
 			var claims int64
 			require.NoError(t, model.DB.Model(&model.ExternalIdentityClaim{}).Where("user_id = ? AND subject = ?", fixture.user.Id, "42").Count(&claims).Error)
@@ -441,8 +722,8 @@ func TestTelegramOAuthConcurrentBindingHasSingleOwner(t *testing.T) {
 	otherState, otherCode := fixture.authorization(t, "bind", otherIdentity, "", telegramIdentityClaims(42))
 	start := make(chan struct{})
 	responses := make(chan *httptest.ResponseRecorder, 2)
-	go func() { <-start; responses <- telegramOAuthCallback(state, code, fixture.identity) }()
-	go func() { <-start; responses <- telegramOAuthCallback(otherState, otherCode, otherIdentity) }()
+	go func() { <-start; responses <- fixture.callback(state, code, fixture.identity) }()
+	go func() { <-start; responses <- fixture.callback(otherState, otherCode, otherIdentity) }()
 	close(start)
 	successes := 0
 	for range 2 {
