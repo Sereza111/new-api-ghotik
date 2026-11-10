@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import {
+  PromptInputActionAddAttachments,
   PromptInputButton,
   PromptInputTools,
 } from '@/components/ai-elements/prompt-input'
@@ -119,7 +120,10 @@ export function PlaygroundInputTools({
               <p>{t('Attach')}</p>
             </TooltipContent>
             <DropdownMenuContent align='start'>
-              {ATTACHMENT_ACTIONS.map(({ action, icon: Icon, label }) => (
+              <PromptInputActionAddAttachments />
+              {ATTACHMENT_ACTIONS.filter(({ action }) =>
+                action.startsWith('take-')
+              ).map(({ action, icon: Icon, label }) => (
                 <DropdownMenuItem
                   key={action}
                   onClick={() => handleFileAction(action)}

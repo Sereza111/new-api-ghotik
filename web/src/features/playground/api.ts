@@ -47,7 +47,10 @@ export async function sendImageGeneration(
   payload: ImageGenerationRequest,
   signal?: AbortSignal
 ): Promise<ImageGenerationResponse> {
-  const res = await api.post(API_ENDPOINTS.IMAGE_GENERATIONS, payload, {
+  const endpoint = payload.images?.length
+    ? API_ENDPOINTS.IMAGE_EDITS
+    : API_ENDPOINTS.IMAGE_GENERATIONS
+  const res = await api.post(endpoint, payload, {
     signal,
     skipErrorHandler: true,
   } as Record<string, unknown>)

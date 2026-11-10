@@ -50,6 +50,7 @@ export interface Message {
   status?: MessageStatus
   errorCode?: string | null
   images?: GeneratedImage[]
+  inputImages?: string[]
 }
 
 export interface GeneratedImage {
@@ -132,6 +133,7 @@ export interface ImageGenerationRequest {
   n: number
   quality: 'medium'
   size: '1024x1024'
+  images?: Array<{ image_url: string }>
 }
 
 export interface ImageGenerationResponse {

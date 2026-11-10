@@ -61,6 +61,32 @@ describe('image generation payload', () => {
     })
   })
 
+  it('includes pasted references in image edit payloads', () => {
+    const reference = 'data:image/png;base64,aW1hZ2U='
+    const messages = [
+      createUserMessage('keep the subject and change the background', 1_000, [
+        reference,
+      ]),
+      createLoadingAssistantMessage(),
+    ]
+
+    expect(
+      buildImageGenerationPayload(messages, {
+        ...DEFAULT_CONFIG,
+        model: 'gpt-image-2.5-sunburst',
+        group: 'GPT',
+      })
+    ).toEqual({
+      model: 'gpt-image-2.5-sunburst',
+      group: 'GPT',
+      prompt: 'keep the subject and change the background',
+      n: 1,
+      quality: 'medium',
+      size: '1024x1024',
+      images: [{ image_url: reference }],
+    })
+  })
+
   it('turns a base64 API result into a displayable assistant image', () => {
     const message = applyImageGenerationResponse(
       createLoadingAssistantMessage(1_000),
@@ -86,6 +112,32 @@ describe('image generation payload', () => {
 })
 
 describe('chat completion payload', () => {
+  it('sends pasted references as multimodal message content', () => {
+    const reference = 'data:image/webp;base64,aW1hZ2U='
+    const payload = buildChatCompletionPayload(
+      [createUserMessage('describe this image', 1_000, [reference])],
+      DEFAULT_CONFIG,
+      {
+        temperature: false,
+        top_p: false,
+        max_tokens: false,
+        frequency_penalty: false,
+        presence_penalty: false,
+        seed: false,
+      }
+    )
+
+    expect(payload.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'describe this image' },
+          { type: 'image_url', image_url: { url: reference } },
+        ],
+      },
+    ])
+  })
+
   it('preserves the selected reasoning effort', () => {
     const payload = buildChatCompletionPayload(
       [createUserMessage('solve this carefully')],

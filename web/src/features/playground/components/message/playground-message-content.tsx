@@ -83,6 +83,8 @@ export function PlaygroundMessageContent({
   const isError = isErrorMessage(message)
   const images = message.images ?? []
   const hasImages = images.length > 0
+  const inputImages = message.inputImages ?? []
+  const hasInputImages = inputImages.length > 0
   const isMessageFinal =
     message.status !== MESSAGE_STATUS.LOADING &&
     message.status !== MESSAGE_STATUS.STREAMING
@@ -137,8 +139,24 @@ export function PlaygroundMessageContent({
         </>
       )}
 
-      {!isError && (showMessageContent || hasImages) && (
+      {!isError && (showMessageContent || hasImages || hasInputImages) && (
         <>
+          {hasInputImages && (
+            <div className='mb-2 grid w-full max-w-md grid-cols-2 gap-2'>
+              {inputImages.map((image) => (
+                <img
+                  alt={t('Image')}
+                  className='border-border/70 bg-muted/20 aspect-square size-full rounded-md border object-contain'
+                  decoding='async'
+                  height={320}
+                  key={image}
+                  loading='lazy'
+                  src={image}
+                  width={320}
+                />
+              ))}
+            </div>
+          )}
           {hasImages && <GeneratedImageGrid images={images} />}
           {showMessageContent &&
             (isSourceVisible ? (

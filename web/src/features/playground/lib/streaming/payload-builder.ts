@@ -44,10 +44,12 @@ export function buildImageGenerationPayload(
   config: PlaygroundConfig
 ): ImageGenerationRequest {
   let prompt = ''
+  let inputImages: string[] = []
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index]
     if (message.from === 'user' && isValidMessage(message)) {
       prompt = getMessageContent(message)
+      inputImages = message.inputImages ?? []
       break
     }
   }
@@ -59,6 +61,11 @@ export function buildImageGenerationPayload(
     n: 1,
     quality: 'medium',
     size: '1024x1024',
+    ...(inputImages.length > 0
+      ? {
+          images: inputImages.map((imageUrl) => ({ image_url: imageUrl })),
+        }
+      : {}),
   }
 }
 

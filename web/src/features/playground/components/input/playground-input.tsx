@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import {
   PromptInput,
+  PromptInputAttachment,
+  PromptInputAttachments,
   PromptInputFooter,
   PromptInputTextarea,
   type PromptInputMessage,
@@ -19,9 +22,13 @@ import type {
 import { PlaygroundInputControls } from './playground-input-controls'
 import { PlaygroundInputTools } from './playground-input-tools'
 
+const REFERENCE_IMAGE_ACCEPT = 'image/png,image/jpeg,image/webp'
+const MAX_REFERENCE_IMAGES = 4
+const MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
+
 interface PlaygroundInputProps {
   config: PlaygroundConfig
-  onSubmit: (text: string) => void
+  onSubmit: (text: string, inputImages?: string[]) => void
   onStop?: () => void
   disabled?: boolean
   isGenerating?: boolean
@@ -73,17 +80,34 @@ export function PlaygroundInput({
     const submittableText = getSubmittableInputText(message, disabled)
 
     if (!submittableText) return
-    onSubmit(submittableText)
-    setText('')
+    const inputImages = [
+      ...new Set(
+        (message.files ?? [])
+          .map((file) => file.url)
+          .filter((url): url is string => Boolean(url))
+      ),
+    ]
+
+    onSubmit(submittableText, inputImages)
+    setText((currentText) => (currentText === message.text ? '' : currentText))
   }
 
   return (
     <div className='grid shrink-0 gap-4 px-1 md:pb-4'>
       <PromptInput
+        accept={REFERENCE_IMAGE_ACCEPT}
         className='relative'
         groupClassName='bg-background/95 dark:bg-background/80 border-border/70 shadow-[0_18px_60px_-32px_rgba(0,0,0,0.65)] ring-1 ring-foreground/5 rounded-xl overflow-hidden transition-all duration-200 focus-within:border-primary/45 focus-within:ring-primary/15 focus-within:shadow-[0_22px_70px_-34px_rgba(0,0,0,0.75)]'
+        maxFiles={MAX_REFERENCE_IMAGES}
+        maxFileSize={MAX_REFERENCE_IMAGE_BYTES}
+        multiple
+        onError={(error) => toast.error(error.message)}
         onSubmit={handleSubmit}
       >
+        <PromptInputAttachments className='px-3 pt-3'>
+          {(attachment) => <PromptInputAttachment data={attachment} />}
+        </PromptInputAttachments>
+
         <PromptInputTextarea
           autoComplete='off'
           autoCorrect='off'

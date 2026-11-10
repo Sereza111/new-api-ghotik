@@ -40,7 +40,6 @@ import {
   createContext,
   type FormEvent,
   type FormEventHandler,
-  Fragment,
   type HTMLAttributes,
   type KeyboardEventHandler,
   type PropsWithChildren,
@@ -381,6 +380,8 @@ export type PromptInputAttachmentsProps = Omit<
 
 export function PromptInputAttachments({
   children,
+  className,
+  ...props
 }: PromptInputAttachmentsProps) {
   const attachments = usePromptInputAttachments()
 
@@ -388,9 +389,16 @@ export function PromptInputAttachments({
     return null
   }
 
-  return attachments.files.map((file) => (
-    <Fragment key={file.id}>{children(file)}</Fragment>
-  ))
+  return (
+    <div
+      className={cn('flex flex-wrap items-center gap-2', className)}
+      {...props}
+    >
+      {attachments.files.map((file) => (
+        <div key={file.id}>{children(file)}</div>
+      ))}
+    </div>
+  )
 }
 
 export type PromptInputActionAddAttachmentsProps = ComponentProps<
@@ -439,7 +447,7 @@ export type PromptInputProps = Omit<
   maxFiles?: number
   maxFileSize?: number // bytes
   onError?: (err: {
-    code: 'max_files' | 'max_file_size' | 'accept'
+    code: 'max_files' | 'max_file_size' | 'accept' | 'file_read'
     message: string
   }) => void
   onSubmit: (
@@ -487,22 +495,39 @@ export const PromptInput = ({
 
   // ----- Local attachments (only used when no provider)
   const [items, setItems] = useState<(FileUIPart & { id: string })[]>([])
+  const itemsRef = useRef(items)
   const files = usingProvider ? controller.attachments.files : items
+
+  useEffect(() => {
+    itemsRef.current = items
+  }, [items])
 
   const openFileDialogLocal = useCallback(() => {
     inputRef.current?.click()
   }, [])
 
   const matchesAccept = useCallback(
-    (f: File) => {
+    (file: File) => {
       if (!accept || accept.trim() === '') {
         return true
       }
-      if (accept.includes('image/*')) {
-        return f.type.startsWith('image/')
-      }
-      // NOTE: keep simple; expand as needed
-      return true
+
+      const filename = file.name.toLowerCase()
+      const mediaType = file.type.toLowerCase()
+
+      return accept
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean)
+        .some((pattern) => {
+          if (pattern.startsWith('.')) {
+            return filename.endsWith(pattern)
+          }
+          if (pattern.endsWith('/*')) {
+            return mediaType.startsWith(pattern.slice(0, -1))
+          }
+          return mediaType === pattern
+        })
     },
     [accept]
   )
@@ -671,13 +696,13 @@ export const PromptInput = ({
 
   useEffect(
     () => () => {
-      if (!usingProvider) {
-        for (const f of files) {
-          if (f.url) URL.revokeObjectURL(f.url)
+      for (const file of itemsRef.current) {
+        if (file.url) {
+          URL.revokeObjectURL(file.url)
         }
       }
     },
-    [usingProvider, files]
+    []
   )
 
   const handleChange: ChangeEventHandler<HTMLInputElement> = (event) => {
@@ -737,33 +762,40 @@ export const PromptInput = ({
         }
         return item
       })
-    ).then((convertedFiles: FileUIPart[]) => {
-      try {
-        const result = onSubmit({ text, files: convertedFiles }, event)
+    )
+      .then((convertedFiles: FileUIPart[]) => {
+        try {
+          const result = onSubmit({ text, files: convertedFiles }, event)
 
-        // Handle both sync and async onSubmit
-        if (result instanceof Promise) {
-          result
-            .then(() => {
-              clear()
-              if (usingProvider) {
-                controller.textInput.clear()
-              }
-            })
-            .catch(() => {
-              // Don't clear on error - user may want to retry
-            })
-        } else {
-          // Sync function completed without throwing, clear attachments
-          clear()
-          if (usingProvider) {
-            controller.textInput.clear()
+          // Handle both sync and async onSubmit
+          if (result instanceof Promise) {
+            result
+              .then(() => {
+                clear()
+                if (usingProvider) {
+                  controller.textInput.clear()
+                }
+              })
+              .catch(() => {
+                // Don't clear on error - user may want to retry
+              })
+          } else {
+            // Sync function completed without throwing, clear attachments
+            clear()
+            if (usingProvider) {
+              controller.textInput.clear()
+            }
           }
+        } catch {
+          // Don't clear on error - user may want to retry
         }
-      } catch (_error) {
-        // Don't clear on error - user may want to retry
-      }
-    })
+      })
+      .catch(() => {
+        onError?.({
+          code: 'file_read',
+          message: t('An unexpected error occurred'),
+        })
+      })
   }
 
   // Render with or without local provider
@@ -889,7 +921,10 @@ export const PromptInputTextarea = ({
 
   return (
     <InputGroupTextarea
-      className={cn('field-sizing-content max-h-48 min-h-16 break-all', className)}
+      className={cn(
+        'field-sizing-content max-h-48 min-h-16 break-all',
+        className
+      )}
       name='message'
       onCompositionEnd={() => setIsComposing(false)}
       onCompositionStart={() => setIsComposing(true)}
