@@ -725,19 +725,25 @@ func TestGetTokenUsageFollowsTheUserQuotaSwitchAndIPWhitelist(t *testing.T) {
 		expired       bool
 		allowIps      string
 		remoteAddr    string
+		quotaMode     string
 		wantStatus    int
 		wantUserQuota bool
+		wantUSD       bool
 	}{
-		{name: "switch off", remoteAddr: "203.0.113.7:4321", wantStatus: http.StatusOK},
-		{name: "switch on without IP whitelist", allow: true, remoteAddr: "203.0.113.7:4321", wantStatus: http.StatusOK, wantUserQuota: true},
-		{name: "switch on with matching IP whitelist", allow: true, allowIps: "198.51.100.1\n203.0.113.0/24", remoteAddr: "203.0.113.7:4321", wantStatus: http.StatusOK, wantUserQuota: true},
-		{name: "expired key with the switch on", allow: true, expired: true, remoteAddr: "203.0.113.7:4321", wantStatus: http.StatusOK, wantUserQuota: true},
+		{name: "switch off", remoteAddr: "203.0.113.7:4321", wantStatus: http.StatusOK, wantUSD: true},
+		{name: "switch on without IP whitelist", allow: true, remoteAddr: "203.0.113.7:4321", wantStatus: http.StatusOK, wantUserQuota: true, wantUSD: true},
+		{name: "switch on with matching IP whitelist", allow: true, allowIps: "198.51.100.1\n203.0.113.0/24", remoteAddr: "203.0.113.7:4321", wantStatus: http.StatusOK, wantUserQuota: true, wantUSD: true},
+		{name: "expired key with the switch on", allow: true, expired: true, remoteAddr: "203.0.113.7:4321", wantStatus: http.StatusOK, wantUserQuota: true, wantUSD: true},
+		{name: "token quota mode has no wallet currency", quotaMode: model.TokenQuotaModeTokens, remoteAddr: "203.0.113.7:4321", wantStatus: http.StatusOK},
 		{name: "switch on from an IP outside the whitelist", allow: true, allowIps: "198.51.100.1", remoteAddr: "203.0.113.7:4321", wantStatus: http.StatusForbidden},
 		{name: "switch off from an IP outside the whitelist", allowIps: "198.51.100.1", remoteAddr: "203.0.113.7:4321", wantStatus: http.StatusForbidden},
 		{name: "unresolved client IP with a whitelist", allow: true, allowIps: "203.0.113.0/24", remoteAddr: "unresolved", wantStatus: http.StatusForbidden},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := setupTokenControllerTestDB(t)
+			previousQuotaPerUnit := common.QuotaPerUnit
+			common.QuotaPerUnit = 500_000
+			t.Cleanup(func() { common.QuotaPerUnit = previousQuotaPerUnit })
 			require.NoError(t, db.AutoMigrate(&model.User{}))
 			// Initialize production column quoting for the token key lookup.
 			t.Setenv("LOG_SQL_DSN", "")
@@ -745,7 +751,10 @@ func TestGetTokenUsageFollowsTheUserQuotaSwitchAndIPWhitelist(t *testing.T) {
 			user := &model.User{Username: "quota-owner", Password: "placeholder", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", Quota: 12345, UsedQuota: 678, AuthVersion: 1, AffCode: "quota-owner"}
 			require.NoError(t, db.Create(user).Error)
 			token := seedToken(t, db, user.Id, "usage-token", "usagekey1234")
-			updates := map[string]any{"allow_user_quota_query": tc.allow, "allow_ips": tc.allowIps, "used_quota": 30}
+			updates := map[string]any{"allow_user_quota_query": tc.allow, "allow_ips": tc.allowIps, "used_quota": 30, "unlimited_quota": false}
+			if tc.quotaMode != "" {
+				updates["quota_mode"] = tc.quotaMode
+			}
 			if tc.expired {
 				updates["status"], updates["expired_time"] = common.TokenStatusExpired, 1
 			}
@@ -770,13 +779,24 @@ func TestGetTokenUsageFollowsTheUserQuotaSwitchAndIPWhitelist(t *testing.T) {
 			}
 			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 			require.True(t, response.Code, recorder.Body.String())
-			fields := []string{"expires_at", "model_limits", "model_limits_enabled", "name", "object", "total_available", "total_granted", "total_used", "unlimited_quota"}
+			fields := []string{"billing_basis", "expires_at", "model_limits", "model_limits_enabled", "name", "object", "quota_mode", "total_available", "total_granted", "total_used", "unlimited_quota"}
+			if tc.wantUSD {
+				fields = append(fields, "currency", "quota_per_unit", "total_available_usd", "total_granted_usd", "total_used_usd")
+			}
 			if tc.wantUserQuota {
 				fields = append(fields, "user_quota")
 			}
+			slices.Sort(fields)
 			assert.Equal(t, fields, slices.Sorted(maps.Keys(response.Data)))
 			assert.JSONEq(t, `100`, string(response.Data["total_available"]))
 			assert.JSONEq(t, `30`, string(response.Data["total_used"]))
+			if tc.wantUSD {
+				assert.JSONEq(t, `"USD"`, string(response.Data["currency"]))
+				assert.JSONEq(t, `500000`, string(response.Data["quota_per_unit"]))
+				assert.JSONEq(t, `0.0002`, string(response.Data["total_available_usd"]))
+				assert.JSONEq(t, `0.00026`, string(response.Data["total_granted_usd"]))
+				assert.JSONEq(t, `0.00006`, string(response.Data["total_used_usd"]))
+			}
 			if tc.wantUserQuota {
 				assert.JSONEq(t, `{"total_available":12345,"total_used":678}`, string(response.Data["user_quota"]))
 			}

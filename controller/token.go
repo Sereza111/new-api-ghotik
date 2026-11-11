@@ -3,6 +3,7 @@ package controller
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -326,6 +327,18 @@ func GetTokenUsage(c *gin.Context) {
 		"model_limits":         token.GetModelLimitsMap(),
 		"model_limits_enabled": token.ModelLimitsEnabled,
 		"expires_at":           expiredAt,
+	}
+	if token.EffectiveQuotaMode() == model.TokenQuotaModeMoney &&
+		common.QuotaPerUnit > 0 && !math.IsNaN(common.QuotaPerUnit) && !math.IsInf(common.QuotaPerUnit, 0) {
+		data["currency"] = "USD"
+		data["quota_per_unit"] = common.QuotaPerUnit
+		data["total_granted_usd"] = float64(token.RemainQuota+token.UsedQuota) / common.QuotaPerUnit
+		data["total_used_usd"] = float64(token.UsedQuota) / common.QuotaPerUnit
+		if token.UnlimitedQuota {
+			data["total_available_usd"] = nil
+		} else {
+			data["total_available_usd"] = float64(token.RemainQuota) / common.QuotaPerUnit
+		}
 	}
 	// 用户额度只在令牌允许时返回；IP 白名单已由 TokenAuthReadOnly 检查。
 	if token.AllowUserQuotaQuery {
