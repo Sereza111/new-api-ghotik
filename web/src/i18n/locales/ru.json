@@ -7790,6 +7790,25 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "This chat changed in another tab. The latest version was loaded.": "Этот чат был изменён в другой вкладке. Загружена последняя версия.",
+    "Failed to save chat": "Не удалось сохранить чат",
+    "Unable to load chat": "Не удалось загрузить чат",
+    "Unable to load chats": "Не удалось загрузить чаты",
+    "Failed to create chat": "Не удалось создать чат",
+    "Failed to delete chat": "Не удалось удалить чат",
+    "Loading chats": "Загрузка чатов",
+    "No saved chats": "Нет сохранённых чатов",
+    "New chat": "Новый чат",
+    "No model": "Модель не выбрана",
+    "Messages: {{count}}": "Сообщений: {{count}}",
+    "Chat actions": "Действия с чатом",
+    "Chats": "Чаты",
+    "Saved": "Сохранено",
+    "Your saved playground chats": "Ваши сохранённые чаты Playground",
+    "Rename chat": "Переименовать чат",
+    "Chat name": "Название чата",
+    "Delete chat?": "Удалить чат?",
+    "This chat and its messages will be permanently deleted.": "Этот чат и все его сообщения будут удалены без возможности восстановления."
   }
 }

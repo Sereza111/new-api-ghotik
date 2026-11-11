@@ -37,6 +37,7 @@ export const API_ENDPOINTS = {
   CHAT_COMPLETIONS: '/pg/chat/completions',
   IMAGE_EDITS: '/pg/images/edits',
   IMAGE_GENERATIONS: '/pg/images/generations',
+  PLAYGROUND_SESSIONS: '/api/user/playground/sessions',
   USER_MODELS: '/api/user/models',
   USER_GROUPS: '/api/user/self/groups',
 } as const

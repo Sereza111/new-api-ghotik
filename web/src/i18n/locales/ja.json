@@ -7790,6 +7790,25 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "This chat changed in another tab. The latest version was loaded.": "このチャットは別のタブで変更されました。最新バージョンを読み込みました。",
+    "Failed to save chat": "チャットを保存できませんでした",
+    "Unable to load chat": "チャットを読み込めません",
+    "Unable to load chats": "チャット一覧を読み込めません",
+    "Failed to create chat": "チャットを作成できませんでした",
+    "Failed to delete chat": "チャットを削除できませんでした",
+    "Loading chats": "チャットを読み込み中",
+    "No saved chats": "保存済みのチャットはありません",
+    "New chat": "新しいチャット",
+    "No model": "モデルなし",
+    "Messages: {{count}}": "メッセージ：{{count}}件",
+    "Chat actions": "チャット操作",
+    "Chats": "チャット",
+    "Saved": "保存済み",
+    "Your saved playground chats": "保存済みの Playground チャット",
+    "Rename chat": "チャット名を変更",
+    "Chat name": "チャット名",
+    "Delete chat?": "チャットを削除しますか？",
+    "This chat and its messages will be permanently deleted.": "このチャットとメッセージは完全に削除されます。"
   }
 }

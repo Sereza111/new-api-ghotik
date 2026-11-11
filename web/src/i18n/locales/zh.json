@@ -7790,6 +7790,25 @@
     "Zhipu": "智谱",
     "Zhipu GLM": "智谱GLM",
     "Zhipu V4": "智谱 V4",
-    "Zoom": "缩放"
+    "Zoom": "缩放",
+    "This chat changed in another tab. The latest version was loaded.": "此聊天已在其他标签页中更改。已加载最新版本。",
+    "Failed to save chat": "保存聊天失败",
+    "Unable to load chat": "无法加载聊天",
+    "Unable to load chats": "无法加载聊天列表",
+    "Failed to create chat": "创建聊天失败",
+    "Failed to delete chat": "删除聊天失败",
+    "Loading chats": "正在加载聊天",
+    "No saved chats": "没有已保存的聊天",
+    "New chat": "新聊天",
+    "No model": "未选择模型",
+    "Messages: {{count}}": "消息：{{count}}",
+    "Chat actions": "聊天操作",
+    "Chats": "聊天",
+    "Saved": "已保存",
+    "Your saved playground chats": "您已保存的 Playground 聊天",
+    "Rename chat": "重命名聊天",
+    "Chat name": "聊天名称",
+    "Delete chat?": "删除聊天？",
+    "This chat and its messages will be permanently deleted.": "此聊天及其消息将被永久删除。"
   }
 }

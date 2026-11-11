@@ -7790,6 +7790,25 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "This chat changed in another tab. The latest version was loaded.": "This chat changed in another tab. The latest version was loaded.",
+    "Failed to save chat": "Failed to save chat",
+    "Unable to load chat": "Unable to load chat",
+    "Unable to load chats": "Unable to load chats",
+    "Failed to create chat": "Failed to create chat",
+    "Failed to delete chat": "Failed to delete chat",
+    "Loading chats": "Loading chats",
+    "No saved chats": "No saved chats",
+    "New chat": "New chat",
+    "No model": "No model",
+    "Messages: {{count}}": "Messages: {{count}}",
+    "Chat actions": "Chat actions",
+    "Chats": "Chats",
+    "Saved": "Saved",
+    "Your saved playground chats": "Your saved playground chats",
+    "Rename chat": "Rename chat",
+    "Chat name": "Chat name",
+    "Delete chat?": "Delete chat?",
+    "This chat and its messages will be permanently deleted.": "This chat and its messages will be permanently deleted."
   }
 }

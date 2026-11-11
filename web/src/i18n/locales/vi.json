@@ -7790,6 +7790,25 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "This chat changed in another tab. The latest version was loaded.": "Cuộc trò chuyện này đã thay đổi trong thẻ khác. Phiên bản mới nhất đã được tải.",
+    "Failed to save chat": "Không thể lưu cuộc trò chuyện",
+    "Unable to load chat": "Không thể tải cuộc trò chuyện",
+    "Unable to load chats": "Không thể tải danh sách trò chuyện",
+    "Failed to create chat": "Không thể tạo cuộc trò chuyện",
+    "Failed to delete chat": "Không thể xóa cuộc trò chuyện",
+    "Loading chats": "Đang tải cuộc trò chuyện",
+    "No saved chats": "Chưa có cuộc trò chuyện đã lưu",
+    "New chat": "Cuộc trò chuyện mới",
+    "No model": "Chưa chọn mô hình",
+    "Messages: {{count}}": "Tin nhắn: {{count}}",
+    "Chat actions": "Thao tác trò chuyện",
+    "Chats": "Cuộc trò chuyện",
+    "Saved": "Đã lưu",
+    "Your saved playground chats": "Các cuộc trò chuyện Playground đã lưu",
+    "Rename chat": "Đổi tên cuộc trò chuyện",
+    "Chat name": "Tên cuộc trò chuyện",
+    "Delete chat?": "Xóa cuộc trò chuyện?",
+    "This chat and its messages will be permanently deleted.": "Cuộc trò chuyện này và các tin nhắn sẽ bị xóa vĩnh viễn."
   }
 }

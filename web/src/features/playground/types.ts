@@ -168,6 +168,33 @@ export interface ParameterEnabled {
   seed: boolean
 }
 
+export interface PlaygroundSessionSummary {
+  id: string
+  title: string
+  model: string
+  message_count: number
+  revision: number
+  created_at: number
+  updated_at: number
+}
+
+export interface PlaygroundSessionDetail extends PlaygroundSessionSummary {
+  config: PlaygroundConfig
+  parameter_enabled: ParameterEnabled
+  messages: Message[]
+}
+
+export interface PlaygroundSessionInput {
+  title?: string
+  config?: PlaygroundConfig
+  parameter_enabled?: ParameterEnabled
+  messages?: Message[]
+}
+
+export interface PlaygroundSessionUpdate extends PlaygroundSessionInput {
+  revision: number
+}
+
 // Model and group options
 export interface ModelOption {
   label: string

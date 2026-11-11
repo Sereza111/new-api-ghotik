@@ -27,6 +27,7 @@ import {
   loadConfig,
   loadMessages,
   loadParameterEnabled,
+  sanitizeMessagesForPersistence,
   saveConfig,
   saveMessages,
   saveParameterEnabled,
@@ -106,4 +107,68 @@ test('storage calls without a signed-in user do not persist shared data', () => 
   expect(loadMessages()).toBeNull()
   expect(loadParameterEnabled()).toEqual({})
   expect(localStorage.length).toBe(0)
+})
+
+test('server persistence removes transient image payloads without mutating in-memory messages', () => {
+  const messagesWithImages: Message[] = [
+    {
+      key: 'image-chat',
+      from: 'user',
+      versions: [{ id: 'image-version', content: 'Use this reference' }],
+      inputImages: ['data:image/png;base64,reference'],
+      images: [
+        {
+          id: 'generated-image',
+          src: 'data:image/png;base64,result',
+          revisedPrompt: 'Revised prompt',
+        },
+      ],
+    },
+  ]
+
+  expect(sanitizeMessagesForPersistence(messagesWithImages)).toEqual([
+    {
+      key: 'image-chat',
+      from: 'user',
+      versions: [{ id: 'image-version', content: 'Use this reference' }],
+    },
+  ])
+  expect(messagesWithImages[0].inputImages).toHaveLength(1)
+  expect(messagesWithImages[0].images).toHaveLength(1)
+})
+
+test('server persistence enforces UTF-8 message and aggregate byte limits', () => {
+  const oversizedCyrillic: Message = {
+    key: 'oversized-cyrillic',
+    from: 'user',
+    versions: [
+      {
+        id: 'oversized-version',
+        // This is below the old 40,000-character guard but above 40 KiB in UTF-8.
+        content: 'я'.repeat(21 * 1024),
+      },
+    ],
+  }
+  expect(sanitizeMessagesForPersistence([oversizedCyrillic])).toEqual([])
+
+  const manyMessages = Array.from({ length: 30 }, (_, index): Message => ({
+    key: `message-${index}`,
+    from: 'assistant',
+    versions: [
+      {
+        id: `version-${index}`,
+        content: 'x'.repeat(39 * 1024),
+      },
+    ],
+  }))
+  const persisted = sanitizeMessagesForPersistence(manyMessages)
+  const totalBytes = persisted.reduce(
+    (total, message) =>
+      total + new TextEncoder().encode(JSON.stringify(message)).byteLength,
+    0
+  )
+
+  expect(persisted.length).toBeLessThan(manyMessages.length)
+  expect(persisted.at(-1)?.key).toBe('message-29')
+  expect(totalBytes).toBeLessThanOrEqual(1024 * 1024)
 })

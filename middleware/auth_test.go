@@ -326,6 +326,7 @@ func TestUserAuthAppliesAccessTokenRouteRules(t *testing.T) {
 	router := gin.New()
 	router.GET("/api/user/self", UserAuth(), ok)
 	router.GET("/api/user/access_tokens", UserAuth(), ok)
+	router.GET("/api/user/playground/sessions", UserAuth(), ok)
 	router.GET("/api/undeclared", UserAuth(), ok)
 	router.GET("/api/channel/", AdminAuth(), RequirePermission(authz.ChannelRead), ok)
 	router.GET("/api/pricing", TryUserAuth(), ok)
@@ -338,11 +339,13 @@ func TestUserAuthAppliesAccessTokenRouteRules(t *testing.T) {
 		{name: "missing scope", path: "/api/user/self", token: channel, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
 		{name: "undeclared route", path: "/api/undeclared", token: profile, status: http.StatusForbidden, code: "ACCESS_TOKEN_ROUTE_UNDECLARED", reason: "route_undeclared"},
 		{name: "session route", path: "/api/user/access_tokens", token: profile, status: http.StatusForbidden, code: "AUTH_SESSION_REQUIRED", reason: "session_required"},
+		{name: "playground history rejects scoped token", path: "/api/user/playground/sessions", token: profile, status: http.StatusForbidden, code: "AUTH_SESSION_REQUIRED", reason: "session_required"},
 		{name: "permission route with its scope", path: "/api/channel/", token: channel, status: http.StatusOK},
 		{name: "permission route without its scope", path: "/api/channel/", token: profile, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
 		{name: "expired token", path: "/api/user/self", token: expired, status: http.StatusUnauthorized, code: "ACCESS_TOKEN_EXPIRED", reason: "expired"},
 		{name: "legacy token before the deadline", path: "/api/user/self", token: legacy, status: http.StatusOK},
 		{name: "legacy token on a session route", path: "/api/user/access_tokens", token: legacy, status: http.StatusForbidden, code: "AUTH_SESSION_REQUIRED", reason: "session_required"},
+		{name: "playground history rejects legacy token", path: "/api/user/playground/sessions", token: legacy, status: http.StatusForbidden, code: "AUTH_SESSION_REQUIRED", reason: "session_required"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			response := middlewareBearerRequest(router, test.path, test.token)

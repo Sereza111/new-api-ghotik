@@ -95,6 +95,14 @@ func SetApiRouter(router *gin.Engine) {
 			selfRoute := userRoute.Group("/")
 			selfRoute.Use(middleware.DisableCache(), middleware.UserAuth())
 			{
+				playgroundSessionRoute := selfRoute.Group("/playground/sessions")
+				{
+					playgroundSessionRoute.GET("", controller.ListPlaygroundConversations)
+					playgroundSessionRoute.POST("", controller.CreatePlaygroundConversation)
+					playgroundSessionRoute.GET("/:id", controller.GetPlaygroundConversation)
+					playgroundSessionRoute.PUT("/:id", controller.UpdatePlaygroundConversation)
+					playgroundSessionRoute.DELETE("/:id", controller.DeletePlaygroundConversation)
+				}
 				selfRoute.GET("/sessions", middleware.DisableCache(), controller.GetLoginSessions)
 				selfRoute.DELETE("/sessions/:sid", middleware.DisableCache(), controller.DeleteLoginSession)
 				selfRoute.POST("/sessions/revoke-others", middleware.DisableCache(), controller.RevokeOtherLoginSessions)

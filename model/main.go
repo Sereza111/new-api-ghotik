@@ -347,6 +347,8 @@ func migrateDB() error {
 		&ResellerQuotaOperation{},
 		&User{},
 		&UserSession{},
+		&PlaygroundConversation{},
+		&PlaygroundConversationMessage{},
 		&AuthFlow{},
 		&ExternalIdentityClaim{},
 		&PasskeyCredential{},

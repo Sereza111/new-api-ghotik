@@ -7790,6 +7790,25 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "This chat changed in another tab. The latest version was loaded.": "Cette discussion a été modifiée dans un autre onglet. La dernière version a été chargée.",
+    "Failed to save chat": "Échec de l'enregistrement de la discussion",
+    "Unable to load chat": "Impossible de charger la discussion",
+    "Unable to load chats": "Impossible de charger les discussions",
+    "Failed to create chat": "Échec de la création de la discussion",
+    "Failed to delete chat": "Échec de la suppression de la discussion",
+    "Loading chats": "Chargement des discussions",
+    "No saved chats": "Aucune discussion enregistrée",
+    "New chat": "Nouvelle discussion",
+    "No model": "Aucun modèle",
+    "Messages: {{count}}": "Messages : {{count}}",
+    "Chat actions": "Actions de la discussion",
+    "Chats": "Discussions",
+    "Saved": "Enregistré",
+    "Your saved playground chats": "Vos discussions Playground enregistrées",
+    "Rename chat": "Renommer la discussion",
+    "Chat name": "Nom de la discussion",
+    "Delete chat?": "Supprimer la discussion ?",
+    "This chat and its messages will be permanently deleted.": "Cette discussion et ses messages seront définitivement supprimés."
   }
 }

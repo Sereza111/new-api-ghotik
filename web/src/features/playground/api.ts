@@ -27,7 +27,25 @@ import type {
   ImageGenerationResponse,
   ModelOption,
   GroupOption,
+  PlaygroundSessionDetail,
+  PlaygroundSessionInput,
+  PlaygroundSessionSummary,
+  PlaygroundSessionUpdate,
 } from './types'
+
+interface PlaygroundSessionResponse<T> {
+  success: boolean
+  message?: string
+  code?: string
+  data?: T
+}
+
+const KEEPALIVE_REQUEST_MAX_BYTES = 60 * 1024
+const textEncoder = new TextEncoder()
+
+type PlaygroundSessionUpdateOptions = {
+  keepalive?: boolean
+}
 
 /**
  * Send chat completion request (non-streaming)
@@ -101,4 +119,67 @@ export async function getUserGroups(): Promise<GroupOption[]> {
     ratio: info.ratio,
     desc: info.desc,
   }))
+}
+
+export async function listPlaygroundSessions(): Promise<
+  PlaygroundSessionSummary[]
+> {
+  const res = await api.get(API_ENDPOINTS.PLAYGROUND_SESSIONS)
+  const response = requireServerSuccess(
+    res.data as PlaygroundSessionResponse<PlaygroundSessionSummary[]>
+  )
+  return response.data ?? []
+}
+
+export async function getPlaygroundSession(
+  id: string
+): Promise<PlaygroundSessionDetail> {
+  const res = await api.get(`${API_ENDPOINTS.PLAYGROUND_SESSIONS}/${id}`)
+  const response = requireServerSuccess(
+    res.data as PlaygroundSessionResponse<PlaygroundSessionDetail>
+  )
+  if (!response.data) throw new Error('Playground session not found')
+  return response.data
+}
+
+export async function createPlaygroundSession(
+  input: PlaygroundSessionInput
+): Promise<PlaygroundSessionDetail> {
+  const res = await api.post(API_ENDPOINTS.PLAYGROUND_SESSIONS, input)
+  const response = requireServerSuccess(
+    res.data as PlaygroundSessionResponse<PlaygroundSessionDetail>
+  )
+  if (!response.data) throw new Error('Playground session was not created')
+  return response.data
+}
+
+export async function updatePlaygroundSession(
+  id: string,
+  input: PlaygroundSessionUpdate,
+  options: PlaygroundSessionUpdateOptions = {}
+): Promise<PlaygroundSessionDetail> {
+  const useKeepalive =
+    options.keepalive === true &&
+    textEncoder.encode(JSON.stringify(input)).byteLength <=
+      KEEPALIVE_REQUEST_MAX_BYTES
+  const res = await api.put(
+    `${API_ENDPOINTS.PLAYGROUND_SESSIONS}/${id}`,
+    input,
+    {
+      skipErrorHandler: true,
+      ...(useKeepalive
+        ? { adapter: 'fetch', fetchOptions: { keepalive: true } }
+        : {}),
+    }
+  )
+  const response = requireServerSuccess(
+    res.data as PlaygroundSessionResponse<PlaygroundSessionDetail>
+  )
+  if (!response.data) throw new Error('Playground session was not updated')
+  return response.data
+}
+
+export async function deletePlaygroundSession(id: string): Promise<void> {
+  const res = await api.delete(`${API_ENDPOINTS.PLAYGROUND_SESSIONS}/${id}`)
+  requireServerSuccess(res.data as PlaygroundSessionResponse<null>)
 }

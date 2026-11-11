@@ -30,6 +30,7 @@ import { hasMessageContent } from '../message/message-utils'
 import {
   MAX_LOADED_MESSAGE_CHARS,
   MAX_LOADED_MESSAGES_CHARS,
+  MAX_STORED_MESSAGE_BYTES,
   MAX_STORED_MESSAGES,
   MAX_STORED_MESSAGES_BYTES,
   STORAGE_VERSION,
@@ -47,6 +48,16 @@ const TRUNCATED_CONTENT_SUFFIX = '\n\n[...]'
 const MIN_PREFIX_COLLAPSE_LENGTH = 2000
 const MIN_REPEATED_SECTION_COUNT = 3
 const SECTION_HEADING_LINE_PATTERN = /^#{2,6}\s+\d+\.\s+.+$/gm
+const GO_JSON_ESCAPED_CHARACTER_PATTERN = /[<>&\u2028\u2029]/g
+const textEncoder = new TextEncoder()
+
+function getGoJSONByteLength(value: unknown): number {
+  const serialized = JSON.stringify(value).replace(
+    GO_JSON_ESCAPED_CHARACTER_PATTERN,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`
+  )
+  return textEncoder.encode(serialized).byteLength
+}
 
 function getUserStorageKey(key: string): string | null {
   // Legacy data has no owner; never assign it to the next signed-in account.
@@ -391,12 +402,48 @@ export function loadMessages(): Message[] | null {
  */
 export function saveMessages(messages: Message[]): void {
   try {
-    const trimmed = trimMessages(messages)
-    const parsed = messagesSchema.parse(trimmed) as Message[]
+    const parsed = sanitizeMessagesForPersistence(messages)
     writeStoredValue(STORAGE_KEYS.MESSAGES, parsed)
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to save messages:', error)
+  }
+}
+
+/**
+ * Remove transient image payloads before chat state leaves memory.
+ * Zod object parsing deliberately strips `images` and `inputImages`.
+ */
+export function sanitizeMessagesForPersistence(messages: Message[]): Message[] {
+  const trimmed = trimMessages(messages)
+  const parsed = messagesSchema.parse(trimmed) as Message[]
+  const persisted: Message[] = []
+  let totalBytes = 0
+
+  // Preserve as much of the newest history as satisfies the server's
+  // per-message and aggregate byte limits. Oversized individual messages stay
+  // in memory, but are not allowed to make every later save fail with 400.
+  for (let index = parsed.length - 1; index >= 0; index--) {
+    const message = parsed[index]
+    const messageBytes = getGoJSONByteLength(message)
+    if (messageBytes > MAX_STORED_MESSAGE_BYTES) continue
+    if (totalBytes + messageBytes > MAX_STORED_MESSAGES_BYTES) break
+
+    totalBytes += messageBytes
+    persisted.push(message)
+  }
+
+  return persisted.reverse()
+}
+
+/** Remove only the legacy message cache after a successful server migration. */
+export function clearStoredMessages(): void {
+  try {
+    const key = getUserStorageKey(STORAGE_KEYS.MESSAGES)
+    if (key) localStorage.removeItem(key)
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to clear stored messages:', error)
   }
 }
 

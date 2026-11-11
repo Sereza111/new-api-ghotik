@@ -1069,6 +1069,18 @@ func deleteUserAuthenticationData(tx *gorm.DB, userId int) error {
 	if err := releaseAllExternalIdentitiesWithTx(tx, userId); err != nil {
 		return err
 	}
+	// Some focused tests and rolling-upgrade paths intentionally use a partial
+	// schema. Production startup creates both tables before requests are served.
+	if tx.Migrator().HasTable(&PlaygroundConversationMessage{}) {
+		if err := tx.Unscoped().Where("user_id = ?", userId).Delete(&PlaygroundConversationMessage{}).Error; err != nil {
+			return err
+		}
+	}
+	if tx.Migrator().HasTable(&PlaygroundConversation{}) {
+		if err := tx.Unscoped().Where("user_id = ?", userId).Delete(&PlaygroundConversation{}).Error; err != nil {
+			return err
+		}
+	}
 	for _, authenticationData := range []any{
 		&TwoFABackupCode{},
 		&TwoFA{},
