@@ -540,14 +540,42 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 			mf = form
 		}
 
-		// 写入所有非文件字段
+		allowedMultipartFields := map[string]struct{}{
+			"prompt":             {},
+			"n":                  {},
+			"parameters":         {},
+			"size":               {},
+			"quality":            {},
+			"response_format":    {},
+			"style":              {},
+			"user":               {},
+			"extra_fields":       {},
+			"background":         {},
+			"moderation":         {},
+			"output_format":      {},
+			"output_compression": {},
+			"partial_images":     {},
+			"stream":             {},
+			"input_fidelity":     {},
+			"watermark":          {},
+			"watermark_enabled":  {},
+			"user_id":            {},
+		}
+
+		// Forward only fields represented by ImageRequest. Unknown provider
+		// multipliers must not bypass request validation and billing.
 		if mf != nil {
 			for key, values := range mf.Value {
 				if key == "model" {
 					continue
 				}
+				if _, allowed := allowedMultipartFields[key]; !allowed {
+					continue
+				}
 				for _, value := range values {
-					writer.WriteField(key, value)
+					if err := writer.WriteField(key, value); err != nil {
+						return nil, fmt.Errorf("write multipart field %q: %w", key, err)
+					}
 				}
 			}
 		}
@@ -637,6 +665,31 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 				}
 				_ = maskFile.Close()
 			}
+
+			// OpenAI image 2.6 edits can include a separate markup reference.
+			if markupFiles, exists := mf.File["markup"]; exists && len(markupFiles) > 0 {
+				markupFile, err := markupFiles[0].Open()
+				if err != nil {
+					return nil, errors.New("failed to open markup file")
+				}
+
+				mimeType := detectImageMimeType(markupFiles[0].Filename)
+				h := make(textproto.MIMEHeader)
+				h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="markup"; filename="%s"`, markupFiles[0].Filename))
+				h.Set("Content-Type", mimeType)
+
+				markupPart, err := writer.CreatePart(h)
+				if err != nil {
+					_ = markupFile.Close()
+					return nil, errors.New("create form file failed for markup")
+				}
+
+				if _, err := io.Copy(markupPart, markupFile); err != nil {
+					_ = markupFile.Close()
+					return nil, errors.New("copy markup file failed")
+				}
+				_ = markupFile.Close()
+			}
 		} else {
 			return nil, errors.New("no multipart form data found")
 		}
@@ -668,6 +721,10 @@ func detectImageMimeType(filename string) string {
 		return "image/png"
 	case ".webp":
 		return "image/webp"
+	case ".gif":
+		return "image/gif"
+	case ".svg":
+		return "image/svg+xml"
 	default:
 		// Try to detect from extension if possible
 		if strings.HasPrefix(ext, ".jp") {

@@ -63,6 +63,7 @@ export interface InputFileAttachment {
 export interface GeneratedImage {
   id: string
   src: string
+  format?: 'png' | 'jpeg' | 'webp' | 'gif' | 'svg'
   revisedPrompt?: string
 }
 
@@ -149,9 +150,11 @@ export interface ImageGenerationRequest {
 
 export interface ImageGenerationResponse {
   created?: number
+  output_format?: string
   data: Array<{
     url?: string
     b64_json?: string
+    output_format?: string
     revised_prompt?: string
   }>
 }

@@ -33,6 +33,7 @@ import {
 describe('image generation payload', () => {
   it('recognizes OpenAI image generation models', () => {
     expect(isImageGenerationModel('gpt-image-2')).toBe(true)
+    expect(isImageGenerationModel('gpt-image-2.6-sunburst')).toBe(true)
     expect(isImageGenerationModel('chatgpt-image-latest')).toBe(true)
     expect(isImageGenerationModel('gpt-5.6-terra')).toBe(false)
   })
@@ -105,9 +106,48 @@ describe('image generation payload', () => {
       {
         id: 'generated-0',
         src: 'data:image/png;base64,aW1hZ2U=',
+        format: 'png',
         revisedPrompt: 'A winter forest',
       },
     ])
+  })
+
+  it.each([
+    {
+      name: 'GIF',
+      base64: 'R0lGODlh',
+      reportedFormat: 'gif',
+      expectedFormat: 'gif',
+      expectedMime: 'image/gif',
+    },
+    {
+      name: 'SVG',
+      base64:
+        'PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjwvc3ZnPg==',
+      reportedFormat: 'svg',
+      expectedFormat: 'svg',
+      expectedMime: 'image/svg+xml',
+    },
+    {
+      name: 'actual PNG despite reported SVG',
+      base64: 'iVBORw0KGgo=',
+      reportedFormat: 'svg',
+      expectedFormat: 'png',
+      expectedMime: 'image/png',
+    },
+  ])('uses the actual $name response format for previews', (testCase) => {
+    const message = applyImageGenerationResponse(
+      createLoadingAssistantMessage(1_000),
+      {
+        output_format: testCase.reportedFormat,
+        data: [{ b64_json: testCase.base64 }],
+      }
+    )
+
+    expect(message?.images?.[0]?.format).toBe(testCase.expectedFormat)
+    expect(message?.images?.[0]?.src).toBe(
+      `data:${testCase.expectedMime};base64,${testCase.base64}`
+    )
   })
 })
 

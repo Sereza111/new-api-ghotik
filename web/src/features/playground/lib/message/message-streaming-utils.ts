@@ -21,6 +21,7 @@ import { t } from 'i18next'
 import { ERROR_MESSAGES, MESSAGE_ROLES, MESSAGE_STATUS } from '../../constants'
 import type {
   ChatCompletionResponse,
+  GeneratedImage,
   ImageGenerationResponse,
   Message,
 } from '../../types'
@@ -219,8 +220,13 @@ export function applyImageGenerationResponse(
   response: ImageGenerationResponse
 ): Message | null {
   const images = response.data.flatMap((image, index) => {
+    const format = resolveGeneratedImageFormat(
+      image.b64_json,
+      image.url,
+      image.output_format || response.output_format
+    )
     const src = image.b64_json
-      ? `data:image/png;base64,${image.b64_json}`
+      ? `data:${imageFormatMimeType(format)};base64,${image.b64_json}`
       : image.url
 
     return src
@@ -228,6 +234,7 @@ export function applyImageGenerationResponse(
           {
             id: `${response.created ?? 'generated'}-${index}`,
             src,
+            format,
             revisedPrompt: image.revised_prompt || undefined,
           },
         ]
@@ -243,6 +250,130 @@ export function applyImageGenerationResponse(
     images,
     status: MESSAGE_STATUS.COMPLETE,
   })
+}
+
+type GeneratedImageFormat = NonNullable<GeneratedImage['format']>
+
+function normalizeGeneratedImageFormat(
+  value?: string
+): GeneratedImageFormat | undefined {
+  switch (value?.trim().toLowerCase()) {
+    case 'png':
+      return 'png'
+    case 'jpg':
+    case 'jpeg':
+      return 'jpeg'
+    case 'webp':
+      return 'webp'
+    case 'gif':
+      return 'gif'
+    case 'svg':
+    case 'svg+xml':
+      return 'svg'
+    default:
+      return undefined
+  }
+}
+
+function imageFormatMimeType(format: GeneratedImageFormat): string {
+  switch (format) {
+    case 'jpeg':
+      return 'image/jpeg'
+    case 'svg':
+      return 'image/svg+xml'
+    default:
+      return `image/${format}`
+  }
+}
+
+function formatFromDataUrl(url?: string): GeneratedImageFormat | undefined {
+  if (!url?.startsWith('data:')) return undefined
+
+  const mimeType = url.slice(5, url.indexOf(';')).toLowerCase()
+  switch (mimeType) {
+    case 'image/png':
+      return 'png'
+    case 'image/jpeg':
+      return 'jpeg'
+    case 'image/webp':
+      return 'webp'
+    case 'image/gif':
+      return 'gif'
+    case 'image/svg+xml':
+      return 'svg'
+    default:
+      return undefined
+  }
+}
+
+function formatFromBase64Bytes(
+  encoded?: string
+): GeneratedImageFormat | undefined {
+  if (!encoded) return undefined
+
+  try {
+    const normalized = encoded.replaceAll(/\s/g, '')
+    const prefixLength = Math.min(normalized.length, 1368)
+    const alignedLength = prefixLength - (prefixLength % 4)
+    const decoded = atob(normalized.slice(0, alignedLength))
+    const bytes = Uint8Array.from(decoded, (character) =>
+      character.charCodeAt(0)
+    )
+
+    if (
+      bytes.length >= 8 &&
+      bytes[0] === 0x89 &&
+      bytes[1] === 0x50 &&
+      bytes[2] === 0x4e &&
+      bytes[3] === 0x47 &&
+      bytes[4] === 0x0d &&
+      bytes[5] === 0x0a &&
+      bytes[6] === 0x1a &&
+      bytes[7] === 0x0a
+    ) {
+      return 'png'
+    }
+    if (decoded.startsWith('GIF87a') || decoded.startsWith('GIF89a')) {
+      return 'gif'
+    }
+    if (
+      bytes.length >= 3 &&
+      bytes[0] === 0xff &&
+      bytes[1] === 0xd8 &&
+      bytes[2] === 0xff
+    ) {
+      return 'jpeg'
+    }
+    if (decoded.startsWith('RIFF') && decoded.slice(8, 12) === 'WEBP') {
+      return 'webp'
+    }
+
+    const textPrefix = new TextDecoder().decode(bytes)
+    if (
+      /^\uFEFF?\s*(?:<\?xml[\s\S]*?\?>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg(?:\s|>)/i.test(
+        textPrefix
+      )
+    ) {
+      return 'svg'
+    }
+  } catch {
+    return undefined
+  }
+
+  return undefined
+}
+
+function resolveGeneratedImageFormat(
+  base64?: string,
+  url?: string,
+  reportedFormat?: string
+): GeneratedImageFormat {
+  return (
+    formatFromBase64Bytes(base64) ||
+    formatFromDataUrl(url) ||
+    normalizeGeneratedImageFormat(reportedFormat) ||
+    'png'
+  )
 }
 
 /**

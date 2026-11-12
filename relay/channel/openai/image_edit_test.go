@@ -26,13 +26,22 @@ func TestConvertImageEditRequestMultipart(t *testing.T) {
 	newMultipartContext := func(t *testing.T, prompt string) *gin.Context {
 		var body bytes.Buffer
 		writer := multipart.NewWriter(&body)
-		require.NoError(t, writer.WriteField("model", "gpt-image-1"))
+		require.NoError(t, writer.WriteField("model", "gpt-image-2.6-sunburst"))
 		require.NoError(t, writer.WriteField("prompt", prompt))
 		require.NoError(t, writer.WriteField("stream", "true"))
 		require.NoError(t, writer.WriteField("partial_images", "3"))
+		require.NoError(t, writer.WriteField("size", "4K"))
+		require.NoError(t, writer.WriteField("quality", "high"))
+		require.NoError(t, writer.WriteField("output_format", "svg"))
+		require.NoError(t, writer.WriteField("parameters", `{"n":1}`))
+		require.NoError(t, writer.WriteField("frame_count", "999999"))
 		part, err := writer.CreateFormFile("image", "input.png")
 		require.NoError(t, err)
 		_, err = part.Write([]byte("fake image"))
+		require.NoError(t, err)
+		markupPart, err := writer.CreateFormFile("markup", "annotations.svg")
+		require.NoError(t, err)
+		_, err = markupPart.Write([]byte("<svg></svg>"))
 		require.NoError(t, err)
 		require.NoError(t, writer.Close())
 
@@ -47,7 +56,7 @@ func TestConvertImageEditRequestMultipart(t *testing.T) {
 			RelayMode: relayconstant.RelayModeImagesEdits,
 		}
 		request := dto.ImageRequest{
-			Model:  "gpt-image-1",
+			Model:  "gpt-image-2.6-sunburst",
 			Prompt: prompt,
 			Stream: common.GetPointer(true),
 		}
@@ -61,11 +70,17 @@ func TestConvertImageEditRequestMultipart(t *testing.T) {
 		replayedRequest.Header.Set("Content-Type", c.Request.Header.Get("Content-Type"))
 		require.NoError(t, replayedRequest.ParseMultipartForm(32<<20))
 
-		require.Equal(t, "gpt-image-1", replayedRequest.PostForm.Get("model"))
+		require.Equal(t, "gpt-image-2.6-sunburst", replayedRequest.PostForm.Get("model"))
 		require.Equal(t, prompt, replayedRequest.PostForm.Get("prompt"))
 		require.Equal(t, "true", replayedRequest.PostForm.Get("stream"))
 		require.Equal(t, "3", replayedRequest.PostForm.Get("partial_images"))
+		require.Equal(t, "4K", replayedRequest.PostForm.Get("size"))
+		require.Equal(t, "high", replayedRequest.PostForm.Get("quality"))
+		require.Equal(t, "svg", replayedRequest.PostForm.Get("output_format"))
+		require.JSONEq(t, `{"n":1}`, replayedRequest.PostForm.Get("parameters"))
+		require.Empty(t, replayedRequest.PostForm.Get("frame_count"))
 		require.Len(t, replayedRequest.MultipartForm.File["image"], 1)
+		require.Len(t, replayedRequest.MultipartForm.File["markup"], 1)
 
 		file, err := replayedRequest.MultipartForm.File["image"][0].Open()
 		require.NoError(t, err)
@@ -73,6 +88,16 @@ func TestConvertImageEditRequestMultipart(t *testing.T) {
 		fileBytes, err := io.ReadAll(file)
 		require.NoError(t, err)
 		require.Equal(t, []byte("fake image"), fileBytes)
+
+		markupHeader := replayedRequest.MultipartForm.File["markup"][0]
+		require.Equal(t, "annotations.svg", markupHeader.Filename)
+		require.Equal(t, "image/svg+xml", markupHeader.Header.Get("Content-Type"))
+		markupFile, err := markupHeader.Open()
+		require.NoError(t, err)
+		defer markupFile.Close()
+		markupBytes, err := io.ReadAll(markupFile)
+		require.NoError(t, err)
+		require.Equal(t, []byte("<svg></svg>"), markupBytes)
 	}
 
 	t.Run("with pre-parsed form", func(t *testing.T) {

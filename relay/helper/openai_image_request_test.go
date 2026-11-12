@@ -278,6 +278,35 @@ func TestOpenAIImageResolutionPricing(t *testing.T) {
 		})
 	}
 
+	t.Run("sunburst preserves native fields without bypassing 4K billing", func(t *testing.T) {
+		body := `{
+			"model":"gpt-image-2.6-sunburst",
+			"prompt":"animate the reference",
+			"size":"4K",
+			"quality":"high",
+			"output_format":"svg",
+			"markup":{"image_url":"data:image/png;base64,aW1hZ2U="}
+		}`
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewBufferString(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+
+		req, err := GetAndValidOpenAIImageRequest(c, relayconstant.RelayModeImagesEdits)
+		require.NoError(t, err)
+		require.Equal(t, 2.0, req.GetTokenCountMeta().BillingRatios["image_size"])
+
+		upstreamBody, err := common.Marshal(req)
+		require.NoError(t, err)
+		var upstream map[string]any
+		require.NoError(t, common.Unmarshal(upstreamBody, &upstream))
+		require.Equal(t, "4K", upstream["size"])
+		require.Equal(t, "high", upstream["quality"])
+		require.Equal(t, "svg", upstream["output_format"])
+		markup, ok := upstream["markup"].(map[string]any)
+		require.True(t, ok)
+		require.Equal(t, "data:image/png;base64,aW1hZ2U=", markup["image_url"])
+	})
+
 	t.Run("DALL-E keeps legacy size and quality pricing", func(t *testing.T) {
 		req := &dto.ImageRequest{Model: "dall-e-3", Prompt: "draw a cat", Size: "1024x1792", Quality: "hd"}
 		meta := req.GetTokenCountMeta()

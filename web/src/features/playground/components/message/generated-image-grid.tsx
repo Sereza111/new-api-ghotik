@@ -50,7 +50,9 @@ export function GeneratedImageGrid({ images }: GeneratedImageGridProps) {
             className='bg-background/85 text-foreground hover:bg-background absolute top-2 right-2 size-9 opacity-0 shadow-sm backdrop-blur-sm transition-opacity group-hover/image:opacity-100 focus-visible:opacity-100'
             render={
               <a
-                download={`generated-image-${index + 1}.png`}
+                download={`generated-image-${index + 1}.${
+                  image.format === 'jpeg' ? 'jpg' : image.format || 'png'
+                }`}
                 href={image.src}
               />
             }
