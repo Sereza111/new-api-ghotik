@@ -51,6 +51,13 @@ export interface Message {
   errorCode?: string | null
   images?: GeneratedImage[]
   inputImages?: string[]
+  inputFiles?: InputFileAttachment[]
+}
+
+export interface InputFileAttachment {
+  id: string
+  filename: string
+  dataUrl: string
 }
 
 export interface GeneratedImage {
@@ -66,10 +73,14 @@ export interface ChatCompletionMessage {
 }
 
 export interface ContentPart {
-  type: 'text' | 'image_url'
+  type: 'text' | 'image_url' | 'file'
   text?: string
   image_url?: {
     url: string
+  }
+  file?: {
+    filename: string
+    file_data: string
   }
 }
 

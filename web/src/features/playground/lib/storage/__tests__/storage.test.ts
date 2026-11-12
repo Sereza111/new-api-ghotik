@@ -109,13 +109,20 @@ test('storage calls without a signed-in user do not persist shared data', () => 
   expect(localStorage.length).toBe(0)
 })
 
-test('server persistence removes transient image payloads without mutating in-memory messages', () => {
+test('server persistence removes transient media payloads without mutating in-memory messages', () => {
   const messagesWithImages: Message[] = [
     {
       key: 'image-chat',
       from: 'user',
       versions: [{ id: 'image-version', content: 'Use this reference' }],
       inputImages: ['data:image/png;base64,reference'],
+      inputFiles: [
+        {
+          id: 'report',
+          filename: 'report.pdf',
+          dataUrl: 'data:application/pdf;base64,document',
+        },
+      ],
       images: [
         {
           id: 'generated-image',
@@ -134,6 +141,7 @@ test('server persistence removes transient image payloads without mutating in-me
     },
   ])
   expect(messagesWithImages[0].inputImages).toHaveLength(1)
+  expect(messagesWithImages[0].inputFiles).toHaveLength(1)
   expect(messagesWithImages[0].images).toHaveLength(1)
 })
 

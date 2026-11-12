@@ -1,3 +1,4 @@
+import { nanoid } from 'nanoid'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -14,6 +15,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
 import { getSubmittableInputText } from '../../lib'
 import type {
+  InputFileAttachment,
   ModelOption,
   GroupOption,
   ParameterEnabled,
@@ -23,12 +25,42 @@ import { PlaygroundInputControls } from './playground-input-controls'
 import { PlaygroundInputTools } from './playground-input-tools'
 
 const REFERENCE_IMAGE_ACCEPT = 'image/png,image/jpeg,image/webp'
-const MAX_REFERENCE_IMAGES = 4
-const MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
+const CHAT_ATTACHMENT_ACCEPT = [
+  REFERENCE_IMAGE_ACCEPT,
+  'application/pdf',
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  'application/json',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.pdf',
+  '.txt',
+  '.md',
+  '.markdown',
+  '.csv',
+  '.json',
+  '.docx',
+].join(',')
+const MAX_ATTACHMENTS = 4
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+
+type PromptAttachment = NonNullable<PromptInputMessage['files']>[number]
+
+function isImageAttachment(file: PromptAttachment): boolean {
+  const filename = file.filename?.toLowerCase() ?? ''
+  return (
+    file.mediaType?.toLowerCase().startsWith('image/') === true ||
+    /\.(?:png|jpe?g|webp)$/.test(filename)
+  )
+}
 
 interface PlaygroundInputProps {
   config: PlaygroundConfig
-  onSubmit: (text: string, inputImages?: string[]) => void
+  onSubmit: (
+    text: string,
+    inputImages?: string[],
+    inputFiles?: InputFileAttachment[]
+  ) => void
   onStop?: () => void
   disabled?: boolean
   isGenerating?: boolean
@@ -77,29 +109,47 @@ export function PlaygroundInput({
   const [text, setText] = useState('')
 
   const handleSubmit = (message: PromptInputMessage) => {
-    const submittableText = getSubmittableInputText(message, disabled)
+    const submittableText = getSubmittableInputText(
+      isImageMode ? { text: message.text } : message,
+      disabled
+    )
 
-    if (!submittableText) return
+    if (submittableText === null) return
+    const attachments = message.files ?? []
     const inputImages = [
       ...new Set(
-        (message.files ?? [])
+        attachments
+          .filter(isImageAttachment)
           .map((file) => file.url)
           .filter((url): url is string => Boolean(url))
       ),
     ]
+    const inputFiles = attachments
+      .filter((file) => !isImageAttachment(file))
+      .flatMap((file) => {
+        const filename = file.filename?.trim()
+        const dataUrl = file.url?.trim()
+        if (!filename || !dataUrl) return []
+        const attachment: InputFileAttachment = {
+          id: nanoid(),
+          filename,
+          dataUrl,
+        }
+        return [attachment]
+      })
 
-    onSubmit(submittableText, inputImages)
+    onSubmit(submittableText, inputImages, inputFiles)
     setText((currentText) => (currentText === message.text ? '' : currentText))
   }
 
   return (
     <div className='grid shrink-0 gap-4 px-1 md:pb-4'>
       <PromptInput
-        accept={REFERENCE_IMAGE_ACCEPT}
+        accept={isImageMode ? REFERENCE_IMAGE_ACCEPT : CHAT_ATTACHMENT_ACCEPT}
         className='relative'
         groupClassName='bg-background/95 dark:bg-background/80 border-border/70 shadow-[0_18px_60px_-32px_rgba(0,0,0,0.65)] ring-1 ring-foreground/5 rounded-xl overflow-hidden transition-all duration-200 focus-within:border-primary/45 focus-within:ring-primary/15 focus-within:shadow-[0_22px_70px_-34px_rgba(0,0,0,0.75)]'
-        maxFiles={MAX_REFERENCE_IMAGES}
-        maxFileSize={MAX_REFERENCE_IMAGE_BYTES}
+        maxFiles={MAX_ATTACHMENTS}
+        maxFileSize={MAX_ATTACHMENT_BYTES}
         multiple
         onError={(error) => toast.error(error.message)}
         onSubmit={handleSubmit}

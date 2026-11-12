@@ -138,6 +138,124 @@ describe('chat completion payload', () => {
     ])
   })
 
+  it('sends uploaded documents as OpenAI-compatible file parts', () => {
+    const document = 'data:application/pdf;base64,JVBERi0xLjQKcGxheWdyb3VuZA=='
+    const payload = buildChatCompletionPayload(
+      [
+        createUserMessage(
+          'Summarize the report',
+          1_000,
+          [],
+          [{ id: 'report', filename: 'report.pdf', dataUrl: document }]
+        ),
+      ],
+      DEFAULT_CONFIG,
+      {
+        temperature: false,
+        top_p: false,
+        max_tokens: false,
+        frequency_penalty: false,
+        presence_penalty: false,
+        seed: false,
+      }
+    )
+
+    expect(payload.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Summarize the report' },
+          {
+            type: 'file',
+            file: {
+              filename: 'report.pdf',
+              file_data: document,
+            },
+          },
+        ],
+      },
+    ])
+  })
+
+  it('allows a document-only user message', () => {
+    const document = 'data:application/octet-stream;base64,aGVsbG8='
+    const payload = buildChatCompletionPayload(
+      [
+        createUserMessage(
+          '',
+          1_000,
+          [],
+          [{ id: 'notes', filename: 'notes.txt', dataUrl: document }]
+        ),
+      ],
+      DEFAULT_CONFIG,
+      {
+        temperature: false,
+        top_p: false,
+        max_tokens: false,
+        frequency_penalty: false,
+        presence_penalty: false,
+        seed: false,
+      }
+    )
+
+    expect(payload.messages[0]).toEqual({
+      role: 'user',
+      content: [
+        {
+          type: 'file',
+          file: {
+            filename: 'notes.txt',
+            file_data: 'data:text/plain;base64,aGVsbG8=',
+          },
+        },
+      ],
+    })
+  })
+
+  it('normalizes a DOCX browser MIME to the canonical document type', () => {
+    const payload = buildChatCompletionPayload(
+      [
+        createUserMessage(
+          'Read this document',
+          1_000,
+          [],
+          [
+            {
+              id: 'word-document',
+              filename: 'report.docx',
+              dataUrl: 'data:application/zip;base64,UEsDBA==',
+            },
+          ]
+        ),
+      ],
+      DEFAULT_CONFIG,
+      {
+        temperature: false,
+        top_p: false,
+        max_tokens: false,
+        frequency_penalty: false,
+        presence_penalty: false,
+        seed: false,
+      }
+    )
+
+    expect(payload.messages[0]).toEqual({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Read this document' },
+        {
+          type: 'file',
+          file: {
+            filename: 'report.docx',
+            file_data:
+              'data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,UEsDBA==',
+          },
+        },
+      ],
+    })
+  })
+
   it('preserves the selected reasoning effort', () => {
     const payload = buildChatCompletionPayload(
       [createUserMessage('solve this carefully')],

@@ -55,7 +55,8 @@ type playgroundMessageReasoning struct {
 	DurationMs  *int64  `json:"durationMs,omitempty"`
 }
 
-// playgroundConversationMessage deliberately excludes images and inputImages.
+// playgroundConversationMessage deliberately excludes transient media payloads
+// such as images, inputImages, and inputFiles.
 // Clipboard data URLs are request-scoped and must not be persisted in the DB.
 type playgroundConversationMessage struct {
 	Key                  string                      `json:"key"`

@@ -141,4 +141,48 @@ describe('PromptInput clipboard attachments', () => {
       )
     })
   })
+
+  test('accepts a document by extension and submits it as a data URL', async () => {
+    const file = new File(['report'], 'report.pdf', { type: '' })
+    const onSubmit = vi.fn()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ blob: async () => file }))
+    )
+
+    render(
+      <PromptInput accept='application/pdf,.pdf' onSubmit={onSubmit}>
+        <PromptInputAttachments>
+          {(attachment) => <PromptInputAttachment data={attachment} />}
+        </PromptInputAttachments>
+        <PromptInputTextarea />
+      </PromptInput>
+    )
+
+    const input = screen.getByLabelText('Upload files')
+    fireEvent.change(input, { target: { files: [file] } })
+    expect(screen.getByText('report.pdf')).toBeVisible()
+
+    const form = screen.getByRole('textbox').closest('form')
+    expect(form).not.toBeNull()
+    if (!form) throw new Error('Prompt input form was not rendered')
+    fireEvent.submit(form)
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        {
+          text: '',
+          files: [
+            {
+              type: 'file',
+              url: 'data:application/octet-stream;base64,cmVwb3J0',
+              mediaType: '',
+              filename: 'report.pdf',
+            },
+          ],
+        },
+        expect.any(Object)
+      )
+    })
+  })
 })

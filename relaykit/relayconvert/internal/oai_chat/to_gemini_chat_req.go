@@ -334,16 +334,15 @@ func OpenAIChatRequestToGeminiGenerateContent(c context.Context, textRequest dto
 					return nil, fmt.Errorf("get file data from '%s' failed: %w", source.GetIdentifier(), err)
 				}
 
-				if !sharedgemini.IsSupportedMimeType(mimeType) {
+				mediaPart, supported, err := sharedgemini.ResolvedMediaPart(base64Data, mimeType)
+				if err != nil {
+					return nil, fmt.Errorf("convert file data from '%s' for Gemini: %w", source.GetIdentifier(), err)
+				}
+				if !supported {
 					return nil, fmt.Errorf("mime type is not supported by Gemini: '%s', url: '%s', supported types are: %v", mimeType, source.GetIdentifier(), sharedgemini.SupportedMimeTypesList())
 				}
 
-				parts = append(parts, dto.GeminiPart{
-					InlineData: &dto.GeminiInlineData{
-						MimeType: mimeType,
-						Data:     base64Data,
-					},
-				})
+				parts = append(parts, mediaPart)
 			}
 		}
 

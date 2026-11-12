@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert/convmeta"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert/internal/convdiag"
+	relaymedia "github.com/QuantumNous/new-api/relaykit/relayconvert/internal/media"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
 	"github.com/QuantumNous/new-api/relaykit/types"
 )
@@ -52,6 +53,31 @@ var supportedMimeTypes = map[string]bool{
 func IsSupportedMimeType(mimeType string) bool {
 	mimeType = strings.ToLower(mimeType)
 	return supportedMimeTypes[mimeType] || strings.HasPrefix(mimeType, "audio/") || strings.HasPrefix(mimeType, "video/")
+}
+
+// ResolvedMediaPart converts resolved media into a Gemini part. DOCX is
+// extracted to text because Gemini inlineData does not accept Office Open XML.
+// The bool reports whether this helper recognizes the MIME type.
+func ResolvedMediaPart(base64Data string, mimeType string) (dto.GeminiPart, bool, error) {
+	mediaType, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(mimeType)), ";")
+	mediaType = strings.TrimSpace(mediaType)
+	if IsSupportedMimeType(mediaType) {
+		return dto.GeminiPart{
+			InlineData: &dto.GeminiInlineData{
+				MimeType: mediaType,
+				Data:     base64Data,
+			},
+		}, true, nil
+	}
+	if !relaymedia.IsDOCXMimeType(mediaType) {
+		return dto.GeminiPart{}, false, nil
+	}
+
+	text, err := relaymedia.DecodeDOCX(base64Data)
+	if err != nil {
+		return dto.GeminiPart{}, true, fmt.Errorf("decode DOCX file: %w", err)
+	}
+	return dto.GeminiPart{Text: text}, true, nil
 }
 
 var SafetySettingCategories = []string{

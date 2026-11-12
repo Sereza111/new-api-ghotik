@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { FileTextIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -85,6 +86,8 @@ export function PlaygroundMessageContent({
   const hasImages = images.length > 0
   const inputImages = message.inputImages ?? []
   const hasInputImages = inputImages.length > 0
+  const inputFiles = message.inputFiles ?? []
+  const hasInputFiles = inputFiles.length > 0
   const isMessageFinal =
     message.status !== MESSAGE_STATUS.LOADING &&
     message.status !== MESSAGE_STATUS.STREAMING
@@ -139,52 +142,70 @@ export function PlaygroundMessageContent({
         </>
       )}
 
-      {!isError && (showMessageContent || hasImages || hasInputImages) && (
-        <>
-          {hasInputImages && (
-            <div className='mb-2 grid w-full max-w-md grid-cols-2 gap-2'>
-              {inputImages.map((image) => (
-                <img
-                  alt={t('Image')}
-                  className='border-border/70 bg-muted/20 aspect-square size-full rounded-md border object-contain'
-                  decoding='async'
-                  height={320}
-                  key={image}
-                  loading='lazy'
-                  src={image}
-                  width={320}
-                />
+      {!isError &&
+        (showMessageContent ||
+          hasImages ||
+          hasInputImages ||
+          hasInputFiles) && (
+          <>
+            {hasInputImages && (
+              <div className='mb-2 grid w-full max-w-md grid-cols-2 gap-2'>
+                {inputImages.map((image) => (
+                  <img
+                    alt={t('Image')}
+                    className='border-border/70 bg-muted/20 aspect-square size-full rounded-md border object-contain'
+                    decoding='async'
+                    height={320}
+                    key={image}
+                    loading='lazy'
+                    src={image}
+                    width={320}
+                  />
+                ))}
+              </div>
+            )}
+            {hasInputFiles && (
+              <div className='mb-2 flex w-full max-w-md flex-wrap gap-2'>
+                {inputFiles.map((file) => (
+                  <div
+                    aria-label={`${t('File')}: ${file.filename}`}
+                    className='border-border/70 bg-muted/30 flex max-w-full min-w-0 items-center gap-2 rounded-md border px-2.5 py-2 text-sm'
+                    key={file.id}
+                  >
+                    <FileTextIcon className='size-4 shrink-0' />
+                    <span className='truncate'>{file.filename}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {hasImages && <GeneratedImageGrid images={images} />}
+            {showMessageContent &&
+              (isSourceVisible ? (
+                <CodeBlock
+                  code={versionContent}
+                  className='my-0 group-[.is-assistant]:w-full group-[.is-assistant]:max-w-[78ch]'
+                  collapsedLines={24}
+                  defaultCollapsed={false}
+                  language='markdown'
+                  maxExpandedLines={48}
+                  showLineNumbers
+                  showToolbar
+                  title={t('Raw response')}
+                >
+                  <CodeBlockCopyButton />
+                </CodeBlock>
+              ) : (
+                <MessageContent
+                  variant='flat'
+                  className={cn(getMessageContentStyles())}
+                >
+                  <Response final={isMessageFinal}>{displayContent}</Response>
+                </MessageContent>
               ))}
-            </div>
-          )}
-          {hasImages && <GeneratedImageGrid images={images} />}
-          {showMessageContent &&
-            (isSourceVisible ? (
-              <CodeBlock
-                code={versionContent}
-                className='my-0 group-[.is-assistant]:w-full group-[.is-assistant]:max-w-[78ch]'
-                collapsedLines={24}
-                defaultCollapsed={false}
-                language='markdown'
-                maxExpandedLines={48}
-                showLineNumbers
-                showToolbar
-                title={t('Raw response')}
-              >
-                <CodeBlockCopyButton />
-              </CodeBlock>
-            ) : (
-              <MessageContent
-                variant='flat'
-                className={cn(getMessageContentStyles())}
-              >
-                <Response final={isMessageFinal}>{displayContent}</Response>
-              </MessageContent>
-            ))}
-          <MessageMetadata alignment={alignment} message={message} />
-          {actions}
-        </>
-      )}
+            <MessageMetadata alignment={alignment} message={message} />
+            {actions}
+          </>
+        )}
     </div>
   )
 }

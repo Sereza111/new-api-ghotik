@@ -411,8 +411,9 @@ export function saveMessages(messages: Message[]): void {
 }
 
 /**
- * Remove transient image payloads before chat state leaves memory.
- * Zod object parsing deliberately strips `images` and `inputImages`.
+ * Remove transient media payloads before chat state leaves memory.
+ * Zod object parsing deliberately strips `images`, `inputImages`, and
+ * `inputFiles`.
  */
 export function sanitizeMessagesForPersistence(messages: Message[]): Message[] {
   const trimmed = trimMessages(messages)

@@ -205,6 +205,8 @@ func GetMimeTypeByExtension(ext string) string {
 	// Document files
 	case "pdf":
 		return "application/pdf"
+	case "docx":
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 	default:
 		return "application/octet-stream" // Default for unknown types

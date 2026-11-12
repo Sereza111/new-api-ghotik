@@ -24,7 +24,47 @@ import type {
   MessageVersion,
   ChatCompletionMessage,
   ContentPart,
+  InputFileAttachment,
 } from '../../types'
+
+const ATTACHMENT_MIME_BY_EXTENSION: Record<string, string> = {
+  '.csv': 'text/csv',
+  '.docx':
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.json': 'application/json',
+  '.markdown': 'text/markdown',
+  '.md': 'text/markdown',
+  '.pdf': 'application/pdf',
+  '.txt': 'text/plain',
+}
+
+function normalizeAttachmentDataUrl(file: InputFileAttachment): string {
+  const dataUrl = file.dataUrl.trim()
+  if (!dataUrl.startsWith('data:')) return dataUrl
+
+  const commaIndex = dataUrl.indexOf(',')
+  if (commaIndex === -1) return dataUrl
+
+  const metadata = dataUrl.slice(5, commaIndex)
+  const separatorIndex = metadata.indexOf(';')
+  const declaredMime = (
+    separatorIndex === -1 ? metadata : metadata.slice(0, separatorIndex)
+  )
+    .trim()
+    .toLowerCase()
+
+  const filename = file.filename.trim().toLowerCase()
+  const extension = Object.keys(ATTACHMENT_MIME_BY_EXTENSION).find((value) =>
+    filename.endsWith(value)
+  )
+  if (!extension) return dataUrl
+
+  const canonicalMime = ATTACHMENT_MIME_BY_EXTENSION[extension]
+  if (declaredMime === canonicalMime) return dataUrl
+
+  const parameters = separatorIndex === -1 ? '' : metadata.slice(separatorIndex)
+  return `data:${canonicalMime}${parameters}${dataUrl.slice(commaIndex)}`
+}
 
 /**
  * Create a new message version
@@ -77,7 +117,8 @@ export function updateCurrentVersionContent(
 export function createUserMessage(
   content: string,
   createdAt: number = Date.now(),
-  inputImages: string[] = []
+  inputImages: string[] = [],
+  inputFiles: InputFileAttachment[] = []
 ): Message {
   return {
     key: nanoid(),
@@ -85,6 +126,7 @@ export function createUserMessage(
     versions: [createMessageVersion(content)],
     createdAt,
     inputImages: inputImages.length > 0 ? inputImages : undefined,
+    inputFiles: inputFiles.length > 0 ? inputFiles : undefined,
   }
 }
 
@@ -109,26 +151,34 @@ export function createLoadingAssistantMessage(
 }
 
 /**
- * Build message content with optional images
+ * Build message content with optional images and files.
  */
 export function buildMessageContent(
   text: string,
-  imageUrls: string[] = []
+  imageUrls: string[] = [],
+  inputFiles: InputFileAttachment[] = []
 ): string | ContentPart[] {
   const validImages = imageUrls.filter((url) => url.trim() !== '')
+  const validFiles = inputFiles.filter(
+    (file) => file.filename.trim() !== '' && file.dataUrl.trim() !== ''
+  )
 
-  if (validImages.length === 0) {
+  if (validImages.length === 0 && validFiles.length === 0) {
     return text
   }
 
   const parts: ContentPart[] = [
-    {
-      type: 'text',
-      text: text || '',
-    },
+    ...(text.trim() ? [{ type: 'text' as const, text }] : []),
     ...validImages.map((url) => ({
       type: 'image_url' as const,
       image_url: { url: url.trim() },
+    })),
+    ...validFiles.map((file) => ({
+      type: 'file' as const,
+      file: {
+        filename: file.filename.trim(),
+        file_data: normalizeAttachmentDataUrl(file),
+      },
     })),
   ]
 
@@ -158,7 +208,11 @@ export function formatMessageForAPI(message: Message): ChatCompletionMessage {
   const currentVersion = getCurrentVersion(message)
   return {
     role: message.from,
-    content: buildMessageContent(currentVersion.content, message.inputImages),
+    content: buildMessageContent(
+      currentVersion.content,
+      message.inputImages,
+      message.inputFiles
+    ),
   }
 }
 

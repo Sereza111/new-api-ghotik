@@ -33,6 +33,15 @@ func MediaBlock(base64Data string, mimeType string, declaredImage bool) (dto.Cla
 			Type:   "document",
 			Source: &dto.ClaudeMessageSource{Type: "base64", MediaType: mediaType, Data: base64Data},
 		}, ""
+	case relaymedia.IsDOCXMimeType(mediaType):
+		text, err := relaymedia.DecodeDOCX(base64Data)
+		if err != nil {
+			return dto.ClaudeMediaMessage{}, fmt.Sprintf("DOCX file could not be decoded: %v", err)
+		}
+		return dto.ClaudeMediaMessage{
+			Type:   "document",
+			Source: &dto.ClaudeMessageSource{Type: "text", MediaType: "text/plain", Data: text},
+		}, ""
 	case relaymedia.IsTextMimeType(mediaType):
 		text, ok := relaymedia.DecodeText(base64Data)
 		if !ok {
