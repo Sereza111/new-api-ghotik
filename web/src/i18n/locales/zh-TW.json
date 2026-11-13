@@ -7809,6 +7809,10 @@
     "Rename chat": "重新命名聊天",
     "Chat name": "聊天名稱",
     "Delete chat?": "刪除聊天？",
-    "This chat and its messages will be permanently deleted.": "此聊天及其訊息將被永久刪除。"
+    "This chat and its messages will be permanently deleted.": "此聊天及其訊息將被永久刪除。",
+    "Compare models": "比較模型",
+    "Exit comparison": "結束比較",
+    "Primary model": "主要模型",
+    "Secondary model": "次要模型"
   }
 }

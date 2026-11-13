@@ -16,18 +16,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useCallback, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+
 import { PlaygroundChat } from './components/chat/playground-chat'
+import { PlaygroundComparisonLayout } from './components/comparison/playground-comparison-layout'
 import { PlaygroundInput } from './components/input/playground-input'
 import { PlaygroundSessionNavigation } from './components/sessions/playground-session-navigation'
 import {
-  useChatHandler,
-  usePlaygroundConversation,
+  usePlaygroundComparison,
   usePlaygroundOptions,
   usePlaygroundState,
 } from './hooks'
 import { isImageGenerationModel } from './lib'
+import type { ModelOption, PlaygroundConfig } from './types'
 
 export function Playground() {
+  const { t } = useTranslation()
   const {
     config,
     parameterEnabled,
@@ -53,40 +58,104 @@ export function Playground() {
     removeSession,
     retrySessions,
   } = usePlaygroundState()
+  const [secondaryModels, setSecondaryModels] = useState<ModelOption[]>([])
   const isImageMode = isImageGenerationModel(config.model)
 
-  const { sendChat, stopGeneration, isGenerating } = useChatHandler({
+  const comparison = usePlaygroundComparison({
     config,
     parameterEnabled,
-    onMessageUpdate: updateMessages,
-  })
-
-  const {
-    editingMessageKey,
-    handleSendMessage,
-    handleRegenerateMessage,
-    handleEditMessage,
-    handleEditOpenChange,
-    applyEdit,
-    handleDeleteMessage,
-  } = usePlaygroundConversation({
     messages,
     updateMessages,
-    sendChat,
   })
 
   const handleClearMessages = () => {
-    handleEditOpenChange(false)
+    comparison.primary.conversation.handleEditOpenChange(false)
+    comparison.secondary.conversation.handleEditOpenChange(false)
     clearMessages()
   }
 
-  const { isLoadingModels } = usePlaygroundOptions({
+  const { isLoadingModels: isLoadingPrimaryModels } = usePlaygroundOptions({
     currentGroup: config.group,
     currentModel: config.model,
     setGroups,
     setModels,
     updateConfig,
   })
+
+  const updateSecondaryConfig = useCallback(
+    function updateComparisonOption<K extends keyof PlaygroundConfig>(
+      key: K,
+      value: PlaygroundConfig[K]
+    ): void {
+      if (key !== 'model' && key !== 'group') return
+
+      updateConfig('comparison', {
+        ...config.comparison,
+        [key]: value as string,
+      })
+    },
+    [config.comparison, updateConfig]
+  )
+
+  const { isLoadingModels: isLoadingSecondaryModels } = usePlaygroundOptions({
+    currentGroup: config.comparison.group,
+    currentModel: config.comparison.model,
+    setGroups,
+    setModels: setSecondaryModels,
+    updateConfig: updateSecondaryConfig,
+  })
+
+  const handleComparisonEnabledChange = (enabled: boolean) => {
+    updateConfig('comparison', {
+      ...config.comparison,
+      enabled,
+      model: config.comparison.model || config.model,
+      group: config.comparison.group || config.group,
+    })
+  }
+
+  const primaryConversation = comparison.primary.conversation
+  const secondaryConversation = comparison.secondary.conversation
+  const primaryChat = (
+    <PlaygroundChat
+      messages={comparison.primary.messages}
+      isLoadingMessages={isLoadingMessages}
+      onRegenerateMessage={primaryConversation.handleRegenerateMessage}
+      onEditMessage={primaryConversation.handleEditMessage}
+      onDeleteMessage={primaryConversation.handleDeleteMessage}
+      onSelectPrompt={comparison.handleSendMessage}
+      isGenerating={comparison.primary.handler.isGenerating}
+      editingKey={primaryConversation.editingMessageKey}
+      onCancelEdit={primaryConversation.handleEditOpenChange}
+      onSaveEdit={(newContent) =>
+        primaryConversation.applyEdit(newContent, false)
+      }
+      onSaveEditAndSubmit={(newContent) =>
+        primaryConversation.applyEdit(newContent, true)
+      }
+      contentClassName={config.comparison.enabled ? 'max-w-none' : undefined}
+    />
+  )
+  const secondaryChat = (
+    <PlaygroundChat
+      messages={comparison.secondary.messages}
+      isLoadingMessages={isLoadingMessages}
+      onRegenerateMessage={secondaryConversation.handleRegenerateMessage}
+      onEditMessage={secondaryConversation.handleEditMessage}
+      onDeleteMessage={secondaryConversation.handleDeleteMessage}
+      onSelectPrompt={comparison.handleSendMessage}
+      isGenerating={comparison.secondary.handler.isGenerating}
+      editingKey={secondaryConversation.editingMessageKey}
+      onCancelEdit={secondaryConversation.handleEditOpenChange}
+      onSaveEdit={(newContent) =>
+        secondaryConversation.applyEdit(newContent, false)
+      }
+      onSaveEditAndSubmit={(newContent) =>
+        secondaryConversation.applyEdit(newContent, true)
+      }
+      contentClassName='max-w-none'
+    />
+  )
 
   return (
     <div className='relative flex size-full min-h-0 flex-col overflow-hidden md:flex-row'>
@@ -96,7 +165,7 @@ export function Playground() {
         isLoading={isLoadingSessions}
         isError={isSessionsError}
         busy={isSessionBusy}
-        generationActive={isGenerating}
+        generationActive={comparison.isGenerating}
         saveStatus={sessionSaveStatus}
         onCreate={createSession}
         onSelect={selectSession}
@@ -106,33 +175,59 @@ export function Playground() {
       />
 
       <div className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'>
-        {/* Full-width scroll container: scrolling works over side whitespace */}
         <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
-          <PlaygroundChat
-            messages={messages}
-            isLoadingMessages={isLoadingMessages}
-            onRegenerateMessage={handleRegenerateMessage}
-            onEditMessage={handleEditMessage}
-            onDeleteMessage={handleDeleteMessage}
-            onSelectPrompt={handleSendMessage}
-            isGenerating={isGenerating}
-            editingKey={editingMessageKey}
-            onCancelEdit={handleEditOpenChange}
-            onSaveEdit={(newContent) => applyEdit(newContent, false)}
-            onSaveEditAndSubmit={(newContent) => applyEdit(newContent, true)}
+          <PlaygroundComparisonLayout
+            enabled={config.comparison.enabled}
+            disabled={
+              comparison.isGenerating ||
+              isLoadingMessages ||
+              !activeSessionId ||
+              !config.model
+            }
+            onEnabledChange={handleComparisonEnabledChange}
+            primary={{
+              title: t('Primary model'),
+              content: primaryChat,
+              model: config.model,
+              group: config.group,
+              models,
+              groups,
+              isLoading: isLoadingPrimaryModels,
+              isGenerating: comparison.primary.handler.isGenerating,
+              onModelChange: (value) => updateConfig('model', value),
+              onGroupChange: (value) => updateConfig('group', value),
+              onStop: comparison.primary.handler.stopGeneration,
+            }}
+            secondary={{
+              title: t('Secondary model'),
+              content: secondaryChat,
+              model: config.comparison.model,
+              group: config.comparison.group,
+              models: secondaryModels,
+              groups,
+              isLoading: isLoadingSecondaryModels,
+              isGenerating: comparison.secondary.handler.isGenerating,
+              onModelChange: (value) => updateSecondaryConfig('model', value),
+              onGroupChange: (value) => updateSecondaryConfig('group', value),
+              onStop: comparison.secondary.handler.stopGeneration,
+            }}
           />
         </div>
 
-        {/* Input area: center content and constrain to the same container width */}
-        <div className='mx-auto w-full max-w-4xl'>
+        <div className='mx-auto w-full max-w-7xl'>
           <PlaygroundInput
             config={config}
-            disabled={isGenerating || isLoadingMessages || !activeSessionId}
+            disabled={
+              comparison.isGenerating ||
+              isLoadingMessages ||
+              !activeSessionId ||
+              (config.comparison.enabled && !config.comparison.model)
+            }
             groups={groups}
             groupValue={config.group}
-            isGenerating={isGenerating}
+            isGenerating={comparison.isGenerating}
             isImageMode={isImageMode}
-            isModelLoading={isLoadingModels}
+            isModelLoading={isLoadingPrimaryModels}
             modelValue={config.model}
             models={models}
             onGroupChange={(value) => updateConfig('group', value)}
@@ -140,8 +235,8 @@ export function Playground() {
             onClearMessages={handleClearMessages}
             onModelChange={(value) => updateConfig('model', value)}
             onParameterEnabledChange={updateParameterEnabled}
-            onStop={stopGeneration}
-            onSubmit={handleSendMessage}
+            onStop={comparison.stopAll}
+            onSubmit={comparison.handleSendMessage}
             parameterEnabled={parameterEnabled}
             hasMessages={messages.length > 0}
           />

@@ -7809,6 +7809,10 @@
     "Rename chat": "チャット名を変更",
     "Chat name": "チャット名",
     "Delete chat?": "チャットを削除しますか？",
-    "This chat and its messages will be permanently deleted.": "このチャットとメッセージは完全に削除されます。"
+    "This chat and its messages will be permanently deleted.": "このチャットとメッセージは完全に削除されます。",
+    "Compare models": "モデルを比較",
+    "Exit comparison": "比較を終了",
+    "Primary model": "メインモデル",
+    "Secondary model": "サブモデル"
   }
 }

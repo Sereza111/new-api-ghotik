@@ -13,19 +13,30 @@ import (
 
 const (
 	playgroundConversationMaxBodySize = model.PlaygroundConversationMaxMessagesBytes + 256*1024
+	playgroundComparisonMaxGroupBytes = 255
+	playgroundMessageMaxTurnIDBytes   = 128
 )
 
+type playgroundComparisonConfig struct {
+	Enabled         bool   `json:"enabled"`
+	Model           string `json:"model"`
+	Group           string `json:"group"`
+	ReasoningEffort string `json:"reasoning_effort"`
+}
+
 type playgroundConversationConfig struct {
-	Model            string  `json:"model"`
-	Group            string  `json:"group"`
-	Temperature      float64 `json:"temperature"`
-	TopP             float64 `json:"top_p"`
-	MaxTokens        int     `json:"max_tokens"`
-	FrequencyPenalty float64 `json:"frequency_penalty"`
-	PresencePenalty  float64 `json:"presence_penalty"`
-	Seed             *int    `json:"seed"`
-	Stream           bool    `json:"stream"`
-	ReasoningEffort  string  `json:"reasoning_effort"`
+	Model            string                      `json:"model"`
+	Group            string                      `json:"group"`
+	Temperature      float64                     `json:"temperature"`
+	TopP             float64                     `json:"top_p"`
+	MaxTokens        int                         `json:"max_tokens"`
+	FrequencyPenalty float64                     `json:"frequency_penalty"`
+	PresencePenalty  float64                     `json:"presence_penalty"`
+	Seed             *int                        `json:"seed"`
+	Stream           bool                        `json:"stream"`
+	ReasoningEffort  string                      `json:"reasoning_effort"`
+	WebSearchEnabled bool                        `json:"web_search_enabled"`
+	Comparison       *playgroundComparisonConfig `json:"comparison,omitempty"`
 }
 
 type playgroundParameterEnabled struct {
@@ -73,6 +84,8 @@ type playgroundConversationMessage struct {
 	IsContentComplete    *bool                       `json:"isContentComplete,omitempty"`
 	Status               string                      `json:"status,omitempty"`
 	ErrorCode            *string                     `json:"errorCode,omitempty"`
+	Lane                 string                      `json:"lane,omitempty"`
+	TurnID               string                      `json:"turnId,omitempty"`
 }
 
 type createPlaygroundConversationRequest struct {
@@ -134,6 +147,12 @@ func validatePlaygroundConversationMessage(message playgroundConversationMessage
 	if message.Key == "" || len(message.Key) > 128 || len(message.Versions) == 0 || len(message.Versions) > 20 {
 		return false
 	}
+	if message.Lane != "" && message.Lane != "primary" && message.Lane != "secondary" {
+		return false
+	}
+	if len(message.TurnID) > playgroundMessageMaxTurnIDBytes || !utf8.ValidString(message.TurnID) {
+		return false
+	}
 	if message.From != "user" && message.From != "assistant" && message.From != "system" {
 		return false
 	}
@@ -151,6 +170,34 @@ func validatePlaygroundConversationMessage(message playgroundConversationMessage
 	default:
 		return false
 	}
+}
+
+func validPlaygroundReasoningEffort(effort string) bool {
+	switch effort {
+	case "", "none", "minimal", "low", "medium", "high", "xhigh", "max":
+		return true
+	default:
+		return false
+	}
+}
+
+func validatePlaygroundComparisonConfig(comparison *playgroundComparisonConfig) bool {
+	if comparison == nil {
+		return true
+	}
+	if len(comparison.Model) > model.PlaygroundConversationMaxModelBytes || !utf8.ValidString(comparison.Model) {
+		return false
+	}
+	if len(comparison.Group) > playgroundComparisonMaxGroupBytes || !utf8.ValidString(comparison.Group) {
+		return false
+	}
+	if !validPlaygroundReasoningEffort(comparison.ReasoningEffort) {
+		return false
+	}
+	if comparison.Enabled && (strings.TrimSpace(comparison.Model) == "" || strings.TrimSpace(comparison.Group) == "") {
+		return false
+	}
+	return true
 }
 
 func marshalPlaygroundConversationMessages(messages []playgroundConversationMessage) ([]string, error) {
@@ -173,6 +220,12 @@ func marshalPlaygroundConversationMessages(messages []playgroundConversationMess
 
 func marshalPlaygroundConversationSettings(config playgroundConversationConfig, parameters playgroundParameterEnabled) (string, string, error) {
 	if len(config.Model) > model.PlaygroundConversationMaxModelBytes || !utf8.ValidString(config.Model) {
+		return "", "", model.ErrPlaygroundConversationInvalid
+	}
+	if !validPlaygroundReasoningEffort(config.ReasoningEffort) {
+		return "", "", model.ErrPlaygroundConversationInvalid
+	}
+	if !validatePlaygroundComparisonConfig(config.Comparison) {
 		return "", "", model.ErrPlaygroundConversationInvalid
 	}
 	configJSON, err := common.Marshal(config)

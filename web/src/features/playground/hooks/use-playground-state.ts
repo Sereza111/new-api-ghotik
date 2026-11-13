@@ -182,7 +182,14 @@ export function usePlaygroundState() {
       const sanitizedMessages = sanitizeMessagesForPersistence(
         session.messages ?? []
       )
-      const nextConfig = { ...DEFAULT_CONFIG, ...session.config }
+      const nextConfig = {
+        ...DEFAULT_CONFIG,
+        ...session.config,
+        comparison: {
+          ...DEFAULT_CONFIG.comparison,
+          ...session.config.comparison,
+        },
+      }
       const nextParameterEnabled = {
         ...DEFAULT_PARAMETER_ENABLED,
         ...session.parameter_enabled,

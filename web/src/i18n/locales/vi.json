@@ -7809,6 +7809,10 @@
     "Rename chat": "Đổi tên cuộc trò chuyện",
     "Chat name": "Tên cuộc trò chuyện",
     "Delete chat?": "Xóa cuộc trò chuyện?",
-    "This chat and its messages will be permanently deleted.": "Cuộc trò chuyện này và các tin nhắn sẽ bị xóa vĩnh viễn."
+    "This chat and its messages will be permanently deleted.": "Cuộc trò chuyện này và các tin nhắn sẽ bị xóa vĩnh viễn.",
+    "Compare models": "So sánh mô hình",
+    "Exit comparison": "Thoát so sánh",
+    "Primary model": "Mô hình chính",
+    "Secondary model": "Mô hình phụ"
   }
 }

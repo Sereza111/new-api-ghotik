@@ -145,6 +145,51 @@ test('server persistence removes transient media payloads without mutating in-me
   expect(messagesWithImages[0].images).toHaveLength(1)
 })
 
+test('comparison configuration and lane metadata persist while transient media is removed', () => {
+  useAuthStore.getState().auth.setUser({ id: 3, username: 'C', role: 1 })
+  saveConfig({
+    comparison: {
+      enabled: true,
+      model: 'secondary-model',
+      group: 'secondary-group',
+    },
+  })
+  saveMessages([
+    {
+      key: 'secondary-user',
+      from: 'user',
+      versions: [{ id: 'secondary-version', content: 'Compare this' }],
+      lane: 'secondary',
+      turnId: 'turn-1',
+      inputImages: ['data:image/png;base64,reference'],
+      inputFiles: [
+        {
+          id: 'brief',
+          filename: 'brief.pdf',
+          dataUrl: 'data:application/pdf;base64,document',
+        },
+      ],
+    },
+  ])
+
+  expect(loadConfig()).toEqual({
+    comparison: {
+      enabled: true,
+      model: 'secondary-model',
+      group: 'secondary-group',
+    },
+  })
+  expect(loadMessages()).toEqual([
+    {
+      key: 'secondary-user',
+      from: 'user',
+      versions: [{ id: 'secondary-version', content: 'Compare this' }],
+      lane: 'secondary',
+      turnId: 'turn-1',
+    },
+  ])
+})
+
 test('server persistence enforces UTF-8 message and aggregate byte limits', () => {
   const oversizedCyrillic: Message = {
     key: 'oversized-cyrillic',

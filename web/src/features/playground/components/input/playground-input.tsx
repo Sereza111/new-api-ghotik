@@ -11,7 +11,6 @@ import {
   PromptInputTextarea,
   type PromptInputMessage,
 } from '@/components/ai-elements/prompt-input'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
 import { getSubmittableInputText } from '../../lib'
 import type {
@@ -23,6 +22,7 @@ import type {
 } from '../../types'
 import { PlaygroundInputControls } from './playground-input-controls'
 import { PlaygroundInputTools } from './playground-input-tools'
+import { PlaygroundReasoningControl } from './playground-reasoning-control'
 
 const REFERENCE_IMAGE_ACCEPT = 'image/png,image/jpeg,image/webp'
 const CHAT_ATTACHMENT_ACCEPT = [
@@ -175,40 +175,11 @@ export function PlaygroundInput({
         />
 
         {!isImageMode ? (
-          <div className='border-border/60 flex flex-wrap items-center gap-2 border-t px-3 py-2'>
-            <span className='text-muted-foreground mr-1 text-xs font-medium'>
-              {t('Reasoning effort')}
-            </span>
-            <ToggleGroup
-              value={[config.reasoning_effort]}
-              onValueChange={(value) => {
-                const nextValue = value.find(
-                  (item) => item !== config.reasoning_effort
-                ) as PlaygroundConfig['reasoning_effort'] | undefined
-                if (nextValue) onConfigChange('reasoning_effort', nextValue)
-              }}
-              aria-label={t('Reasoning effort')}
-              variant='outline'
-              size='sm'
-              spacing={1}
-              className='max-w-full flex-wrap'
-            >
-              {[
-                ['none', t('Off')],
-                ['low', t('Low')],
-                ['medium', t('Medium')],
-                ['high', t('High')],
-              ].map(([value, label]) => (
-                <ToggleGroupItem
-                  key={value}
-                  value={value}
-                  className='h-7 px-2.5 text-xs'
-                >
-                  {label}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-          </div>
+          <PlaygroundReasoningControl
+            config={config}
+            disabled={disabled}
+            onConfigChange={onConfigChange}
+          />
         ) : (
           <div className='border-border/60 text-muted-foreground flex items-center justify-between gap-3 border-t px-3 py-2 text-xs'>
             <span className='font-medium'>{t('Reasoning effort')}</span>

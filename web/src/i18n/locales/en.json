@@ -7809,6 +7809,10 @@
     "Rename chat": "Rename chat",
     "Chat name": "Chat name",
     "Delete chat?": "Delete chat?",
-    "This chat and its messages will be permanently deleted.": "This chat and its messages will be permanently deleted."
+    "This chat and its messages will be permanently deleted.": "This chat and its messages will be permanently deleted.",
+    "Compare models": "Compare models",
+    "Exit comparison": "Exit comparison",
+    "Primary model": "Primary model",
+    "Secondary model": "Secondary model"
   }
 }

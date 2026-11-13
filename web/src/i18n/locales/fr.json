@@ -7809,6 +7809,10 @@
     "Rename chat": "Renommer la discussion",
     "Chat name": "Nom de la discussion",
     "Delete chat?": "Supprimer la discussion ?",
-    "This chat and its messages will be permanently deleted.": "Cette discussion et ses messages seront définitivement supprimés."
+    "This chat and its messages will be permanently deleted.": "Cette discussion et ses messages seront définitivement supprimés.",
+    "Compare models": "Comparer les modèles",
+    "Exit comparison": "Quitter la comparaison",
+    "Primary model": "Modèle principal",
+    "Secondary model": "Modèle secondaire"
   }
 }

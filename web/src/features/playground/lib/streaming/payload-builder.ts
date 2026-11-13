@@ -28,6 +28,10 @@ import {
   getMessageContent,
   isValidMessage,
 } from '../message/message-utils'
+import {
+  isParameterSupported,
+  normalizeReasoningEffort,
+} from '../parameters/model-capabilities'
 
 const IMAGE_MODEL_PATTERNS = [
   /^gpt-image-/i,
@@ -89,32 +93,47 @@ export function buildChatCompletionPayload(
     stream: config.stream,
   }
 
-  if (parameterEnabled.temperature) {
+  const reasoningEffort = normalizeReasoningEffort(
+    config.model,
+    config.reasoning_effort
+  )
+
+  const parameterIsEnabled = (key: keyof ParameterEnabled) =>
+    parameterEnabled[key] &&
+    isParameterSupported(config.model, reasoningEffort, key)
+
+  if (parameterIsEnabled('temperature')) {
     payload.temperature = config.temperature
   }
 
-  if (parameterEnabled.top_p) {
+  if (parameterIsEnabled('top_p')) {
     payload.top_p = config.top_p
   }
 
-  if (parameterEnabled.max_tokens) {
+  if (parameterIsEnabled('max_tokens')) {
     payload.max_tokens = config.max_tokens
   }
 
-  if (parameterEnabled.frequency_penalty) {
+  if (parameterIsEnabled('frequency_penalty')) {
     payload.frequency_penalty = config.frequency_penalty
   }
 
-  if (parameterEnabled.presence_penalty) {
+  if (parameterIsEnabled('presence_penalty')) {
     payload.presence_penalty = config.presence_penalty
   }
 
-  if (parameterEnabled.seed && config.seed !== null) {
+  if (parameterIsEnabled('seed') && config.seed !== null) {
     payload.seed = config.seed
   }
 
-  if (config.reasoning_effort !== 'none') {
-    payload.reasoning_effort = config.reasoning_effort
+  if (reasoningEffort !== 'none') {
+    payload.reasoning_effort = reasoningEffort
+  }
+
+  if (config.web_search_enabled) {
+    payload.web_search_options = {
+      search_context_size: 'medium',
+    }
   }
 
   return payload

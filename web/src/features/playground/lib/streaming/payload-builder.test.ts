@@ -313,6 +313,133 @@ describe('chat completion payload', () => {
     expect(payload.reasoning_effort).toBe('high')
   })
 
+  it('sends Ultra as the canonical max reasoning effort', () => {
+    const payload = buildChatCompletionPayload(
+      [createUserMessage('solve this exhaustively')],
+      {
+        ...DEFAULT_CONFIG,
+        model: 'gpt-6-sol',
+        reasoning_effort: 'max',
+      },
+      {
+        temperature: false,
+        top_p: false,
+        max_tokens: false,
+        frequency_penalty: false,
+        presence_penalty: false,
+        seed: false,
+      }
+    )
+
+    expect(payload.reasoning_effort).toBe('max')
+  })
+
+  it('normalizes extended reasoning for models without that capability', () => {
+    const payload = buildChatCompletionPayload(
+      [createUserMessage('solve this carefully')],
+      {
+        ...DEFAULT_CONFIG,
+        model: 'gpt-4o',
+        reasoning_effort: 'max',
+      },
+      {
+        temperature: false,
+        top_p: false,
+        max_tokens: false,
+        frequency_penalty: false,
+        presence_penalty: false,
+        seed: false,
+      }
+    )
+
+    expect(payload.reasoning_effort).toBe('high')
+  })
+
+  it('enables hosted web search through the relay contract', () => {
+    const payload = buildChatCompletionPayload(
+      [createUserMessage('find the latest release')],
+      { ...DEFAULT_CONFIG, web_search_enabled: true },
+      {
+        temperature: false,
+        top_p: false,
+        max_tokens: false,
+        frequency_penalty: false,
+        presence_penalty: false,
+        seed: false,
+      }
+    )
+
+    expect(payload.web_search_options).toEqual({
+      search_context_size: 'medium',
+    })
+  })
+
+  it('omits parameters that conflict with OpenAI reasoning models', () => {
+    const payload = buildChatCompletionPayload(
+      [createUserMessage('solve this')],
+      {
+        ...DEFAULT_CONFIG,
+        model: 'gpt-6-sol',
+        reasoning_effort: 'max',
+        temperature: 0,
+        top_p: 0,
+        max_tokens: 8192,
+        frequency_penalty: 0,
+        presence_penalty: 0,
+        seed: 0,
+      },
+      {
+        temperature: true,
+        top_p: true,
+        max_tokens: true,
+        frequency_penalty: true,
+        presence_penalty: true,
+        seed: true,
+      }
+    )
+
+    expect(payload).toMatchObject({
+      reasoning_effort: 'max',
+      max_tokens: 8192,
+    })
+    expect(payload).not.toHaveProperty('temperature')
+    expect(payload).not.toHaveProperty('top_p')
+    expect(payload).not.toHaveProperty('frequency_penalty')
+    expect(payload).not.toHaveProperty('presence_penalty')
+    expect(payload).not.toHaveProperty('seed')
+  })
+
+  it('preserves explicit zero values for compatible models', () => {
+    const payload = buildChatCompletionPayload(
+      [createUserMessage('answer this')],
+      {
+        ...DEFAULT_CONFIG,
+        model: 'gpt-4o',
+        temperature: 0,
+        top_p: 0,
+        frequency_penalty: 0,
+        presence_penalty: 0,
+        seed: 0,
+      },
+      {
+        temperature: true,
+        top_p: true,
+        max_tokens: false,
+        frequency_penalty: true,
+        presence_penalty: true,
+        seed: true,
+      }
+    )
+
+    expect(payload).toMatchObject({
+      temperature: 0,
+      top_p: 0,
+      frequency_penalty: 0,
+      presence_penalty: 0,
+      seed: 0,
+    })
+  })
+
   it('omits reasoning effort when it is disabled', () => {
     const payload = buildChatCompletionPayload(
       [createUserMessage('answer normally')],

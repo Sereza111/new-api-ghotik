@@ -23,6 +23,17 @@ export type MessageStatus = 'loading' | 'streaming' | 'complete' | 'error'
 
 export type PlaygroundMessageLayoutMode = 'alternating' | 'left'
 
+export type PlaygroundLane = 'primary' | 'secondary'
+
+export type ReasoningEffort =
+  | 'none'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+  | 'max'
+
 export interface MessageVersion {
   id: string
   content: string
@@ -52,6 +63,8 @@ export interface Message {
   images?: GeneratedImage[]
   inputImages?: string[]
   inputFiles?: InputFileAttachment[]
+  lane?: PlaygroundLane
+  turnId?: string
 }
 
 export interface InputFileAttachment {
@@ -96,7 +109,10 @@ export interface ChatCompletionRequest {
   frequency_penalty?: number
   presence_penalty?: number
   seed?: number
-  reasoning_effort?: 'low' | 'medium' | 'high'
+  reasoning_effort?: Exclude<ReasoningEffort, 'none'>
+  web_search_options?: {
+    search_context_size?: 'low' | 'medium' | 'high'
+  }
 }
 
 export interface ChatCompletionChunk {
@@ -160,6 +176,12 @@ export interface ImageGenerationResponse {
 }
 
 // Configuration types
+export interface PlaygroundComparisonConfig {
+  enabled: boolean
+  model: string
+  group: string
+}
+
 export interface PlaygroundConfig {
   model: string
   group: string
@@ -170,7 +192,9 @@ export interface PlaygroundConfig {
   presence_penalty: number
   seed: number | null
   stream: boolean
-  reasoning_effort: 'none' | 'low' | 'medium' | 'high'
+  reasoning_effort: ReasoningEffort
+  web_search_enabled: boolean
+  comparison: PlaygroundComparisonConfig
 }
 
 export interface ParameterEnabled {

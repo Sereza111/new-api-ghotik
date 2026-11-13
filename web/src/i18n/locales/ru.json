@@ -7809,6 +7809,10 @@
     "Rename chat": "Переименовать чат",
     "Chat name": "Название чата",
     "Delete chat?": "Удалить чат?",
-    "This chat and its messages will be permanently deleted.": "Этот чат и все его сообщения будут удалены без возможности восстановления."
+    "This chat and its messages will be permanently deleted.": "Этот чат и все его сообщения будут удалены без возможности восстановления.",
+    "Compare models": "Сравнить модели",
+    "Exit comparison": "Закрыть сравнение",
+    "Primary model": "Основная модель",
+    "Secondary model": "Вторая модель"
   }
 }

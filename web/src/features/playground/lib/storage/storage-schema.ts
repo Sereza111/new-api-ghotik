@@ -35,7 +35,17 @@ export const playgroundConfigSchema = z.object({
   presence_penalty: z.number().optional(),
   seed: z.number().nullable().optional(),
   stream: z.boolean().optional(),
-  reasoning_effort: z.enum(['none', 'low', 'medium', 'high']).optional(),
+  reasoning_effort: z
+    .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+    .optional(),
+  web_search_enabled: z.boolean().optional(),
+  comparison: z
+    .object({
+      enabled: z.boolean(),
+      model: z.string(),
+      group: z.string(),
+    })
+    .optional(),
 })
 
 export const parameterEnabledSchema = z.object({
@@ -88,6 +98,8 @@ const messageSchema = z.object({
   isContentComplete: z.boolean().optional(),
   status: messageStatusSchema.optional(),
   errorCode: z.string().nullable().optional(),
+  lane: z.enum(['primary', 'secondary']).optional(),
+  turnId: z.string().max(128).optional(),
 })
 
 export const messagesSchema = z.array(messageSchema)

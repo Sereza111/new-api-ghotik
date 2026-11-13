@@ -38,12 +38,9 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
 
-import {
-  ATTACHMENT_ACTIONS,
-  getAttachmentActionNotice,
-  getSearchActionNotice,
-} from '../../lib'
+import { ATTACHMENT_ACTIONS, getAttachmentActionNotice } from '../../lib'
 import type { ParameterEnabled, PlaygroundConfig } from '../../types'
 import { PlaygroundParameterPanel } from './playground-parameter-panel'
 
@@ -82,11 +79,6 @@ export function PlaygroundInputTools({
     toast.info(t(notice.title), {
       description: notice.description,
     })
-  }
-
-  const handleSearchAction = () => {
-    const notice = getSearchActionNotice()
-    toast.info(t(notice.title))
   }
 
   const handleClearMessages = () => {
@@ -140,10 +132,24 @@ export function PlaygroundInputTools({
           <TooltipTrigger
             render={
               <PromptInputButton
-                aria-label={t('Search')}
-                className='text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium'
-                disabled={disabled}
-                onClick={handleSearchAction}
+                aria-label={
+                  config.web_search_enabled
+                    ? t('Disable web search')
+                    : t('Enable web search')
+                }
+                aria-pressed={config.web_search_enabled}
+                className={cn(
+                  'text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium',
+                  config.web_search_enabled &&
+                    'bg-primary/12 text-primary hover:bg-primary/18 hover:text-primary'
+                )}
+                disabled={disabled || isImageMode}
+                onClick={() =>
+                  onConfigChange(
+                    'web_search_enabled',
+                    !config.web_search_enabled
+                  )
+                }
                 variant='ghost'
               >
                 <GlobeIcon size={16} />
@@ -151,7 +157,9 @@ export function PlaygroundInputTools({
             }
           />
           <TooltipContent>
-            <p>{t('Search')}</p>
+            <p>
+              {config.web_search_enabled ? t('Web search on') : t('Web search')}
+            </p>
           </TooltipContent>
         </Tooltip>
 

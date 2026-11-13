@@ -44,6 +44,7 @@ import {
 import { useIsMobile } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
 
+import { isParameterSupported } from '../../lib/parameters/model-capabilities'
 import {
   getParameterControlValueText,
   normalizeParameterNumberValue,
@@ -103,6 +104,11 @@ function PlaygroundParameterContent({
     >
       {PLAYGROUND_PARAMETER_CONTROLS.map((control) => {
         const enabled = parameterEnabled[control.key]
+        const supported = isParameterSupported(
+          config.model,
+          config.reasoning_effort,
+          control.key
+        )
         const value = config[control.key]
         const controlId = `playground-${control.key}`
 
@@ -110,7 +116,7 @@ function PlaygroundParameterContent({
           <div
             className={cn(
               'border-border/70 bg-background/60 grid gap-2 rounded-lg border p-3 transition-opacity',
-              (!enabled || disabled) && 'opacity-55'
+              (!enabled || disabled || !supported) && 'opacity-55'
             )}
             key={control.key}
           >
@@ -139,8 +145,8 @@ function PlaygroundParameterContent({
                 aria-label={t('Enable {{parameter}}', {
                   parameter: t(control.labelKey),
                 })}
-                checked={enabled}
-                disabled={disabled}
+                checked={enabled && supported}
+                disabled={disabled || !supported}
                 onCheckedChange={(checked) =>
                   onParameterEnabledChange(control.key, checked)
                 }
@@ -151,7 +157,7 @@ function PlaygroundParameterContent({
             {control.valueType === 'slider' ? (
               <Slider
                 className='py-1.5'
-                disabled={disabled || !enabled}
+                disabled={disabled || !enabled || !supported}
                 id={controlId}
                 max={control.max}
                 min={control.min}
@@ -169,7 +175,7 @@ function PlaygroundParameterContent({
               />
             ) : (
               <Input
-                disabled={disabled || !enabled}
+                disabled={disabled || !enabled || !supported}
                 id={controlId}
                 inputMode='numeric'
                 max={control.max}
@@ -199,7 +205,13 @@ export function PlaygroundParameterPanel(props: PlaygroundParameterPanelProps) {
   const { t } = useTranslation()
   const isMobile = useIsMobile()
   const activeCount = PLAYGROUND_PARAMETER_CONTROLS.filter(
-    (control) => props.parameterEnabled[control.key]
+    (control) =>
+      props.parameterEnabled[control.key] &&
+      isParameterSupported(
+        props.config.model,
+        props.config.reasoning_effort,
+        control.key
+      )
   ).length
 
   const trigger = (

@@ -59,6 +59,7 @@ const session = (
     seed: null,
     stream: true,
     reasoning_effort: 'none',
+    web_search_enabled: false,
   },
   parameter_enabled: {
     temperature: true,

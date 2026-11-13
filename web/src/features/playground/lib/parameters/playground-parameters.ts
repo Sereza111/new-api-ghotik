@@ -74,7 +74,7 @@ export const PLAYGROUND_PARAMETER_CONTROLS = [
     labelKey: 'Max Tokens',
     descriptionKey: 'Caps the response length',
     valueType: 'number',
-    min: 0,
+    min: 1,
     max: 200000,
     step: 1,
   },
@@ -96,11 +96,12 @@ export function normalizeParameterNumberValue(
   key: PlaygroundParameterKey,
   value: string | number
 ): number | null {
+  const control = PLAYGROUND_PARAMETER_CONTROLS.find((item) => item.key === key)
+
   if (value === '') {
-    return key === 'seed' ? null : 0
+    return key === 'seed' ? null : (control?.min ?? 0)
   }
 
-  const control = PLAYGROUND_PARAMETER_CONTROLS.find((item) => item.key === key)
   const parsed = typeof value === 'number' ? value : Number.parseFloat(value)
 
   if (!control || Number.isNaN(parsed)) {

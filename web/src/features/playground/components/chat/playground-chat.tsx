@@ -26,6 +26,7 @@ import {
 } from '@/components/ai-elements/conversation'
 import { Loader } from '@/components/ai-elements/loader'
 import { Message } from '@/components/ai-elements/message'
+import { cn } from '@/lib/utils'
 
 import {
   getChatMessageRenderState,
@@ -60,6 +61,7 @@ interface PlaygroundChatProps {
   onCancelEdit?: (open: boolean) => void
   onSaveEditAndSubmit?: (newContent: string) => void
   messageLayoutMode?: PlaygroundMessageLayoutMode
+  contentClassName?: string
 }
 
 export function PlaygroundChat({
@@ -76,6 +78,7 @@ export function PlaygroundChat({
   onCancelEdit,
   onSaveEditAndSubmit,
   messageLayoutMode = 'alternating',
+  contentClassName,
 }: PlaygroundChatProps) {
   const { t } = useTranslation()
   const [editText, setEditText] = useState('')
@@ -215,7 +218,11 @@ export function PlaygroundChat({
     <Conversation>
       {/* Remove outer padding; apply padding to inner centered container to align with input */}
       <ConversationContent className='p-0'>
-        <div className='mx-auto w-full max-w-4xl px-4 py-4'>{chatContent}</div>
+        <div
+          className={cn('mx-auto w-full max-w-7xl px-4 py-4', contentClassName)}
+        >
+          {chatContent}
+        </div>
       </ConversationContent>
       <ConversationScrollButton />
     </Conversation>

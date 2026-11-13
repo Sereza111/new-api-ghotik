@@ -29,7 +29,15 @@ export type MessageStateUpdater =
   | ((previousMessages: Message[]) => Message[])
 
 export function getInitialPlaygroundConfig(): PlaygroundConfig {
-  return { ...DEFAULT_CONFIG, ...loadConfig() }
+  const storedConfig = loadConfig()
+  return {
+    ...DEFAULT_CONFIG,
+    ...storedConfig,
+    comparison: {
+      ...DEFAULT_CONFIG.comparison,
+      ...storedConfig.comparison,
+    },
+  }
 }
 
 export function getInitialParameterEnabled(): ParameterEnabled {
