@@ -594,9 +594,23 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 .vl-public-surface {
+  /* The public page avoids a render-blocking font request while dashboard
+     themes retain the bundled Lora face for their explicit serif setting. */
+  --font-public-serif:
+    Georgia, 'Source Serif Pro', 'Source Serif 4', 'Noto Serif SC',
+    'Noto Serif TC', 'Noto Serif JP', 'Noto Serif KR', 'Source Han Serif SC',
+    'Source Han Serif TC', 'Source Han Serif', 'Songti SC', 'STSong',
+    'STSongti-SC-Regular', 'PingFang SC', 'SimSun', 'NSimSun', '宋体',
+    'FangSong', '仿宋', 'KaiTi', '楷体', 'Times New Roman', Cambria,
+    'Liberation Serif', serif;
   --primary: oklch(0.5 0.08 230);
   --primary-foreground: oklch(0.985 0.004 240);
   --ring: oklch(0.5 0.08 230);
+}
+
+.vl-public-surface.font-serif,
+.vl-public-surface .font-serif {
+  font-family: var(--font-public-serif);
 }
 
 .dark .vl-public-surface {

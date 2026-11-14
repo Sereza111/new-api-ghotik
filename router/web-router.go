@@ -26,6 +26,13 @@ func SetWebRouter(router *gin.Engine, assets WebAssets, pluginDispatcher gin.Han
 		pluginDispatcher,
 		middleware.RouteTag("web"),
 		func(c *gin.Context) {
+			c.Header("Content-Security-Policy", "base-uri 'self'; object-src 'none'; frame-ancestors 'none'")
+			c.Header("Permissions-Policy", "camera=(), geolocation=(), microphone=()")
+			c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+			c.Header("X-Content-Type-Options", "nosniff")
+			c.Header("X-Frame-Options", "DENY")
+		},
+		func(c *gin.Context) {
 			// ServeFrontendFiles sends build files already compressed.
 			if !frontendFS.Exists("/", c.Request.URL.Path) {
 				compress(c)

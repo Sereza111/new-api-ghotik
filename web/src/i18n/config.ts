@@ -68,7 +68,9 @@ export const i18nReady = i18n
   .use(localeBackend)
   .use(initReactI18next)
   .init({
-    fallbackLng: 'en',
+    // Translation keys are English source copy, so a missing localized entry
+    // already falls back to the key without downloading the full English file.
+    fallbackLng: false,
     supportedLngs: INTERFACE_LANGUAGE_OPTIONS.map(({ code }) => code),
     load: 'currentOnly',
     defaultNS: 'translation',

@@ -16,12 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useEffect, useRef } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Footer } from '@/components/layout/components/footer'
 import { PublicLayout } from '@/components/layout/components/public-layout'
-import { RichContent } from '@/components/rich-content'
 import { useTheme } from '@/context/theme-provider'
 import { isLikelyHtml } from '@/lib/content-format'
 import { useAuthStore } from '@/stores/auth-store'
@@ -29,6 +28,12 @@ import { useAuthStore } from '@/stores/auth-store'
 import { CTA, Hero, HowItWorks, PlatformOverview } from './components'
 import { FortuneAtmosphere } from './components/fortune-atmosphere'
 import { useHomePageContent } from './hooks'
+
+const RichContent = lazy(() =>
+  import('@/components/rich-content').then((module) => ({
+    default: module.RichContent,
+  }))
+)
 
 export function Home() {
   const { i18n, t } = useTranslation()
@@ -98,25 +103,41 @@ export function Home() {
     if (contentIsHtml) {
       return (
         <PublicLayout showMainContainer={false}>
-          <RichContent
-            mode='html'
-            htmlVariant='isolated'
-            content={content}
-            className='custom-home-content'
-          />
+          <Suspense
+            fallback={
+              <main className='flex min-h-screen items-center justify-center'>
+                <div className='text-muted-foreground'>{t('Loading...')}</div>
+              </main>
+            }
+          >
+            <RichContent
+              mode='html'
+              htmlVariant='isolated'
+              content={content}
+              className='custom-home-content'
+            />
+          </Suspense>
         </PublicLayout>
       )
     }
 
     return (
       <PublicLayout>
-        <div className='mx-auto max-w-6xl px-4 py-8'>
-          <RichContent
-            mode='markdown'
-            content={content}
-            className='custom-home-content'
-          />
-        </div>
+        <Suspense
+          fallback={
+            <div className='text-muted-foreground py-8 text-center'>
+              {t('Loading...')}
+            </div>
+          }
+        >
+          <div className='mx-auto max-w-6xl px-4 py-8'>
+            <RichContent
+              mode='markdown'
+              content={content}
+              className='custom-home-content'
+            />
+          </div>
+        </Suspense>
       </PublicLayout>
     )
   }

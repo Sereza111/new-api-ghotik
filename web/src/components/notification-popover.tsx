@@ -18,9 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
 import { Bell, Megaphone } from 'lucide-react'
+import { lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { RichContent } from '@/components/rich-content'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -43,6 +43,31 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { getAnnouncementColorClass } from '@/lib/colors'
 import { formatDateTimeObject } from '@/lib/time'
 import { cn } from '@/lib/utils'
+
+const RichContent = lazy(() =>
+  import('@/components/rich-content').then((module) => ({
+    default: module.RichContent,
+  }))
+)
+
+function DeferredRichContent(props: {
+  breaks?: boolean
+  content: string
+  className?: string
+}) {
+  return (
+    <Suspense
+      fallback={
+        <div
+          className='bg-muted/50 h-12 animate-pulse rounded-md'
+          aria-hidden='true'
+        />
+      }
+    >
+      <RichContent {...props} />
+    </Suspense>
+  )
+}
 
 interface AnnouncementItem {
   id?: number | string
@@ -205,7 +230,7 @@ function NoticeContent({
 
   return (
     <ScrollArea className='h-[min(52vh,28rem)] pr-3'>
-      <RichContent breaks content={notice} />
+      <DeferredRichContent breaks content={notice} />
     </ScrollArea>
   )
 }
@@ -260,12 +285,15 @@ function AnnouncementsContent({
                   <AnnouncementDot type={item.type} />
                   <div className='flex min-w-0 flex-1 flex-col gap-2'>
                     <div className='text-sm'>
-                      <RichContent breaks content={item.content || ''} />
+                      <DeferredRichContent
+                        breaks
+                        content={item.content || ''}
+                      />
                     </div>
 
                     {item.extra ? (
                       <div className='text-muted-foreground text-xs'>
-                        <RichContent breaks content={item.extra} />
+                        <DeferredRichContent breaks content={item.extra} />
                       </div>
                     ) : null}
 

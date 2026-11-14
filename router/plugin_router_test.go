@@ -1129,6 +1129,11 @@ func TestWebFallbackDoesNotCacheMissingAPIOrAssets(t *testing.T) {
 	assert.Equal(t, http.StatusOK, page.Code)
 	assert.Equal(t, "dashboard", page.Body.String())
 	assert.Equal(t, "no-cache", page.Header().Get("Cache-Control"))
+	assert.Equal(t, "base-uri 'self'; object-src 'none'; frame-ancestors 'none'", page.Header().Get("Content-Security-Policy"))
+	assert.Equal(t, "camera=(), geolocation=(), microphone=()", page.Header().Get("Permissions-Policy"))
+	assert.Equal(t, "strict-origin-when-cross-origin", page.Header().Get("Referrer-Policy"))
+	assert.Equal(t, "nosniff", page.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "DENY", page.Header().Get("X-Frame-Options"))
 }
 
 func TestSecurityRoutesDisableCachingBeforeAuthentication(t *testing.T) {

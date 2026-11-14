@@ -136,6 +136,7 @@ function ProjectAttribution(props: { currentYear: number; inline?: boolean }) {
         href='https://github.com/QuantumNous/new-api'
         target='_blank'
         rel='noopener noreferrer'
+        aria-label={`${t('New API')} GitHub`}
         className='text-foreground hover:text-foreground font-medium transition-colors'
       >
         {t('New API')}
