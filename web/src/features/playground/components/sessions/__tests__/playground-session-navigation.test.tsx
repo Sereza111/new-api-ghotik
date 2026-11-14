@@ -104,3 +104,16 @@ test('renames and deletes a playground session', async () => {
 
   expect(onDelete).toHaveBeenCalledWith('second-session')
 })
+
+test('collapses the chat list while keeping new chat and restore actions available', async () => {
+  const user = userEvent.setup()
+  const { onCreate } = renderNavigation()
+  await user.click(screen.getByRole('button', { name: 'Hide chats' }))
+  expect(
+    screen.queryByRole('button', { name: /Second chat/ })
+  ).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'New chat' }))
+  expect(onCreate).toHaveBeenCalledOnce()
+  await user.click(screen.getByRole('button', { name: 'Show chats' }))
+  expect(screen.getByRole('button', { name: /Second chat/ })).toBeVisible()
+})

@@ -28,7 +28,6 @@ const STANDARD_REASONING_LEVELS: ReasoningEffort[] = [
 
 const EXTENDED_REASONING_LEVELS: ReasoningEffort[] = [
   'none',
-  'minimal',
   'low',
   'medium',
   'high',
@@ -36,14 +35,55 @@ const EXTENDED_REASONING_LEVELS: ReasoningEffort[] = [
   'max',
 ]
 
-const EXTENDED_REASONING_MODEL =
-  /^(?:gpt-(?:5|6)|o[134](?:-|$)|claude-|gemini-)/i
 const OPENAI_REASONING_MODEL = /^(?:gpt-(?:5|6)|o[134](?:-|$))/i
 
 export function getReasoningEffortOptions(model: string): ReasoningEffort[] {
-  return EXTENDED_REASONING_MODEL.test(model.trim())
-    ? EXTENDED_REASONING_LEVELS
-    : STANDARD_REASONING_LEVELS
+  const name = model.trim().toLowerCase()
+  if (/^claude-(?:fable-5|mythos-5|opus-5-5)/.test(name)) {
+    return ['low', 'medium', 'high', 'xhigh', 'max']
+  }
+  if (name.startsWith('claude-mythos-preview')) {
+    return ['low', 'medium', 'high', 'max']
+  }
+  if (/^claude-(?:(?:opus|sonnet|haiku)-5|opus-4-[78])/.test(name)) {
+    return ['none', 'low', 'medium', 'high', 'xhigh', 'max']
+  }
+  if (/^claude-(?:opus|sonnet)-4-6/.test(name)) {
+    return ['none', 'low', 'medium', 'high', 'max']
+  }
+  if (/^claude-(?:3-7|(?:opus|sonnet|haiku)-4)/.test(name)) {
+    return STANDARD_REASONING_LEVELS
+  }
+  if (/(?:image|tts|native-audio|live)/.test(name)) return ['none']
+  if (name.startsWith('gemini-3-pro')) return ['low', 'high']
+  if (/^gemini-3(?:\.[0-9]+)?-pro/.test(name) || name === 'gemini-pro-latest') {
+    return ['low', 'medium', 'high']
+  }
+  if (
+    name.startsWith('gemini-3') ||
+    /^gemini-flash(?:-lite)?-latest$/.test(name)
+  ) {
+    return ['minimal', 'low', 'medium', 'high']
+  }
+  if (name.startsWith('gemini-2.5-pro')) return ['low', 'medium', 'high']
+  if (name.startsWith('gemini-2.5-flash')) return STANDARD_REASONING_LEVELS
+  if (/^o[134](?:-|$)/.test(name)) return ['low', 'medium', 'high']
+  if (/^gpt-5(?:-|$)/.test(name) && !name.includes('search')) {
+    return ['minimal', 'low', 'medium', 'high']
+  }
+  if (name.startsWith('gpt-5.1')) return STANDARD_REASONING_LEVELS
+  if (name.startsWith('gpt-5.6')) return EXTENDED_REASONING_LEVELS
+  if (/^gpt-5\.[2345](?:-|$)/.test(name)) {
+    return ['none', 'low', 'medium', 'high', 'xhigh']
+  }
+  if (
+    /^gpt-6(?:\.1)?-(?:astra|sol)/.test(name) &&
+    !name.startsWith('gpt-6-sol')
+  ) {
+    return ['low', 'medium', 'high', 'xhigh', 'max']
+  }
+  if (/^gpt-6-(?:sol|luna)/.test(name)) return EXTENDED_REASONING_LEVELS
+  return ['none']
 }
 
 export function normalizeReasoningEffort(
@@ -53,9 +93,8 @@ export function normalizeReasoningEffort(
   const options = getReasoningEffortOptions(model)
   if (options.includes(effort)) return effort
 
-  if (effort === 'minimal') return 'low'
-  if (effort === 'xhigh' || effort === 'max') return 'high'
-  return effort
+  if (effort === 'none' || effort === 'minimal') return options[0]
+  return options.includes('high') ? 'high' : options[0]
 }
 
 export function isParameterSupported(

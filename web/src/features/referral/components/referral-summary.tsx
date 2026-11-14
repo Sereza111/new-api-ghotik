@@ -20,23 +20,28 @@ import {
   ArrowRightLeft,
   BadgePercent,
   Gift,
+  Link2,
   Send,
   ShieldCheck,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { CopyButton } from '@/components/copy-button'
-import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import {
-  Progress,
-  ProgressLabel,
-  ProgressValue,
-} from '@/components/ui/progress'
-import { formatQuota } from '@/lib/format'
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import { IconBadge } from '@/components/ui/icon-badge'
+import { Input } from '@/components/ui/input'
+import { toIntlLocale } from '@/i18n/languages'
+import { formatNumber, formatQuota } from '@/lib/format'
 
 import type { ReferralOverview } from '../types'
+import { ReferralMembership } from './referral-membership'
 
 interface ReferralSummaryProps {
   overview: ReferralOverview
@@ -45,23 +50,9 @@ interface ReferralSummaryProps {
   transferDisabled: boolean
 }
 
-const LEVEL_NAMES: Record<string, string> = {
-  starter: 'Starter',
-  bronze: 'Bronze',
-  silver: 'Silver',
-  gold: 'Gold',
-}
-
 export function ReferralSummary(props: ReferralSummaryProps) {
-  const { t } = useTranslation()
-  const levelName = t(
-    LEVEL_NAMES[props.overview.level.code] ?? props.overview.level.name
-  )
-  const progress = Math.min(
-    100,
-    Math.max(0, props.overview.level.progress_percent)
-  )
-  const isHighestLevel = props.overview.level.next_threshold == null
+  const { t, i18n } = useTranslation()
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const telegramShareUrl = `https://t.me/share/url?url=${encodeURIComponent(
     props.referralLink
   )}&text=${encodeURIComponent(t('Join through my referral link'))}`
@@ -76,80 +67,57 @@ export function ReferralSummary(props: ReferralSummaryProps) {
       icon: BadgePercent,
       label: t('Reward from invited user top-ups'),
       value: t('{{percent}}%', {
-        percent: props.overview.topup_reward_percent,
+        percent: formatNumber(props.overview.topup_reward_percent, locale),
       }),
     },
     {
       icon: ShieldCheck,
       label: t('Top-up fee discount (except Stripe and Creem)'),
       value: t('{{percent}}%', {
-        percent: props.overview.level.topup_fee_discount_percent,
+        percent: formatNumber(
+          props.overview.level.topup_fee_discount_percent,
+          locale
+        ),
       }),
     },
   ]
 
   return (
-    <section className='overflow-hidden rounded-md border'>
-      <div className='grid lg:grid-cols-[minmax(0,1.15fr)_minmax(300px,0.85fr)]'>
-        <div className='border-b p-5 lg:border-r lg:border-b-0'>
-          <div className='flex flex-wrap items-start justify-between gap-3'>
-            <div className='min-w-0'>
-              <p className='text-muted-foreground text-xs font-medium uppercase'>
-                {t('Referral level and benefits')}
-              </p>
-              <h2 className='mt-1 font-serif text-2xl font-semibold'>
-                {levelName}
-              </h2>
-            </div>
-            <StatusBadge
-              label={t('Level {{level}}', { level: levelName })}
-              variant='info'
-              copyable={false}
-            />
-          </div>
+    <section className='flex min-w-0 flex-col gap-6 sm:gap-8'>
+      <ReferralMembership overview={props.overview} />
 
-          <Progress value={isHighestLevel ? 100 : progress} className='mt-7'>
-            <ProgressLabel>
-              {isHighestLevel
-                ? t('Highest referral level reached')
-                : t('{{current}} of {{target}} qualified referrals', {
-                    current: props.overview.qualified_count,
-                    target: props.overview.level.next_threshold,
-                  })}
-            </ProgressLabel>
-            <ProgressValue>
-              {() =>
-                t('{{percent}}% complete', {
-                  percent: isHighestLevel ? 100 : Math.round(progress),
-                })
-              }
-            </ProgressValue>
-          </Progress>
-        </div>
-
-        <div className='divide-y px-5'>
-          {benefits.map((benefit) => (
-            <div
-              key={benefit.label}
-              className='flex min-h-16 items-center gap-3 py-3'
-            >
-              <benefit.icon
-                className='text-primary size-4 shrink-0'
-                aria-hidden='true'
-              />
-              <span className='text-muted-foreground min-w-0 flex-1 text-sm'>
+      <dl className='grid gap-3 sm:grid-cols-3' aria-label={t('Your benefits')}>
+        {benefits.map((benefit) => (
+          <div
+            key={benefit.label}
+            className='referral-benefit flex items-start gap-4 rounded-xl border p-4 sm:p-5'
+          >
+            <IconBadge tone='primary' size='lg'>
+              <benefit.icon aria-hidden='true' />
+            </IconBadge>
+            <div className='flex min-w-0 flex-col gap-2'>
+              <dt className='text-muted-foreground order-2 text-xs leading-relaxed'>
                 {benefit.label}
-              </span>
-              <span className='shrink-0 font-medium tabular-nums'>
+              </dt>
+              <dd className='text-2xl font-semibold tracking-tight tabular-nums'>
                 {benefit.value}
-              </span>
+              </dd>
             </div>
-          ))}
-        </div>
-      </div>
+          </div>
+        ))}
+      </dl>
 
-      <div className='border-t p-4 sm:p-5'>
-        <div className='flex flex-col gap-3 xl:flex-row xl:items-end'>
+      <Card className='rounded-xl' data-card-hover='false'>
+        <CardHeader>
+          <CardTitle className='flex items-center gap-2'>
+            <Link2 className='text-primary size-4' aria-hidden='true' />
+            {t('Share your link and earn rewards')}
+          </CardTitle>
+          <CardDescription>
+            {t('Copy the link or send it directly in Telegram.')}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className='flex flex-col gap-3 xl:flex-row xl:items-end'>
           <label className='min-w-0 flex-1'>
             <span className='mb-1.5 block text-sm font-medium'>
               {t('Your referral link')}
@@ -157,15 +125,15 @@ export function ReferralSummary(props: ReferralSummaryProps) {
             <Input
               value={props.referralLink}
               readOnly
-              className='font-mono text-xs'
+              className='h-11 font-mono text-xs'
             />
           </label>
           <div className='grid grid-cols-2 gap-2 sm:flex'>
             <CopyButton
               value={props.referralLink}
-              variant='outline'
+              variant='default'
               size='default'
-              className='h-10 gap-2'
+              className='h-11 gap-2'
               tooltip={t('Copy referral link')}
               aria-label={t('Copy referral link')}
             >
@@ -173,7 +141,7 @@ export function ReferralSummary(props: ReferralSummaryProps) {
             </CopyButton>
             <Button
               variant='outline'
-              className='h-10 gap-2'
+              className='h-11 gap-2'
               disabled={!props.referralLink}
               render={
                 <a
@@ -187,7 +155,8 @@ export function ReferralSummary(props: ReferralSummaryProps) {
               {t('Telegram')}
             </Button>
             <Button
-              className='col-span-2 h-10 gap-2'
+              variant='secondary'
+              className='col-span-2 h-11 gap-2'
               disabled={props.transferDisabled}
               onClick={props.onTransfer}
             >
@@ -195,8 +164,8 @@ export function ReferralSummary(props: ReferralSummaryProps) {
               {t('Transfer to Balance')}
             </Button>
           </div>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </section>
   )
 }

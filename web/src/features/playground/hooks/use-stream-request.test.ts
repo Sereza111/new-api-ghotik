@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 
 import type { ChatCompletionRequest } from '../types'
 import { createStreamRequestController } from './use-stream-request'
@@ -78,6 +78,86 @@ const noopCallbacks = {
 }
 
 describe('latest-wins stream request coordination', () => {
+  test.each([
+    ['closed response without terminator', 'readystatechange', undefined],
+    [
+      'upstream error in a successful HTTP stream',
+      'message',
+      JSON.stringify({
+        error: { message: 'upstream failed', code: 'upstream_error' },
+      }),
+    ],
+  ])('settles generation on %s', async (_name, event, data) => {
+    const source = new FakeStreamSource()
+    const onError = vi.fn()
+    const setStreaming = vi.fn()
+    const controller = createStreamRequestController({
+      getHeaders: async () => ({}),
+      createSource: () => source,
+      setStreaming,
+    })
+    await controller.send(payload, { ...noopCallbacks, onError })
+    source.readyState = 2
+    source.emit(event, data)
+    expect(onError).toHaveBeenCalledOnce()
+    expect(setStreaming).toHaveBeenLastCalledWith(false)
+    expect(source.closed).toBe(true)
+  })
+
+  test('finishes a terminal choice on EOF without cancelling the later usage chunk', async () => {
+    const source = new FakeStreamSource()
+    const onUpdate = vi.fn()
+    const onComplete = vi.fn()
+    const controller = createStreamRequestController({
+      getHeaders: async () => ({}),
+      createSource: () => source,
+      setStreaming: () => undefined,
+    })
+    await controller.send(payload, { ...noopCallbacks, onUpdate, onComplete })
+    source.emit(
+      'message',
+      JSON.stringify({
+        choices: [
+          { delta: { content: 'final answer' }, finish_reason: 'stop' },
+        ],
+      })
+    )
+    expect(onUpdate).toHaveBeenCalledWith('content', 'final answer')
+    expect(source.closed).toBe(false)
+    expect(onComplete).not.toHaveBeenCalled()
+    source.emit(
+      'message',
+      JSON.stringify({ choices: [], usage: { total_tokens: 20 } })
+    )
+    source.readyState = 2
+    source.emit('readystatechange')
+    expect(onComplete).toHaveBeenCalledOnce()
+    expect(source.closed).toBe(true)
+  })
+
+  test('settles a silent connection and clears its watchdog on stop', async () => {
+    vi.useFakeTimers()
+    try {
+      const source = new FakeStreamSource()
+      const onError = vi.fn()
+      const controller = createStreamRequestController({
+        getHeaders: async () => ({}),
+        createSource: () => source,
+        setStreaming: () => undefined,
+      })
+      await controller.send(payload, { ...noopCallbacks, onError })
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000)
+      expect(onError).toHaveBeenCalledOnce()
+      expect(source.closed).toBe(true)
+      await controller.send(payload, { ...noopCallbacks, onError })
+      controller.stop()
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000)
+      expect(onError).toHaveBeenCalledOnce()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
   test('only creates a stream for the latest header request', async () => {
     const firstHeaders = deferred<Record<string, string>>()
     const secondHeaders = deferred<Record<string, string>>()

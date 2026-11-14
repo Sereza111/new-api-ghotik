@@ -17,7 +17,6 @@ import type {
   InputFileAttachment,
   ModelOption,
   GroupOption,
-  ParameterEnabled,
   PlaygroundConfig,
 } from '../../types'
 import { PlaygroundInputControls } from './playground-input-controls'
@@ -41,8 +40,9 @@ const CHAT_ATTACHMENT_ACCEPT = [
   '.json',
   '.docx',
 ].join(',')
-const MAX_ATTACHMENTS = 4
+const MAX_ATTACHMENTS = 20
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+const MAX_TOTAL_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
 type PromptAttachment = NonNullable<PromptInputMessage['files']>[number]
 
@@ -60,7 +60,7 @@ interface PlaygroundInputProps {
     text: string,
     inputImages?: string[],
     inputFiles?: InputFileAttachment[]
-  ) => void
+  ) => void | Promise<void>
   onStop?: () => void
   disabled?: boolean
   isGenerating?: boolean
@@ -78,11 +78,6 @@ interface PlaygroundInputProps {
     value: PlaygroundConfig[K]
   ) => void
   onClearMessages?: () => void
-  onParameterEnabledChange: (
-    key: keyof ParameterEnabled,
-    value: boolean
-  ) => void
-  parameterEnabled: ParameterEnabled
 }
 
 export function PlaygroundInput({
@@ -102,13 +97,11 @@ export function PlaygroundInput({
   hasMessages = false,
   onConfigChange,
   onClearMessages,
-  onParameterEnabledChange,
-  parameterEnabled,
 }: PlaygroundInputProps) {
   const { t } = useTranslation()
   const [text, setText] = useState('')
 
-  const handleSubmit = (message: PromptInputMessage) => {
+  const handleSubmit = async (message: PromptInputMessage) => {
     const submittableText = getSubmittableInputText(
       isImageMode ? { text: message.text } : message,
       disabled
@@ -138,18 +131,19 @@ export function PlaygroundInput({
         return [attachment]
       })
 
-    onSubmit(submittableText, inputImages, inputFiles)
+    await onSubmit(submittableText, inputImages, inputFiles)
     setText((currentText) => (currentText === message.text ? '' : currentText))
   }
 
   return (
-    <div className='grid shrink-0 gap-4 px-1 md:pb-4'>
+    <div className='playground-composer px-3 pb-3 sm:px-5 sm:pb-5'>
       <PromptInput
         accept={isImageMode ? REFERENCE_IMAGE_ACCEPT : CHAT_ATTACHMENT_ACCEPT}
         className='relative'
-        groupClassName='bg-background/95 dark:bg-background/80 border-border/70 shadow-[0_18px_60px_-32px_rgba(0,0,0,0.65)] ring-1 ring-foreground/5 rounded-xl overflow-hidden transition-all duration-200 focus-within:border-primary/45 focus-within:ring-primary/15 focus-within:shadow-[0_22px_70px_-34px_rgba(0,0,0,0.75)]'
+        groupClassName='playground-composer-surface rounded-3xl overflow-hidden transition-colors focus-within:border-primary/45 has-disabled:opacity-100'
         maxFiles={MAX_ATTACHMENTS}
         maxFileSize={MAX_ATTACHMENT_BYTES}
+        maxTotalFileSize={MAX_TOTAL_ATTACHMENT_BYTES}
         multiple
         onError={(error) => toast.error(error.message)}
         onSubmit={handleSubmit}
@@ -163,7 +157,8 @@ export function PlaygroundInput({
           autoCorrect='off'
           autoCapitalize='off'
           spellCheck={false}
-          className='min-h-20 px-5 pt-4 pb-3 leading-7 md:min-h-24 md:text-base'
+          className='max-h-48 min-h-16 px-5 pt-4 pb-2 text-base leading-7 break-words'
+          aria-label={t('Message')}
           disabled={disabled}
           onChange={(event) => setText(event.target.value)}
           placeholder={
@@ -174,20 +169,7 @@ export function PlaygroundInput({
           value={text}
         />
 
-        {!isImageMode ? (
-          <PlaygroundReasoningControl
-            config={config}
-            disabled={disabled}
-            onConfigChange={onConfigChange}
-          />
-        ) : (
-          <div className='border-border/60 text-muted-foreground flex items-center justify-between gap-3 border-t px-3 py-2 text-xs'>
-            <span className='font-medium'>{t('Reasoning effort')}</span>
-            <span>{t('Not used for image generation')}</span>
-          </div>
-        )}
-
-        <PromptInputFooter className='border-border/60 bg-muted/20 dark:bg-muted/10 border-t px-3 py-2.5 backdrop-blur'>
+        <PromptInputFooter className='px-3 pt-1 pb-3'>
           <PlaygroundInputControls
             disabled={disabled}
             groups={groups}
@@ -201,16 +183,20 @@ export function PlaygroundInput({
             onModelChange={onModelChange}
             onStop={onStop}
             text={text}
+            reasoning={
+              !isImageMode ? (
+                <PlaygroundReasoningControl
+                  config={config}
+                  disabled={disabled}
+                  onConfigChange={onConfigChange}
+                />
+              ) : undefined
+            }
             tools={
               <PlaygroundInputTools
-                config={config}
                 disabled={disabled}
-                isImageMode={isImageMode}
                 hasMessages={hasMessages}
-                onConfigChange={onConfigChange}
                 onClearMessages={onClearMessages}
-                onParameterEnabledChange={onParameterEnabledChange}
-                parameterEnabled={parameterEnabled}
               />
             }
           />

@@ -3,6 +3,8 @@ import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import '@/styles/referral.css'
+
 import { ErrorState } from '@/components/error-state'
 import { SectionPageLayout } from '@/components/layout'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -65,9 +67,9 @@ export function Referral() {
   let referralContent: ReactNode
   if (overviewQuery.isPending) {
     referralContent = (
-      <div className='space-y-4' aria-label={t('Loading referrals')}>
-        <Skeleton className='h-64 w-full rounded-md' />
-        <Skeleton className='h-24 w-full rounded-md' />
+      <div className='flex flex-col gap-6' aria-label={t('Loading referrals')}>
+        <Skeleton className='h-80 w-full rounded-xl' />
+        <Skeleton className='h-28 w-full rounded-xl' />
       </div>
     )
   } else if (overviewQuery.isError || !overview) {
@@ -100,7 +102,7 @@ export function Referral() {
           {t('Referral Program')}
         </SectionPageLayout.Title>
         <SectionPageLayout.Content>
-          <div className='mx-auto flex w-full max-w-7xl flex-col gap-5'>
+          <div className='referral-page mx-auto flex w-full max-w-7xl flex-col gap-6 py-2 sm:gap-8 sm:py-4'>
             {referralContent}
           </div>
         </SectionPageLayout.Content>

@@ -19,61 +19,66 @@ For commercial licensing, please contact support@quantumnous.com
 import { BadgeCheck, Clock3, Gift, Users, WalletCards } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { formatQuota } from '@/lib/format'
+import { toIntlLocale } from '@/i18n/languages'
+import { formatNumber, formatQuota } from '@/lib/format'
 
 import type { ReferralOverview } from '../types'
 
-export function ReferralMetrics({ overview }: { overview: ReferralOverview }) {
-  const { t } = useTranslation()
+export function ReferralMetrics(props: { overview: ReferralOverview }) {
+  const { t, i18n } = useTranslation()
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const metrics = [
     {
       label: t('Registered'),
-      value: overview.registered_count.toLocaleString(),
+      value: formatNumber(props.overview.registered_count, locale),
       icon: Users,
     },
     {
       label: t('Qualified'),
-      value: overview.qualified_count.toLocaleString(),
+      value: formatNumber(props.overview.qualified_count, locale),
       icon: BadgeCheck,
     },
     {
       label: t('Available Rewards'),
-      value: formatQuota(overview.available_quota),
+      value: formatQuota(props.overview.available_quota),
       icon: WalletCards,
     },
     {
       label: t('Pending'),
-      value: formatQuota(overview.pending_quota),
+      value: formatQuota(props.overview.pending_quota),
       icon: Clock3,
     },
     {
       label: t('Lifetime Rewards'),
-      value: formatQuota(overview.lifetime_quota),
+      value: formatQuota(props.overview.lifetime_quota),
       icon: Gift,
     },
   ]
 
   return (
-    <section className='bg-border grid gap-px overflow-hidden rounded-md border sm:grid-cols-2 xl:grid-cols-5'>
+    <dl
+      className='grid grid-cols-2 gap-3 lg:grid-cols-5'
+      aria-label={t('Referral activity')}
+    >
       {metrics.map((metric) => (
         <div
           key={metric.label}
-          className='bg-background flex min-h-24 items-center gap-3 p-4'
+          className='referral-metric flex min-w-0 flex-col gap-4 rounded-xl border p-4 last:col-span-2 sm:p-5 lg:last:col-span-1'
         >
-          <metric.icon
-            className='text-primary size-4 shrink-0'
-            aria-hidden='true'
-          />
-          <div className='min-w-0'>
-            <p className='text-muted-foreground truncate text-xs font-medium uppercase'>
+          <div className='flex items-start justify-between gap-3'>
+            <dt className='text-muted-foreground text-xs leading-relaxed font-medium'>
               {metric.label}
-            </p>
-            <p className='mt-1 truncate text-xl font-semibold tabular-nums'>
-              {metric.value}
-            </p>
+            </dt>
+            <metric.icon
+              className='text-primary size-4 shrink-0'
+              aria-hidden='true'
+            />
           </div>
+          <dd className='text-2xl font-medium tracking-tight break-words tabular-nums'>
+            {metric.value}
+          </dd>
         </div>
       ))}
-    </section>
+    </dl>
   )
 }

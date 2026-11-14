@@ -381,42 +381,31 @@ function resolveGeneratedImageFormat(
  * Converts stuck loading/streaming messages to stable state.
  */
 export function sanitizeMessagesOnLoad(messages: Message[]): Message[] {
-  let targetIndex = -1
+  if (!messages.some(isPendingAssistantMessage)) return messages
+  return messages.map((message) => {
+    if (!isPendingAssistantMessage(message)) return message
+    const finalized = finalizeMessage(message)
+    const hasContent = hasMessageContent(finalized)
+    const hasReasoning = finalized.reasoning?.content?.trim()
 
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i]
+    const sanitized: Message =
+      hasContent || hasReasoning
+        ? completeAssistantTiming({
+            ...finalized,
+            status: MESSAGE_STATUS.COMPLETE,
+            isReasoningStreaming: false,
+          })
+        : completeAssistantTiming({
+            ...updateCurrentVersionContent(
+              finalized,
+              `${t(ERROR_MESSAGES.API_REQUEST_ERROR)}: ${t(
+                ERROR_MESSAGES.INTERRUPTED
+              )}`
+            ),
+            status: MESSAGE_STATUS.ERROR,
+            isReasoningStreaming: false,
+          })
 
-    if (isPendingAssistantMessage(message)) {
-      targetIndex = i
-      break
-    }
-  }
-
-  if (targetIndex === -1) return messages
-
-  const finalized = finalizeMessage(messages[targetIndex])
-  const hasContent = hasMessageContent(finalized)
-  const hasReasoning = finalized.reasoning?.content?.trim()
-
-  const sanitized: Message =
-    hasContent || hasReasoning
-      ? completeAssistantTiming({
-          ...finalized,
-          status: MESSAGE_STATUS.COMPLETE,
-          isReasoningStreaming: false,
-        })
-      : completeAssistantTiming({
-          ...updateCurrentVersionContent(
-            finalized,
-            `${t(ERROR_MESSAGES.API_REQUEST_ERROR)}: ${t(
-              ERROR_MESSAGES.INTERRUPTED
-            )}`
-          ),
-          status: MESSAGE_STATUS.ERROR,
-          isReasoningStreaming: false,
-        })
-
-  const result = [...messages]
-  result[targetIndex] = sanitized
-  return result
+    return sanitized
+  })
 }

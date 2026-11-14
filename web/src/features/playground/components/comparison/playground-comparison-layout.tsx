@@ -58,6 +58,8 @@ type PlaygroundComparisonLayoutProps = {
   primary: ComparisonLaneOptions
   secondary: ComparisonLaneOptions
   onEnabledChange: (enabled: boolean) => void
+  composer?: ReactNode
+  empty?: boolean
 }
 
 function ComparisonLaneHeader({ lane }: { lane: ComparisonLaneOptions }) {
@@ -119,6 +121,8 @@ export function PlaygroundComparisonLayout({
   primary,
   secondary,
   onEnabledChange,
+  composer,
+  empty = false,
 }: PlaygroundComparisonLayoutProps) {
   const { t } = useTranslation()
   const isMobile = useIsMobile()
@@ -164,10 +168,11 @@ export function PlaygroundComparisonLayout({
 
   return (
     <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
-      <div className='border-border/70 flex h-11 shrink-0 items-center justify-end border-b px-3'>
+      <div className='playground-topbar flex h-12 shrink-0 items-center justify-end px-4'>
         <Button
           size='sm'
-          variant={enabled ? 'secondary' : 'outline'}
+          variant={enabled ? 'secondary' : 'ghost'}
+          className='rounded-full text-xs'
           disabled={disabled}
           onClick={() => onEnabledChange(!enabled)}
         >
@@ -176,8 +181,23 @@ export function PlaygroundComparisonLayout({
         </Button>
       </div>
 
-      <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
-        {comparisonContent}
+      <div
+        className={
+          empty && !enabled
+            ? 'playground-empty-stage flex min-h-0 flex-1 flex-col justify-center overflow-y-auto'
+            : 'flex min-h-0 flex-1 flex-col overflow-hidden'
+        }
+      >
+        <div
+          className={
+            empty && !enabled
+              ? 'min-h-0 shrink-0'
+              : 'flex min-h-0 flex-1 flex-col overflow-hidden'
+          }
+        >
+          {comparisonContent}
+        </div>
+        <div className='mx-auto w-full max-w-[56rem] shrink-0'>{composer}</div>
       </div>
     </div>
   )

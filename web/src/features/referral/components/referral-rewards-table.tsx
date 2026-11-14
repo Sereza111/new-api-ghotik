@@ -18,10 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import type { ColumnDef, PaginationState } from '@tanstack/react-table'
+import { Gift } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { DataTablePage, useDataTable } from '@/components/data-table'
+import { EmptyState } from '@/components/empty-state'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -169,7 +171,7 @@ export function ReferralRewardsTable() {
   })
 
   return (
-    <section className='space-y-3'>
+    <section className='flex flex-col gap-4'>
       <div>
         <h2 className='font-serif text-lg font-semibold'>
           {t('Reward history')}
@@ -194,22 +196,37 @@ export function ReferralRewardsTable() {
         </Alert>
       ) : null}
 
-      <DataTablePage
-        table={table}
-        columns={columns}
-        isLoading={rewardsQuery.isPending}
-        isFetching={rewardsQuery.isFetching}
-        emptyTitle={t('No referral rewards yet')}
-        emptyDescription={t(
-          'Rewards will appear after invited users meet the referral conditions.'
-        )}
-        toolbarProps={null}
-        fixedHeight={false}
-        paginationInFooter={false}
-        applyHeaderSize
-        getColumnClassName={() => 'py-2.5'}
-        skeletonKeyPrefix='referral-rewards'
-      />
+      {!rewardsQuery.isPending &&
+      !rewardsQuery.isError &&
+      rewardsQuery.data?.total === 0 &&
+      pagination.pageIndex === 0 ? (
+        <EmptyState
+          icon={Gift}
+          bordered
+          className='referral-empty min-h-48 rounded-xl'
+          title={t('No referral rewards yet')}
+          description={t(
+            'Rewards will appear after invited users meet the referral conditions.'
+          )}
+        />
+      ) : (
+        <DataTablePage
+          table={table}
+          columns={columns}
+          isLoading={rewardsQuery.isPending}
+          isFetching={rewardsQuery.isFetching}
+          emptyTitle={t('No referral rewards yet')}
+          emptyDescription={t(
+            'Rewards will appear after invited users meet the referral conditions.'
+          )}
+          toolbarProps={null}
+          fixedHeight={false}
+          paginationInFooter={false}
+          applyHeaderSize
+          getColumnClassName={() => 'py-2.5'}
+          skeletonKeyPrefix='referral-rewards'
+        />
+      )}
     </section>
   )
 }

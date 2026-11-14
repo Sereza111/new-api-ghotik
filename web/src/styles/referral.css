@@ -1,0 +1,187 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+.referral-page {
+  --referral-surface: color-mix(in oklch, var(--card) 80%, var(--background));
+}
+
+.referral-member-card,
+.referral-level {
+  --referral-metal-dark: #17242d;
+  --referral-metal-mid: #304550;
+  --referral-metal-light: #6e8893;
+  --referral-metal-ink: #f2f7fa;
+}
+
+.referral-member-card[data-tier='bronze'],
+.referral-level[data-tier='bronze'] {
+  --referral-metal-dark: #512e26;
+  --referral-metal-mid: #8c5f48;
+  --referral-metal-light: #c39c76;
+  --referral-metal-ink: #fff5e9;
+}
+
+.referral-member-card[data-tier='silver'],
+.referral-level[data-tier='silver'] {
+  --referral-metal-dark: #8b9ca9;
+  --referral-metal-mid: #bdcdd4;
+  --referral-metal-light: #f0f6f4;
+  --referral-metal-ink: #142630;
+}
+
+.referral-member-card[data-tier='gold'],
+.referral-level[data-tier='gold'] {
+  --referral-metal-dark: #907039;
+  --referral-metal-mid: #c7ad73;
+  --referral-metal-light: #f3e4b9;
+  --referral-metal-ink: #2c2417;
+}
+
+.referral-member-card {
+  position: relative;
+  min-height: 268px;
+  gap: 0;
+  padding-top: 24px;
+  border: 1px solid
+    color-mix(in srgb, var(--referral-metal-light) 60%, transparent);
+  border-radius: 20px;
+  color: var(--referral-metal-ink);
+  background:
+    linear-gradient(120deg, transparent 25%, #ffffff16 45%, transparent 62%),
+    linear-gradient(
+      135deg,
+      var(--referral-metal-dark),
+      var(--referral-metal-mid) 58%,
+      var(--referral-metal-light)
+    );
+  box-shadow:
+    inset 0 1px 0 #ffffff32,
+    0 16px 36px -24px
+      color-mix(in srgb, var(--referral-metal-dark) 60%, transparent);
+}
+
+.referral-member-card > [data-slot='card-header'],
+.referral-member-card > [data-slot='card-content'],
+.referral-member-card > [data-slot='card-footer'] {
+  padding-inline: 24px;
+}
+
+.referral-member-orbit {
+  position: absolute;
+  width: 380px;
+  aspect-ratio: 1;
+  top: -135px;
+  right: -150px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  opacity: 0.13;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 22px #ffffff09,
+    0 0 0 44px #ffffff06,
+    0 0 0 66px #ffffff04;
+}
+
+.referral-member-emblem {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  aspect-ratio: 1;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  opacity: 0.75;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 7px #ffffff09;
+}
+
+.referral-member-card .referral-member-footer {
+  border-top: 1px solid #ffffff24;
+  background: #ffffff09;
+  padding-block: 16px;
+}
+
+.referral-level-progress [data-slot='progress-track'] {
+  height: 6px;
+  background: color-mix(in oklch, var(--primary) 13%, var(--muted));
+}
+
+.referral-level-progress [data-slot='progress-indicator'] {
+  border-radius: inherit;
+}
+
+.referral-level {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--referral-surface, var(--card));
+}
+
+.referral-level[aria-current='step'] {
+  border-color: color-mix(in oklch, var(--primary) 60%, var(--border));
+  background: color-mix(in oklch, var(--primary) 8%, var(--card));
+  box-shadow: inset 0 2px 0 var(--primary);
+}
+
+.referral-level-material {
+  width: 34px;
+  height: 22px;
+  border-radius: 4px;
+  border: 1px solid
+    color-mix(in srgb, var(--referral-metal-light) 60%, transparent);
+  background: linear-gradient(
+    125deg,
+    var(--referral-metal-dark),
+    var(--referral-metal-light) 65%,
+    var(--referral-metal-mid)
+  );
+  box-shadow: inset 0 1px 0 #ffffff45;
+}
+
+.referral-benefit,
+.referral-metric {
+  background: var(--referral-surface, var(--card));
+}
+
+.referral-benefit {
+  background: linear-gradient(
+    135deg,
+    color-mix(in oklch, var(--primary) 5%, var(--card)),
+    var(--referral-surface, var(--card))
+  );
+}
+
+.referral-empty {
+  background: linear-gradient(
+    145deg,
+    color-mix(in oklch, var(--primary) 3%, var(--card)),
+    var(--background)
+  );
+}
+
+@media (max-width: 400px) {
+  .referral-member-card > [data-slot='card-header'],
+  .referral-member-card > [data-slot='card-content'],
+  .referral-member-card > [data-slot='card-footer'] {
+    padding-inline: 20px;
+  }
+
+  .referral-member-emblem {
+    width: 56px;
+  }
+}

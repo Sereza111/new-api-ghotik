@@ -39,6 +39,7 @@ import {
   getInitialParameterEnabled,
   getInitialPlaygroundConfig,
   loadMessages,
+  sanitizeMessagesOnLoad,
   sanitizeMessagesForPersistence,
   saveConfig,
   saveParameterEnabled,
@@ -179,8 +180,8 @@ export function usePlaygroundState() {
   const hydrateSession = useCallback(
     (session: PlaygroundSessionDetail) => {
       invalidateSessionSaves()
-      const sanitizedMessages = sanitizeMessagesForPersistence(
-        session.messages ?? []
+      const sanitizedMessages = sanitizeMessagesOnLoad(
+        sanitizeMessagesForPersistence(session.messages ?? [])
       )
       const nextConfig = {
         ...DEFAULT_CONFIG,
@@ -192,7 +193,6 @@ export function usePlaygroundState() {
       }
       const nextParameterEnabled = {
         ...DEFAULT_PARAMETER_ENABLED,
-        ...session.parameter_enabled,
       }
       const normalized = { ...session, messages: sanitizedMessages }
 
@@ -246,11 +246,20 @@ export function usePlaygroundState() {
         if (!session || !snapshot) return false
 
         const targetSequence = saveSequenceRef.current
+        const firstPrompt = snapshot.messages
+          .find((message) => message.from === 'user')
+          ?.versions[0]?.content.replaceAll(/\s+/g, ' ')
+          .trim()
+        const automaticTitle =
+          session.title === 'New conversation' && firstPrompt
+            ? [...firstPrompt].slice(0, 80).join('')
+            : undefined
         setSessionSaveStatus('saving')
         const request = updatePlaygroundSession(
           session.id,
           {
             revision: session.revision,
+            ...(automaticTitle ? { title: automaticTitle } : {}),
             config: snapshot.config,
             parameter_enabled: snapshot.parameter_enabled,
             messages: sanitizeMessagesForPersistence(snapshot.messages),

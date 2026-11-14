@@ -16,6 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useRouterState } from '@tanstack/react-router'
+import { useState } from 'react'
+
 import { CommandMenu } from '@/components/command-menu'
 import { AnimatedOutlet } from '@/components/page-transition'
 import { SkipToMain } from '@/components/skip-to-main'
@@ -34,7 +37,13 @@ type AuthenticatedLayoutProps = {
 }
 
 export function AuthenticatedLayout(props: AuthenticatedLayoutProps) {
-  const defaultOpen = getCookie('sidebar_state') !== 'false'
+  const isChat = useRouterState({
+    select: (state) => /^\/playground\/?$/.test(state.location.pathname),
+  })
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => getCookie('sidebar_state') !== 'false'
+  )
+  const [chatSidebarOpen, setChatSidebarOpen] = useState(false)
   const signedIn = useAuthStore((s) => !!s.auth.user)
   // Unmount pages on sign-out, otherwise their queries refetch and toast "Session expired!" / "invalid access token"
   if (!signedIn) return null
@@ -43,12 +52,13 @@ export function AuthenticatedLayout(props: AuthenticatedLayoutProps) {
     <LayoutProvider>
       <SearchProvider>
         <SidebarProvider
-          defaultOpen={defaultOpen}
+          open={isChat ? chatSidebarOpen : sidebarOpen}
+          onOpenChange={isChat ? setChatSidebarOpen : setSidebarOpen}
           className='flex-col'
           data-app-shell='gothic'
         >
           <SkipToMain />
-          <AppHeader />
+          <AppHeader showTopNav={!isChat} showSearch={!isChat} />
           <div className='flex min-h-0 w-full flex-1'>
             <AppSidebar />
             <SidebarInset

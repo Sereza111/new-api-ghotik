@@ -1,0 +1,94 @@
+.playground-workspace {
+  font-family: var(--font-sans);
+  background: var(--background);
+}
+
+.playground-composer-surface {
+  background: color-mix(in oklch, var(--card) 94%, var(--primary) 6%);
+  border-color: color-mix(in oklch, var(--border) 88%, var(--primary) 12%);
+  box-shadow: 0 12px 40px -24px
+    color-mix(in oklch, var(--foreground) 25%, transparent);
+}
+
+.playground-composer-surface:has(:disabled) {
+  background: color-mix(in oklch, var(--card) 94%, var(--primary) 6%);
+  opacity: 1;
+}
+
+.playground-empty-stage {
+  padding-bottom: clamp(1rem, 12dvh, 8rem);
+}
+
+.playground-welcome [data-slot='empty-header'] {
+  max-width: 34rem;
+}
+
+.playground-welcome [data-slot='empty-title'] {
+  font-size: clamp(1.65rem, 3vw, 2.35rem);
+  font-weight: 550;
+  letter-spacing: -0.04em;
+  line-height: 1.2;
+}
+
+.playground-welcome [data-slot='empty-icon'] {
+  width: 3.25rem;
+  height: 3.25rem;
+  margin-bottom: 0.6rem;
+  border-radius: 1rem;
+  color: var(--primary);
+  background: color-mix(in oklch, var(--primary) 10%, transparent);
+  border: 1px solid color-mix(in oklch, var(--primary) 17%, transparent);
+}
+
+.playground-welcome [data-slot='empty-description'] {
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.playground-welcome [data-slot='empty-content'] {
+  max-width: 40rem;
+}
+
+.playground-workspace .is-user {
+  padding-bottom: 1.5rem;
+}
+
+.playground-workspace .is-assistant {
+  padding-bottom: 2rem;
+}
+
+.playground-workspace .is-user [class*='whitespace-pre-wrap'] {
+  text-align: start;
+}
+
+.playground-session-rail {
+  background: color-mix(in oklch, var(--muted) 24%, var(--background));
+}
+
+@media (max-width: 767px) {
+  .playground-empty-stage {
+    padding-bottom: 1rem;
+  }
+  .playground-composer {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+  .playground-topbar {
+    height: 2rem;
+  }
+  .playground-welcome [data-slot='empty-icon'] {
+    margin-bottom: 0;
+  }
+}
+
+@media (max-height: 600px) {
+  .playground-empty-stage {
+    justify-content: flex-start;
+    padding-bottom: 0;
+  }
+  .playground-welcome {
+    padding-block: 1rem;
+  }
+  .playground-welcome [data-slot='empty-icon'] {
+    display: none;
+  }
+}

@@ -24,6 +24,8 @@ import {
   MessageSquare,
   MoreHorizontal,
   Pencil,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Trash2,
 } from 'lucide-react'
@@ -140,7 +142,7 @@ function SessionList({
   }
 
   return (
-    <div className='space-y-1 p-2'>
+    <div className='flex flex-col gap-1 p-2'>
       {sessions.map((session) => {
         const active = session.id === activeSessionId
         const disabled = busy || generationActive
@@ -148,21 +150,24 @@ function SessionList({
           <div
             key={session.id}
             className={cn(
-              'group flex min-h-14 items-center rounded-md border border-transparent px-1 transition-colors',
-              active ? 'bg-muted border-border' : 'hover:bg-muted/60'
+              'group flex min-h-14 items-center rounded-xl border border-transparent px-1 transition-colors',
+              active ? 'bg-primary/8 border-primary/15' : 'hover:bg-muted/60'
             )}
           >
-            <button
+            <Button
               type='button'
-              className='focus-visible:ring-ring/40 min-w-0 flex-1 px-2 py-2 text-left outline-none focus-visible:ring-2 disabled:cursor-not-allowed'
+              variant='ghost'
+              className='h-auto min-w-0 flex-1 flex-col items-start gap-0 overflow-hidden px-2.5 py-2.5 text-left disabled:opacity-100'
               disabled={disabled || active}
               aria-current={active ? 'page' : undefined}
               onClick={() => void onSelect(session.id)}
             >
-              <span className='block truncate text-sm font-medium'>
-                {session.title || t('New chat')}
+              <span className='block w-full truncate text-[13px] font-medium'>
+                {!session.title || session.title === 'New conversation'
+                  ? t('New chat')
+                  : session.title}
               </span>
-              <span className='text-muted-foreground mt-0.5 flex min-w-0 items-center gap-1 text-xs'>
+              <span className='text-muted-foreground mt-1 flex w-full min-w-0 items-center gap-1 text-[11px]'>
                 <span className='truncate'>
                   {session.model || t('No model')}
                 </span>
@@ -171,7 +176,7 @@ function SessionList({
                   {t('Messages: {{count}}', { count: session.message_count })}
                 </span>
               </span>
-            </button>
+            </Button>
 
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -182,7 +187,7 @@ function SessionList({
                     variant='ghost'
                     size='icon-sm'
                     aria-label={t('Chat actions')}
-                    className='opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100'
+                    className='shrink-0 opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100 md:opacity-0'
                   />
                 }
               >
@@ -225,6 +230,7 @@ export function PlaygroundSessionNavigation({
 }: PlaygroundSessionNavigationProps) {
   const { t } = useTranslation()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
   const [renameTarget, setRenameTarget] =
     useState<PlaygroundSessionSummary | null>(null)
   const [deleteTarget, setDeleteTarget] =
@@ -258,10 +264,22 @@ export function PlaygroundSessionNavigation({
   }
 
   const header = (
-    <div className='flex h-12 shrink-0 items-center justify-between border-b px-3'>
-      <div className='flex min-w-0 items-center gap-2'>
-        <History className='text-muted-foreground size-4' />
-        <span className='truncate text-sm font-medium'>{t('Chats')}</span>
+    <div className='flex shrink-0 flex-col gap-4 p-3 pt-4'>
+      <div className='flex items-center justify-between gap-2 px-1'>
+        <div className='flex min-w-0 items-center gap-2'>
+          <span className='text-muted-foreground truncate text-xs font-medium'>
+            {t('Chats')}
+          </span>
+        </div>
+        <Button
+          className='hidden rounded-lg md:flex'
+          variant='ghost'
+          size='icon-sm'
+          aria-label={t('Hide chats')}
+          onClick={() => setCollapsed(true)}
+        >
+          <PanelLeftClose aria-hidden='true' />
+        </Button>
       </div>
       <TooltipProvider>
         <Tooltip>
@@ -269,8 +287,9 @@ export function PlaygroundSessionNavigation({
             render={
               <Button
                 type='button'
-                variant='ghost'
-                size='icon-sm'
+                variant='outline'
+                size='default'
+                className='h-10 w-full justify-start gap-2 rounded-xl'
                 disabled={actionsDisabled}
                 aria-label={t('New chat')}
                 onClick={() => {
@@ -281,6 +300,7 @@ export function PlaygroundSessionNavigation({
             }
           >
             {busy ? <Loader2 className='animate-spin' /> : <Plus />}
+            {t('New chat')}
           </TooltipTrigger>
           <TooltipContent>{t('New chat')}</TooltipContent>
         </Tooltip>
@@ -290,16 +310,38 @@ export function PlaygroundSessionNavigation({
 
   return (
     <>
-      <aside className='bg-background hidden h-full w-68 shrink-0 flex-col border-r md:flex'>
-        {header}
-        <ScrollArea className='min-h-0 flex-1'>
-          <SessionList {...sessionListProps} />
-        </ScrollArea>
-        <div className='text-muted-foreground flex h-9 shrink-0 items-center gap-1.5 border-t px-3 text-xs'>
-          <SaveStatusIndicator status={saveStatus} />
-          {saveLabel}
-        </div>
-      </aside>
+      {collapsed ? (
+        <aside className='playground-session-rail hidden w-14 shrink-0 flex-col items-center gap-3 border-r py-4 md:flex'>
+          <Button
+            variant='ghost'
+            size='icon'
+            aria-label={t('Show chats')}
+            onClick={() => setCollapsed(false)}
+          >
+            <PanelLeftOpen aria-hidden='true' />
+          </Button>
+          <Button
+            variant='outline'
+            size='icon'
+            aria-label={t('New chat')}
+            disabled={actionsDisabled}
+            onClick={() => void onCreate()}
+          >
+            <Plus aria-hidden='true' />
+          </Button>
+        </aside>
+      ) : (
+        <aside className='playground-session-rail hidden h-full w-60 shrink-0 flex-col border-r md:flex xl:w-64'>
+          {header}
+          <ScrollArea className='min-h-0 flex-1'>
+            <SessionList {...sessionListProps} />
+          </ScrollArea>
+          <div className='text-muted-foreground flex h-11 shrink-0 items-center gap-2 px-5 text-[11px]'>
+            <SaveStatusIndicator status={saveStatus} />
+            {saveLabel}
+          </div>
+        </aside>
+      )}
 
       <div className='flex h-11 shrink-0 items-center justify-between border-b px-3 md:hidden'>
         <Button

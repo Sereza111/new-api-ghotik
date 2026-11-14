@@ -149,11 +149,11 @@ export function PlaygroundMessageContent({
           hasInputFiles) && (
           <>
             {hasInputImages && (
-              <div className='mb-2 grid w-full max-w-md grid-cols-2 gap-2'>
+              <div className='mb-3 grid w-full max-w-md grid-cols-3 gap-2 sm:grid-cols-4'>
                 {inputImages.map((image) => (
                   <img
                     alt={t('Image')}
-                    className='border-border/70 bg-muted/20 aspect-square size-full rounded-md border object-contain'
+                    className='border-border/70 bg-muted/20 aspect-square size-full rounded-xl border object-cover'
                     decoding='async'
                     height={320}
                     key={image}

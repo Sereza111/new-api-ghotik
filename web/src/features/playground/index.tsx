@@ -31,6 +31,8 @@ import {
 import { isImageGenerationModel } from './lib'
 import type { ModelOption, PlaygroundConfig } from './types'
 
+import '@/styles/playground.css'
+
 export function Playground() {
   const { t } = useTranslation()
   const {
@@ -44,7 +46,6 @@ export function Playground() {
     setModels,
     setGroups,
     updateConfig,
-    updateParameterEnabled,
     clearMessages,
     sessions,
     activeSessionId,
@@ -157,8 +158,35 @@ export function Playground() {
     />
   )
 
+  const composer = (
+    <PlaygroundInput
+      key={activeSessionId}
+      config={config}
+      disabled={
+        comparison.isGenerating ||
+        isLoadingMessages ||
+        !activeSessionId ||
+        (config.comparison.enabled && !config.comparison.model)
+      }
+      groups={groups}
+      groupValue={config.group}
+      isGenerating={comparison.isGenerating}
+      isImageMode={isImageMode}
+      isModelLoading={isLoadingPrimaryModels}
+      modelValue={config.model}
+      models={models}
+      onGroupChange={(value) => updateConfig('group', value)}
+      onConfigChange={updateConfig}
+      onClearMessages={handleClearMessages}
+      onModelChange={(value) => updateConfig('model', value)}
+      onStop={comparison.stopAll}
+      onSubmit={comparison.handleSendMessage}
+      hasMessages={messages.length > 0}
+    />
+  )
+
   return (
-    <div className='relative flex size-full min-h-0 flex-col overflow-hidden md:flex-row'>
+    <div className='playground-workspace relative flex size-full min-h-0 flex-col overflow-hidden md:flex-row'>
       <PlaygroundSessionNavigation
         sessions={sessions}
         activeSessionId={activeSessionId}
@@ -177,6 +205,8 @@ export function Playground() {
       <div className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'>
         <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
           <PlaygroundComparisonLayout
+            composer={composer}
+            empty={messages.length === 0 && !isLoadingMessages}
             enabled={config.comparison.enabled}
             disabled={
               comparison.isGenerating ||
@@ -211,34 +241,6 @@ export function Playground() {
               onGroupChange: (value) => updateSecondaryConfig('group', value),
               onStop: comparison.secondary.handler.stopGeneration,
             }}
-          />
-        </div>
-
-        <div className='mx-auto w-full max-w-7xl'>
-          <PlaygroundInput
-            config={config}
-            disabled={
-              comparison.isGenerating ||
-              isLoadingMessages ||
-              !activeSessionId ||
-              (config.comparison.enabled && !config.comparison.model)
-            }
-            groups={groups}
-            groupValue={config.group}
-            isGenerating={comparison.isGenerating}
-            isImageMode={isImageMode}
-            isModelLoading={isLoadingPrimaryModels}
-            modelValue={config.model}
-            models={models}
-            onGroupChange={(value) => updateConfig('group', value)}
-            onConfigChange={updateConfig}
-            onClearMessages={handleClearMessages}
-            onModelChange={(value) => updateConfig('model', value)}
-            onParameterEnabledChange={updateParameterEnabled}
-            onStop={comparison.stopAll}
-            onSubmit={comparison.handleSendMessage}
-            parameterEnabled={parameterEnabled}
-            hasMessages={messages.length > 0}
           />
         </div>
       </div>

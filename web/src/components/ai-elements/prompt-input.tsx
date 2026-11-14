@@ -176,20 +176,19 @@ export function PromptInputProvider({
   const openRef = useRef<() => void>(() => {})
 
   const add = useCallback((files: File[] | FileList) => {
-    const incoming = Array.from(files)
+    const incoming = [...files]
     if (incoming.length === 0) return
 
-    setAttachements((prev) =>
-      prev.concat(
-        incoming.map((file) => ({
-          id: nanoid(),
-          type: 'file' as const,
-          url: URL.createObjectURL(file),
-          mediaType: file.type,
-          filename: file.name,
-        }))
-      )
-    )
+    setAttachements((prev) => [
+      ...prev,
+      ...incoming.map((file) => ({
+        id: nanoid(),
+        type: 'file' as const,
+        url: URL.createObjectURL(file),
+        mediaType: file.type,
+        filename: file.name,
+      })),
+    ])
   }, [])
 
   const remove = useCallback((id: string) => {
@@ -446,8 +445,14 @@ export type PromptInputProps = Omit<
   // Minimal constraints
   maxFiles?: number
   maxFileSize?: number // bytes
+  maxTotalFileSize?: number // aggregate bytes for locally managed attachments
   onError?: (err: {
-    code: 'max_files' | 'max_file_size' | 'accept' | 'file_read'
+    code:
+      | 'max_files'
+      | 'max_file_size'
+      | 'max_total_file_size'
+      | 'accept'
+      | 'file_read'
     message: string
   }) => void
   onSubmit: (
@@ -470,6 +475,7 @@ export const PromptInput = ({
   syncHiddenInput,
   maxFiles,
   maxFileSize,
+  maxTotalFileSize,
   onError,
   onSubmit,
   children,
@@ -496,6 +502,7 @@ export const PromptInput = ({
   // ----- Local attachments (only used when no provider)
   const [items, setItems] = useState<(FileUIPart & { id: string })[]>([])
   const itemsRef = useRef(items)
+  const attachmentSizes = useRef(new Map<string, number>())
   const files = usingProvider ? controller.attachments.files : items
 
   useEffect(() => {
@@ -534,7 +541,7 @@ export const PromptInput = ({
 
   const addLocal = useCallback(
     (fileList: File[] | FileList) => {
-      const incoming = Array.from(fileList)
+      const incoming = [...fileList]
       const accepted = incoming.filter((f) => matchesAccept(f))
       if (incoming.length && accepted.length === 0) {
         onError?.({
@@ -568,19 +575,42 @@ export const PromptInput = ({
           })
         }
         const next: (FileUIPart & { id: string })[] = []
+        let totalSize = prev.reduce(
+          (total, file) => total + (attachmentSizes.current.get(file.id) ?? 0),
+          0
+        )
+        let exceededTotalSize = false
         for (const file of capped) {
+          if (
+            maxTotalFileSize != null &&
+            totalSize + file.size > maxTotalFileSize
+          ) {
+            exceededTotalSize = true
+            continue
+          }
+          totalSize += file.size
+          const id = nanoid()
+          attachmentSizes.current.set(id, file.size)
           next.push({
-            id: nanoid(),
+            id,
             type: 'file',
             url: URL.createObjectURL(file),
             mediaType: file.type,
             filename: file.name,
           })
         }
-        return prev.concat(next)
+        if (exceededTotalSize) {
+          onError?.({
+            code: 'max_total_file_size',
+            message: t('Attachments can total up to {{size}} MB per message.', {
+              size: Math.floor((maxTotalFileSize ?? 0) / (1024 * 1024)),
+            }),
+          })
+        }
+        return [...prev, ...next]
       })
     },
-    [matchesAccept, maxFiles, maxFileSize, onError, t]
+    [matchesAccept, maxFiles, maxFileSize, maxTotalFileSize, onError, t]
   )
 
   const add = useMemo(
@@ -598,6 +628,7 @@ export const PromptInput = ({
         : (id: string) =>
             setItems((prev) => {
               const found = prev.find((file) => file.id === id)
+              attachmentSizes.current.delete(id)
               if (found?.url) {
                 URL.revokeObjectURL(found.url)
               }
@@ -613,6 +644,7 @@ export const PromptInput = ({
         : () =>
             setItems((prev) => {
               for (const file of prev) {
+                attachmentSizes.current.delete(file.id)
                 if (file.url) {
                   URL.revokeObjectURL(file.url)
                 }
@@ -874,9 +906,7 @@ export const PromptInputTextarea = ({
     ) {
       e.preventDefault()
       const lastAttachment =
-        attachments.files.length > 0
-          ? attachments.files[attachments.files.length - 1]
-          : undefined
+        attachments.files.length > 0 ? attachments.files.at(-1) : undefined
       if (lastAttachment) {
         attachments.remove(lastAttachment.id)
       }
@@ -1173,6 +1203,8 @@ export const PromptInputSpeechButton = ({
       speechRecognition.onresult = (event) => {
         let finalTranscript = ''
 
+        // SpeechRecognitionResultList is array-like, but may not be iterable.
+        // eslint-disable-next-line unicorn/prefer-spread
         const results = Array.from(event.results)
 
         for (const result of results) {

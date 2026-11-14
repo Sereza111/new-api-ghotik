@@ -29,6 +29,7 @@ import {
   isValidMessage,
 } from '../message/message-utils'
 import {
+  getReasoningEffortOptions,
   isParameterSupported,
   normalizeReasoningEffort,
 } from '../parameters/model-capabilities'
@@ -126,15 +127,12 @@ export function buildChatCompletionPayload(
     payload.seed = config.seed
   }
 
-  if (reasoningEffort !== 'none') {
+  if (getReasoningEffortOptions(config.model).length > 1) {
     payload.reasoning_effort = reasoningEffort
   }
 
-  if (config.web_search_enabled) {
-    payload.web_search_options = {
-      search_context_size: 'medium',
-    }
-  }
+  // Hosted search is selected by the playground server after it knows the
+  // channel. A model name alone cannot identify a provider's tool support.
 
   return payload
 }

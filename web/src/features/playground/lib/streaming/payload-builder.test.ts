@@ -18,12 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_CONFIG } from '../../constants'
+import { DEFAULT_CONFIG, DEFAULT_PARAMETER_ENABLED } from '../../constants'
 import { applyImageGenerationResponse } from '../message/message-streaming-utils'
 import {
   createLoadingAssistantMessage,
   createUserMessage,
 } from '../message/message-utils'
+import { getReasoningEffortOptions } from '../parameters/model-capabilities'
 import {
   buildChatCompletionPayload,
   buildImageGenerationPayload,
@@ -152,6 +153,43 @@ describe('image generation payload', () => {
 })
 
 describe('chat completion payload', () => {
+  it('sends explicit disabled reasoning for Claude instead of inheriting provider defaults', () => {
+    expect(
+      buildChatCompletionPayload(
+        [createUserMessage('hello')],
+        {
+          ...DEFAULT_CONFIG,
+          model: 'claude-opus-4-6',
+          reasoning_effort: 'none',
+        },
+        DEFAULT_PARAMETER_ENABLED
+      ).reasoning_effort
+    ).toBe('none')
+  })
+
+  it('only offers effort levels supported by the selected model', () => {
+    expect(getReasoningEffortOptions('claude-opus-4-6')).toEqual([
+      'none',
+      'low',
+      'medium',
+      'high',
+      'max',
+    ])
+    expect(getReasoningEffortOptions('gemini-3-pro-preview')).toEqual([
+      'low',
+      'high',
+    ])
+    expect(getReasoningEffortOptions('gpt-4o')).toEqual(['none'])
+    expect(getReasoningEffortOptions('gpt-6-astra')).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+    ])
+    expect(getReasoningEffortOptions('gpt-6.1-sol')).not.toContain('none')
+    expect(getReasoningEffortOptions('gpt-6-sol')).not.toContain('minimal')
+  })
   it('sends pasted references as multimodal message content', () => {
     const reference = 'data:image/webp;base64,aW1hZ2U='
     const payload = buildChatCompletionPayload(
@@ -299,7 +337,7 @@ describe('chat completion payload', () => {
   it('preserves the selected reasoning effort', () => {
     const payload = buildChatCompletionPayload(
       [createUserMessage('solve this carefully')],
-      { ...DEFAULT_CONFIG, reasoning_effort: 'high' },
+      { ...DEFAULT_CONFIG, model: 'claude-opus-4-6', reasoning_effort: 'high' },
       {
         temperature: false,
         top_p: false,
@@ -334,7 +372,7 @@ describe('chat completion payload', () => {
     expect(payload.reasoning_effort).toBe('max')
   })
 
-  it('normalizes extended reasoning for models without that capability', () => {
+  it('omits effort for models without configurable reasoning', () => {
     const payload = buildChatCompletionPayload(
       [createUserMessage('solve this carefully')],
       {
@@ -352,10 +390,10 @@ describe('chat completion payload', () => {
       }
     )
 
-    expect(payload.reasoning_effort).toBe('high')
+    expect(payload.reasoning_effort).toBeUndefined()
   })
 
-  it('enables hosted web search through the relay contract', () => {
+  it('leaves hosted web search selection to the provider aware server', () => {
     const payload = buildChatCompletionPayload(
       [createUserMessage('find the latest release')],
       { ...DEFAULT_CONFIG, web_search_enabled: true },
@@ -369,9 +407,7 @@ describe('chat completion payload', () => {
       }
     )
 
-    expect(payload.web_search_options).toEqual({
-      search_context_size: 'medium',
-    })
+    expect(payload.web_search_options).toBeUndefined()
   })
 
   it('omits parameters that conflict with OpenAI reasoning models', () => {

@@ -119,6 +119,87 @@ afterEach(() => {
   useAuthStore.getState().auth.reset()
 })
 
+test.each(['New conversation', 'A custom title'])(
+  'titles %s only when it is an unnamed conversation',
+  async (title) => {
+    const first = { ...session('first-session'), title }
+    apiMocks.listPlaygroundSessions.mockResolvedValue([first])
+    apiMocks.getPlaygroundSession.mockResolvedValue(first)
+    apiMocks.updatePlaygroundSession.mockResolvedValue({
+      ...first,
+      revision: 2,
+    })
+    const hook = renderHook(() => usePlaygroundState(), {
+      wrapper: createWrapper(),
+    })
+    await waitFor(() =>
+      expect(hook.result.current.activeSessionId).toBe(first.id)
+    )
+    act(() =>
+      hook.result.current.updateMessages([
+        message('Repair the welding power supply'),
+      ])
+    )
+    act(() => window.dispatchEvent(new Event('pagehide')))
+    await waitFor(() =>
+      expect(apiMocks.updatePlaygroundSession).toHaveBeenCalled()
+    )
+    const update = apiMocks.updatePlaygroundSession.mock.calls[0][1]
+    if (title === 'New conversation') {
+      expect(update.title).toBe('Repair the welding power supply')
+    } else expect(update).not.toHaveProperty('title')
+  }
+)
+
+test('restores all interrupted cloud turns without displaying a permanent loader', async () => {
+  const first = session('first-session', 1, [
+    {
+      key: 'primary',
+      from: 'assistant',
+      versions: [{ id: 'one', content: '' }],
+      status: 'loading',
+    },
+    {
+      key: 'secondary',
+      from: 'assistant',
+      versions: [{ id: 'two', content: 'Partial answer' }],
+      status: 'streaming',
+      lane: 'secondary',
+    },
+  ])
+  apiMocks.listPlaygroundSessions.mockResolvedValue([first])
+  apiMocks.getPlaygroundSession.mockResolvedValue(first)
+  const hook = renderHook(() => usePlaygroundState(), {
+    wrapper: createWrapper(),
+  })
+  await waitFor(() =>
+    expect(hook.result.current.activeSessionId).toBe(first.id)
+  )
+  expect(hook.result.current.messages.map((item) => item.status)).toEqual([
+    'error',
+    'complete',
+  ])
+  expect(hook.result.current.messages[1].versions[0].content).toBe(
+    'Partial answer'
+  )
+})
+
+test('does not restore hidden legacy generation limits', async () => {
+  const first = session('first-session')
+  first.parameter_enabled.max_tokens = true
+  first.parameter_enabled.temperature = true
+  apiMocks.listPlaygroundSessions.mockResolvedValue([first])
+  apiMocks.getPlaygroundSession.mockResolvedValue(first)
+  const hook = renderHook(() => usePlaygroundState(), {
+    wrapper: createWrapper(),
+  })
+  await waitFor(() =>
+    expect(hook.result.current.activeSessionId).toBe(first.id)
+  )
+  expect(hook.result.current.parameterEnabled.max_tokens).toBe(false)
+  expect(hook.result.current.parameterEnabled.temperature).toBe(false)
+})
+
 test('ignores an in-flight save after deleting its session', async () => {
   const first = session('first-session')
   const second = session('second-session')

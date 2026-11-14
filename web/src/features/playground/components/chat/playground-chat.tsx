@@ -197,9 +197,9 @@ export function PlaygroundChat({
   })
 
   if (visibleMessages.length === 0 && onSelectPrompt) {
-    chatContent = [
-      <PlaygroundEmptyState key='empty' onSelectPrompt={onSelectPrompt} />,
-    ]
+    if (!isLoadingMessages) {
+      return <PlaygroundEmptyState onSelectPrompt={onSelectPrompt} />
+    }
   }
 
   if (isLoadingMessages) {
@@ -219,7 +219,10 @@ export function PlaygroundChat({
       {/* Remove outer padding; apply padding to inner centered container to align with input */}
       <ConversationContent className='p-0'>
         <div
-          className={cn('mx-auto w-full max-w-7xl px-4 py-4', contentClassName)}
+          className={cn(
+            'mx-auto w-full max-w-[52rem] px-5 py-6 sm:px-8 sm:py-8',
+            contentClassName
+          )}
         >
           {chatContent}
         </div>

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { ImageIcon, SendIcon, SquareIcon } from 'lucide-react'
+import { ArrowUp, ImageIcon, SquareIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -43,6 +43,7 @@ type PlaygroundInputControlsProps = {
   onStop?: () => void
   text: string
   tools: ReactNode
+  reasoning?: ReactNode
 }
 
 export function PlaygroundInputControls({
@@ -59,6 +60,7 @@ export function PlaygroundInputControls({
   onStop,
   text,
   tools,
+  reasoning,
 }: PlaygroundInputControlsProps) {
   const { t } = useTranslation()
   const attachments = usePromptInputAttachments()
@@ -83,54 +85,46 @@ export function PlaygroundInputControls({
       groups={groups}
       onGroupChange={onGroupChange}
       disabled={isSelectorDisabled}
+      className='h-9 max-w-[min(42vw,15rem)] rounded-full border-transparent bg-transparent px-2.5'
     />
   )
 
   const renderSubmitButton = () =>
     shouldShowStop ? (
       <PromptInputButton
-        className='border-destructive/25 bg-destructive/10 text-destructive hover:bg-destructive/15 font-medium'
+        className='size-10 shrink-0 rounded-full'
+        size='icon-sm'
+        aria-label={t('Stop')}
         onClick={onStop}
-        variant='secondary'
+        variant='default'
       >
         <SquareIcon className='fill-current' size={16} />
-        <span className='hidden sm:inline'>{t('Stop')}</span>
-        <span className='sr-only sm:hidden'>{t('Stop')}</span>
       </PromptInputButton>
     ) : (
       <PromptInputButton
-        className='bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground h-8 px-3 font-medium shadow-sm'
+        className='size-10 shrink-0 rounded-full'
+        size='icon-sm'
+        aria-label={isImageMode ? t('Generate') : t('Send')}
         disabled={!canSubmit}
         type='submit'
         variant='default'
       >
-        {isImageMode ? <ImageIcon size={16} /> : <SendIcon size={16} />}
-        <span className='hidden sm:inline'>
-          {isImageMode ? t('Generate') : t('Send')}
-        </span>
-        <span className='sr-only sm:hidden'>
-          {isImageMode ? t('Generate') : t('Send')}
-        </span>
+        {isImageMode ? (
+          <ImageIcon size={18} aria-hidden='true' />
+        ) : (
+          <ArrowUp size={20} aria-hidden='true' />
+        )}
       </PromptInputButton>
     )
 
   return (
-    <div className='flex w-full flex-col gap-2.5 md:flex-row md:items-center md:justify-between'>
-      <div className='flex min-w-0 items-center justify-end md:hidden'>
-        {renderSelector()}
-      </div>
-
-      <div className='flex items-center justify-between gap-2 md:justify-start'>
+    <div className='flex w-full min-w-0 items-end gap-1.5'>
+      <div className='flex min-w-0 flex-1 flex-wrap items-center gap-1'>
         {tools}
-        <div className='flex items-center gap-1.5 md:hidden'>
-          {renderSubmitButton()}
-        </div>
+        <div className='min-w-0'>{renderSelector()}</div>
+        {reasoning}
       </div>
-
-      <div className='hidden min-w-0 items-center gap-2 md:flex'>
-        {renderSelector()}
-        {renderSubmitButton()}
-      </div>
+      {renderSubmitButton()}
     </div>
   )
 }

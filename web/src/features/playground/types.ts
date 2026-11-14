@@ -109,7 +109,7 @@ export interface ChatCompletionRequest {
   frequency_penalty?: number
   presence_penalty?: number
   seed?: number
-  reasoning_effort?: Exclude<ReasoningEffort, 'none'>
+  reasoning_effort?: ReasoningEffort
   web_search_options?: {
     search_context_size?: 'low' | 'medium' | 'high'
   }

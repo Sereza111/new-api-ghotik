@@ -16,9 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { BrainCircuit, ChevronDown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { Slider } from '@/components/ui/slider'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 import {
   getReasoningEffortOptions,
@@ -56,34 +66,48 @@ export function PlaygroundReasoningControl({
     config.model,
     config.reasoning_effort
   )
-  const selectedIndex = Math.max(0, options.indexOf(selectedEffort))
+  if (options.length <= 1) return null
 
   return (
-    <div className='border-border/60 flex min-h-12 flex-wrap items-center gap-x-4 gap-y-2 border-t px-3 py-2.5'>
-      <span className='text-muted-foreground shrink-0 text-xs font-medium'>
-        {t('Reasoning effort')}
-      </span>
-      <div className='flex min-w-48 flex-1 items-center gap-3'>
-        <Slider
-          aria-label={t('Reasoning effort')}
-          className='min-w-32 flex-1 py-1'
-          disabled={disabled}
-          max={options.length - 1}
-          min={0}
-          onValueChange={(nextValue) => {
-            const nextIndex = Array.isArray(nextValue)
-              ? nextValue[0]
-              : nextValue
-            const nextEffort = options[Math.round(nextIndex)]
-            if (nextEffort) onConfigChange('reasoning_effort', nextEffort)
-          }}
-          step={1}
-          value={[selectedIndex]}
-        />
-        <span className='border-border/70 bg-muted/45 text-foreground inline-flex h-7 w-16 shrink-0 items-center justify-center rounded-md border text-xs font-semibold'>
-          {t(REASONING_LABELS[selectedEffort])}
-        </span>
-      </div>
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant='ghost'
+            size='sm'
+            className='h-9 gap-1.5 rounded-full px-2.5 text-xs'
+            disabled={disabled}
+            aria-label={`${t('Reasoning effort')}: ${t(REASONING_LABELS[selectedEffort])}`}
+          />
+        }
+      >
+        <BrainCircuit className='size-4' aria-hidden='true' />
+        <span>{t(REASONING_LABELS[selectedEffort])}</span>
+        <ChevronDown className='size-3' aria-hidden='true' />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align='end' side='top' className='w-52 p-1.5'>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>{t('Reasoning effort')}</DropdownMenuLabel>
+          <DropdownMenuRadioGroup
+            value={selectedEffort}
+            onValueChange={(value) => {
+              if (options.includes(value as ReasoningEffort)) {
+                onConfigChange('reasoning_effort', value as ReasoningEffort)
+              }
+            }}
+          >
+            {options.map((effort) => (
+              <DropdownMenuRadioItem
+                className='min-h-10 px-2'
+                key={effort}
+                value={effort}
+              >
+                {t(REASONING_LABELS[effort])}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

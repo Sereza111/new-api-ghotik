@@ -29,7 +29,7 @@ import {
   parseStreamErrorDetails,
   parseStreamMessageUpdates,
 } from '../lib'
-import type { ChatCompletionRequest } from '../types'
+import type { ChatCompletionChunk, ChatCompletionRequest } from '../types'
 
 interface StreamEventSource {
   readyState?: number
@@ -61,10 +61,12 @@ export function createStreamRequestController(
 ) {
   let source: StreamEventSource | null = null
   let generation = 0
+  let inactivityTimer: ReturnType<typeof setTimeout> | undefined
 
   const closeActiveSource = (target: StreamEventSource) => {
     target.close()
     if (source === target) {
+      clearTimeout(inactivityTimer)
       source = null
       runtime.setStreaming(false)
     }
@@ -76,6 +78,7 @@ export function createStreamRequestController(
   ) => {
     const requestGeneration = generation + 1
     generation = requestGeneration
+    clearTimeout(inactivityTimer)
     const previousSource = source
     source = null
     previousSource?.close()
@@ -99,6 +102,7 @@ export function createStreamRequestController(
     source = nextSource
     runtime.setStreaming(true)
     let completed = false
+    let receivedFinishReason = false
 
     const isCurrent = () =>
       generation === requestGeneration && source === nextSource
@@ -110,21 +114,51 @@ export function createStreamRequestController(
       closeActiveSource(nextSource)
     }
 
+    const complete = () => {
+      if (!isCurrent() || completed) return
+      completed = true
+      closeActiveSource(nextSource)
+      callbacks.onComplete()
+    }
+
+    const resetInactivityTimer = () => {
+      clearTimeout(inactivityTimer)
+      inactivityTimer = setTimeout(
+        () => {
+          if (receivedFinishReason) complete()
+          else handleError(ERROR_MESSAGES.INTERRUPTED)
+        },
+        5 * 60 * 1000
+      )
+    }
+
     nextSource.addEventListener('message', (event) => {
       if (!isCurrent() || completed) return
+      resetInactivityTimer()
       const data = event.data ?? ''
       if (isStreamDoneMessage(data)) {
-        completed = true
-        closeActiveSource(nextSource)
-        callbacks.onComplete()
+        complete()
         return
       }
 
       try {
+        const response = JSON.parse(data) as ChatCompletionChunk & {
+          error?: { message?: string; code?: string }
+        }
+        if (response.error) {
+          const { errorCode, errorMessage } = parseStreamErrorDetails(data)
+          handleError(errorMessage, errorCode)
+          return
+        }
         const updates = parseStreamMessageUpdates(data)
 
         for (const update of updates) {
           callbacks.onUpdate(update.type, update.chunk)
+        }
+        if (response.choices?.[0]?.finish_reason) {
+          // The relay may still be forwarding the usage chunk used for billing.
+          // Wait for DONE or EOF instead of cancelling its upstream request.
+          receivedFinishReason = true
         }
       } catch (error) {
         // eslint-disable-next-line no-console
@@ -152,11 +186,15 @@ export function createStreamRequestController(
 
       if (errorMessage) {
         handleError(errorMessage)
+      } else if (isStreamClosedReadyState(event.readyState)) {
+        if (receivedFinishReason) complete()
+        else handleError(ERROR_MESSAGES.INTERRUPTED)
       }
     })
 
     try {
       if (!isCurrent()) return
+      resetInactivityTimer()
       nextSource.stream()
     } catch (error: unknown) {
       if (!isCurrent() || completed) return
@@ -168,6 +206,7 @@ export function createStreamRequestController(
 
   const cancel = (notify: boolean) => {
     generation += 1
+    clearTimeout(inactivityTimer)
     const activeSource = source
     source = null
     activeSource?.close()

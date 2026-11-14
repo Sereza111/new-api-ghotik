@@ -185,4 +185,46 @@ describe('PromptInput clipboard attachments', () => {
       )
     })
   })
+
+  test('enforces the total attachment budget across additions and releases it on removal', async () => {
+    const user = userEvent.setup()
+    const onError = vi.fn()
+    render(
+      <PromptInput
+        accept='image/png'
+        maxTotalFileSize={8}
+        onError={onError}
+        onSubmit={() => undefined}
+      >
+        <PromptInputAttachments>
+          {(attachment) => <PromptInputAttachment data={attachment} />}
+        </PromptInputAttachments>
+        <PromptInputTextarea />
+      </PromptInput>
+    )
+    const upload = screen.getByLabelText('Upload files')
+    fireEvent.change(upload, {
+      target: {
+        files: [new File(['12345'], 'first.png', { type: 'image/png' })],
+      },
+    })
+    fireEvent.change(upload, {
+      target: {
+        files: [new File(['1234'], 'second.png', { type: 'image/png' })],
+      },
+    })
+    expect(screen.getByText('first.png')).toBeVisible()
+    expect(screen.queryByText('second.png')).not.toBeInTheDocument()
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'max_total_file_size' })
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Remove attachment' }))
+    fireEvent.change(upload, {
+      target: {
+        files: [new File(['1234'], 'second.png', { type: 'image/png' })],
+      },
+    })
+    expect(screen.getByText('second.png')).toBeVisible()
+  })
 })

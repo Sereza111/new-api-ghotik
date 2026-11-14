@@ -16,190 +16,91 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { GlobeIcon, PaperclipIcon, Trash2Icon } from 'lucide-react'
+import { MoreHorizontal, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import {
-  PromptInputActionAddAttachments,
   PromptInputButton,
   PromptInputTools,
+  usePromptInputAttachments,
 } from '@/components/ai-elements/prompt-input'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
-import { cn } from '@/lib/utils'
-
-import { ATTACHMENT_ACTIONS, getAttachmentActionNotice } from '../../lib'
-import type { ParameterEnabled, PlaygroundConfig } from '../../types'
-import { PlaygroundParameterPanel } from './playground-parameter-panel'
 
 type PlaygroundInputToolsProps = {
-  config: PlaygroundConfig
   disabled?: boolean
   hasMessages?: boolean
-  isImageMode?: boolean
   onClearMessages?: () => void
-  onConfigChange: <K extends keyof PlaygroundConfig>(
-    key: K,
-    value: PlaygroundConfig[K]
-  ) => void
-  onParameterEnabledChange: (
-    key: keyof ParameterEnabled,
-    value: boolean
-  ) => void
-  parameterEnabled: ParameterEnabled
 }
 
-export function PlaygroundInputTools({
-  config,
-  disabled,
-  hasMessages = false,
-  isImageMode = false,
-  onClearMessages,
-  onConfigChange,
-  onParameterEnabledChange,
-  parameterEnabled,
-}: PlaygroundInputToolsProps) {
+export function PlaygroundInputTools(props: PlaygroundInputToolsProps) {
   const { t } = useTranslation()
+  const attachments = usePromptInputAttachments()
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
-
-  const handleFileAction = (action: string) => {
-    const notice = getAttachmentActionNotice(action)
-    toast.info(t(notice.title), {
-      description: notice.description,
-    })
-  }
-
-  const handleClearMessages = () => {
-    onClearMessages?.()
-    setClearConfirmOpen(false)
-    toast.success(t('Conversation cleared'))
-  }
 
   return (
     <>
-      <PromptInputTools className='bg-background/70 border-border/60 rounded-lg border p-1 shadow-xs'>
-        <Tooltip>
+      <PromptInputTools>
+        <PromptInputButton
+          aria-label={t('Add photos or files')}
+          title={t('Add photos or files')}
+          className='size-9 rounded-full'
+          size='icon-sm'
+          disabled={props.disabled}
+          onClick={attachments.openFileDialog}
+        >
+          <Plus className='size-5' aria-hidden='true' />
+        </PromptInputButton>
+        {props.hasMessages && props.onClearMessages ? (
           <DropdownMenu>
-            <TooltipTrigger
+            <DropdownMenuTrigger
               render={
-                <DropdownMenuTrigger
-                  render={
-                    <PromptInputButton
-                      aria-label={t('Attach')}
-                      className='text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium'
-                      disabled={disabled}
-                      variant='ghost'
-                    />
-                  }
-                >
-                  <PaperclipIcon size={16} />
-                </DropdownMenuTrigger>
+                <PromptInputButton
+                  aria-label={t('Chat actions')}
+                  disabled={props.disabled}
+                  className='size-9 rounded-full'
+                  size='icon-sm'
+                />
               }
-            />
-            <TooltipContent>
-              <p>{t('Attach')}</p>
-            </TooltipContent>
-            <DropdownMenuContent align='start'>
-              <PromptInputActionAddAttachments />
-              {ATTACHMENT_ACTIONS.filter(({ action }) =>
-                action.startsWith('take-')
-              ).map(({ action, icon: Icon, label }) => (
+            >
+              <MoreHorizontal aria-hidden='true' />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align='start'
+              side='top'
+              className='w-56 p-1.5'
+            >
+              <DropdownMenuGroup>
                 <DropdownMenuItem
-                  key={action}
-                  onClick={() => handleFileAction(action)}
+                  className='min-h-10'
+                  variant='destructive'
+                  onClick={() => setClearConfirmOpen(true)}
                 >
-                  <Icon className='mr-2' size={16} />
-                  {t(label)}
+                  <Trash2 aria-hidden='true' />
+                  {t('Clear chat history')}
                 </DropdownMenuItem>
-              ))}
+              </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <PromptInputButton
-                aria-label={
-                  config.web_search_enabled
-                    ? t('Disable web search')
-                    : t('Enable web search')
-                }
-                aria-pressed={config.web_search_enabled}
-                className={cn(
-                  'text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium',
-                  config.web_search_enabled &&
-                    'bg-primary/12 text-primary hover:bg-primary/18 hover:text-primary'
-                )}
-                disabled={disabled || isImageMode}
-                onClick={() =>
-                  onConfigChange(
-                    'web_search_enabled',
-                    !config.web_search_enabled
-                  )
-                }
-                variant='ghost'
-              >
-                <GlobeIcon size={16} />
-              </PromptInputButton>
-            }
-          />
-          <TooltipContent>
-            <p>
-              {config.web_search_enabled ? t('Web search on') : t('Web search')}
-            </p>
-          </TooltipContent>
-        </Tooltip>
-
-        {!isImageMode && (
-          <PlaygroundParameterPanel
-            config={config}
-            disabled={disabled}
-            onConfigChange={onConfigChange}
-            onParameterEnabledChange={onParameterEnabledChange}
-            parameterEnabled={parameterEnabled}
-          />
-        )}
-
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <PromptInputButton
-                aria-label={t('Clear chat history')}
-                className='text-muted-foreground hover:text-destructive hover:bg-destructive/10 font-medium'
-                disabled={disabled || !hasMessages || !onClearMessages}
-                onClick={() => setClearConfirmOpen(true)}
-                variant='ghost'
-              >
-                <Trash2Icon size={16} />
-              </PromptInputButton>
-            }
-          />
-          <TooltipContent>
-            <p>{t('Clear chat history')}</p>
-          </TooltipContent>
-        </Tooltip>
+        ) : null}
       </PromptInputTools>
-
       <ConfirmDialog
         destructive
-        desc={t(
-          'All playground messages saved in this browser will be removed. This cannot be undone.'
-        )}
+        desc={t('Messages in this chat will be permanently deleted.')}
         confirmText={t('Clear')}
-        handleConfirm={handleClearMessages}
+        handleConfirm={() => {
+          props.onClearMessages?.()
+          setClearConfirmOpen(false)
+          toast.success(t('Conversation cleared'))
+        }}
         open={clearConfirmOpen}
         onOpenChange={setClearConfirmOpen}
         title={t('Clear chat history?')}

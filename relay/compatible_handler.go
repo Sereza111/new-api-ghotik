@@ -9,6 +9,8 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/relay/channel"
+	"github.com/QuantumNous/new-api/relay/channel/sub2api"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -35,16 +37,17 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		return types.NewError(fmt.Errorf("failed to copy request to GeneralOpenAIRequest: %w", err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
 
-	if request.WebSearchOptions != nil {
-		c.Set("chat_completion_web_search_context_size", request.WebSearchOptions.SearchContextSize)
-	}
-
 	err = helper.ModelMappedHelper(c, info, request)
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
 	}
 	if err := helper.ApplyReasoningModelSuffix(c, info, request); err != nil {
 		return newConvertRequestFailedError(c, info, err)
+	}
+	passThroughGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
+	applyPlaygroundWebSearch(info, request, passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled)
+	if request.WebSearchOptions != nil {
+		c.Set("chat_completion_web_search_context_size", request.WebSearchOptions.SearchContextSize)
 	}
 
 	includeUsage := true
@@ -73,10 +76,10 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	}
 	adaptor.Init(info)
 
-	passThroughGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
 	if info.RelayMode == relayconstant.RelayModeChatCompletions &&
 		!passThroughGlobal &&
 		!info.ChannelSetting.PassThroughBodyEnabled &&
+		!sub2api.UsesNativePlaygroundClaude(info) &&
 		service.ShouldChatCompletionsUseResponsesGlobal(info.ChannelId, info.ChannelType, info.OriginModelName) {
 		applySystemPromptIfNeeded(c, info, request)
 		usage, newApiErr := textRequestViaResponses(c, info, adaptor, request)
@@ -112,15 +115,11 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		}
 		requestBody = common.NewReplayableBodyReader(storage)
 	} else {
-		convertedRequest, err := adaptor.ConvertOpenAIRequest(c, info, request)
+		convertedRequest, err := convertTextRequest(c, info, adaptor, request)
 		if err != nil {
 			return newConvertRequestFailedError(c, info, err)
 		}
 		relaycommon.AppendRequestConversionFromRequest(info, convertedRequest)
-
-		if req, ok := convertedRequest.(*dto.GeneralOpenAIRequest); ok {
-			applySystemPromptIfNeeded(c, info, req)
-		}
 
 		jsonData, err := common.Marshal(convertedRequest)
 		if err != nil {
@@ -190,4 +189,45 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), nil)
 	}
 	return nil
+}
+
+func convertTextRequest(c *gin.Context, info *relaycommon.RelayInfo, adaptor channel.Adaptor, request *dto.GeneralOpenAIRequest) (any, error) {
+	if sub2api.UsesNativePlaygroundClaude(info) {
+		applySystemPromptIfNeeded(c, info, request)
+	}
+	converted, err := adaptor.ConvertOpenAIRequest(c, info, request)
+	if err != nil {
+		return nil, err
+	}
+	if req, ok := converted.(*dto.GeneralOpenAIRequest); ok {
+		applySystemPromptIfNeeded(c, info, req)
+	}
+	return converted, nil
+}
+
+// Enable hosted search only where the selected channel can translate it into
+// a provider-native tool. This runs on the per-attempt clone after model mapping,
+// so retrying a different provider cannot inherit an unsupported search field.
+func applyPlaygroundWebSearch(info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest, passthrough bool) {
+	if !info.IsPlayground || passthrough || request.WebSearchOptions != nil || request.ToolChoice != nil || len(request.Tools) > 0 {
+		return
+	}
+	model := strings.ToLower(request.Model)
+	supported := false
+	switch info.ChannelType {
+	case constant.ChannelTypeAnthropic, constant.ChannelTypeSub2API:
+		supported = strings.HasPrefix(model, "claude-") &&
+			!strings.Contains(model, "haiku-3") && !strings.HasPrefix(model, "claude-3-haiku") &&
+			!strings.HasPrefix(model, "claude-3-opus") && !strings.HasPrefix(model, "claude-3-sonnet") &&
+			!strings.HasPrefix(model, "claude-2")
+	case constant.ChannelTypeGemini:
+		supported = (strings.HasPrefix(model, "gemini-2.5-") || strings.HasPrefix(model, "gemini-3")) &&
+			!strings.Contains(model, "image") && !strings.Contains(model, "tts") &&
+			!strings.Contains(model, "live") && !strings.Contains(model, "audio")
+	case constant.ChannelTypeOpenAI:
+		supported = model == "gpt-5-search-api" || strings.HasPrefix(model, "gpt-5-search-api-")
+	}
+	if supported {
+		request.WebSearchOptions = &dto.WebSearchOptions{}
+	}
 }
