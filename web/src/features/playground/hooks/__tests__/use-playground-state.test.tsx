@@ -60,6 +60,11 @@ const session = (
     stream: true,
     reasoning_effort: 'none',
     web_search_enabled: false,
+    comparison: {
+      enabled: false,
+      model: '',
+      group: 'default',
+    },
   },
   parameter_enabled: {
     temperature: true,
