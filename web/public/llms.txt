@@ -1,0 +1,12 @@
+# VL API
+
+VL API is a New API gateway that provides one OpenAI-compatible endpoint for multiple AI model providers.
+
+## Public resources
+
+- [Documentation](https://new-api.errorclub.club/docs): API setup and usage documentation.
+- [Models and pricing](https://new-api.errorclub.club/pricing): Available models and current public pricing.
+- [Service status](https://new-api.errorclub.club/service-status): Current model and provider availability.
+- [Support](https://new-api.errorclub.club/support): Support and contact options.
+
+Authentication is required for account, key, billing, and usage pages. API clients should use the base URL and credentials shown in the authenticated console.

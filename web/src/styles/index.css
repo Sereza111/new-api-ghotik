@@ -594,6 +594,12 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 .vl-public-surface {
+  --primary: oklch(0.5 0.08 230);
+  --primary-foreground: oklch(0.985 0.004 240);
+  --ring: oklch(0.5 0.08 230);
+}
+
+.dark .vl-public-surface {
   --primary: oklch(0.82 0.055 230);
   --primary-foreground: oklch(0.15 0.018 235);
   --ring: oklch(0.74 0.06 230);
@@ -645,8 +651,12 @@ For commercial licensing, please contact support@quantumnous.com
   --fortune-paper: oklch(0.86 0.012 100);
   --fortune-gold: oklch(0.69 0.052 83);
   container-type: inline-size;
-  filter: drop-shadow(0 1.75rem 2.5rem rgb(0 0 0 / 0.55));
+  filter: drop-shadow(0 1.75rem 2.5rem rgb(0 0 0 / 0.18));
   touch-action: pan-y;
+}
+
+.dark .fortune-scene {
+  filter: drop-shadow(0 1.75rem 2.5rem rgb(0 0 0 / 0.55));
 }
 
 .fortune-atmosphere {
@@ -698,10 +708,16 @@ For commercial licensing, please contact support@quantumnous.com
 
 .fortune-oracle-fallback {
   object-fit: contain;
+  filter: grayscale(1) contrast(1.08) brightness(0.96);
+  mix-blend-mode: multiply;
+  opacity: 0.68;
+  transition: opacity 500ms ease;
+}
+
+.dark .fortune-oracle-fallback {
   filter: grayscale(1) contrast(1.16) brightness(0.82);
   mix-blend-mode: screen;
   opacity: 0.76;
-  transition: opacity 500ms ease;
 }
 
 .fortune-scene[data-fortune-ready='true'] .fortune-oracle-art {

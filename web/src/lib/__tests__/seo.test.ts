@@ -61,7 +61,7 @@ describe('SEO metadata', () => {
     ).toContain('index, follow')
     expect(
       document.querySelector('link[rel="canonical"]')?.getAttribute('href')
-    ).toBe('https://new-api.yozik.ru/docs')
+    ).toBe('https://new-api.errorclub.club/docs')
 
     applySeoMetadata('/wallet')
 

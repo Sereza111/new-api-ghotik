@@ -38,7 +38,7 @@ vi.mock('react-i18next', () => ({
   }),
 }))
 
-vi.mock('@/components/layout', () => ({
+vi.mock('@/components/layout/components/public-layout', () => ({
   PublicLayout: ({ children }: PropsWithChildren) => children,
 }))
 vi.mock('@/components/layout/components/footer', () => ({
@@ -79,6 +79,7 @@ describe('fortune atmosphere placement', () => {
     const { container } = render(<Home />)
     const surface = container.querySelector('.fortune-atmosphere-surface')
 
+    expect(surface?.tagName).toBe('MAIN')
     expect(surface).toContainElement(screen.getByTestId('fortune-atmosphere'))
     expect(screen.getAllByTestId('fortune-atmosphere')).toHaveLength(1)
   })

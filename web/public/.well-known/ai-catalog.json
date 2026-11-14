@@ -1,0 +1,29 @@
+{
+  "specVersion": "1.0",
+  "host": {
+    "displayName": "VL API",
+    "identifier": "did:web:new-api.errorclub.club",
+    "documentationUrl": "https://new-api.errorclub.club/docs"
+  },
+  "entries": [
+    {
+      "identifier": "urn:air:errorclub.club:api:vl-api",
+      "displayName": "VL API",
+      "type": "text/html",
+      "url": "https://new-api.errorclub.club/docs",
+      "description": "OpenAI-compatible gateway for text, image, audio and multimodal AI models.",
+      "tags": ["ai-api", "openai-compatible", "multimodal"],
+      "capabilities": [
+        "ChatCompletions",
+        "Responses",
+        "ImageGeneration",
+        "Embeddings",
+        "Audio"
+      ],
+      "representativeQueries": [
+        "How do I call VL API with an OpenAI-compatible SDK?",
+        "Which VL API models support image generation?"
+      ]
+    }
+  ]
+}

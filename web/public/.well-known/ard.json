@@ -1,0 +1,22 @@
+{
+  "entries": [
+    {
+      "@context": "https://agenticresourcediscovery.org/context/v1",
+      "identifier": "urn:air:errorclub.club:api:vl-api",
+      "displayName": "VL API",
+      "type": "text/html",
+      "url": "https://new-api.errorclub.club/docs",
+      "capabilities": [
+        "OpenAI-compatible API gateway",
+        "multi-provider model routing",
+        "usage and billing management"
+      ],
+      "description": "Documentation for the VL API gateway and its compatible model endpoints.",
+      "representativeQueries": [
+        "how do I connect an OpenAI-compatible client to VL API",
+        "which AI models are available through VL API",
+        "how do I create and manage a VL API key"
+      ]
+    }
+  ]
+}

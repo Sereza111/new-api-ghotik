@@ -19,15 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import { createFileRoute, redirect } from '@tanstack/react-router'
 
 import { SecuritySettings } from '@/features/system-settings/security'
-import {
-  SECURITY_DEFAULT_SECTION,
-  SECURITY_SECTION_IDS,
-} from '@/features/system-settings/security/section-registry.tsx'
 
 export const Route = createFileRoute(
   '/_authenticated/system-settings/security/$section'
 )({
-  beforeLoad: ({ params }) => {
+  beforeLoad: async ({ params }) => {
     if (params.section === 'sensitive-words') {
       throw redirect({
         to: '/system-settings/request-policies/$section',
@@ -35,6 +31,8 @@ export const Route = createFileRoute(
         replace: true,
       })
     }
+    const { SECURITY_DEFAULT_SECTION, SECURITY_SECTION_IDS } =
+      await import('@/features/system-settings/security/section-registry.tsx')
     const validSections = SECURITY_SECTION_IDS as unknown as string[]
     if (!validSections.includes(params.section)) {
       throw redirect({

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-const SITE_ORIGIN = 'https://new-api.yozik.ru'
+const SITE_ORIGIN = 'https://new-api.errorclub.club'
 const DEFAULT_DESCRIPTION =
   'VL API — единый шлюз к моделям GPT, Claude, Gemini, Grok и DeepSeek. Один API-ключ, прозрачные цены, пополнение баланса и статистика запросов.'
 

@@ -19,15 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import { createFileRoute, redirect } from '@tanstack/react-router'
 
 import { ModelSettings } from '@/features/system-settings/models'
-import {
-  MODELS_DEFAULT_SECTION,
-  MODELS_SECTION_IDS,
-} from '@/features/system-settings/models/section-registry.tsx'
 
 export const Route = createFileRoute(
   '/_authenticated/system-settings/models/$section'
 )({
-  beforeLoad: ({ params }) => {
+  beforeLoad: async ({ params }) => {
     if (params.section === 'channel-affinity') {
       throw redirect({
         to: '/system-settings/request-policies/$section',
@@ -42,6 +38,8 @@ export const Route = createFileRoute(
         replace: true,
       })
     }
+    const { MODELS_DEFAULT_SECTION, MODELS_SECTION_IDS } =
+      await import('@/features/system-settings/models/section-registry.tsx')
     const validSections = MODELS_SECTION_IDS as unknown as string[]
     if (!validSections.includes(params.section)) {
       throw redirect({

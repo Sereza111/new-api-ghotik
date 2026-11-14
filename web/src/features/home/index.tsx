@@ -19,8 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { PublicLayout } from '@/components/layout'
 import { Footer } from '@/components/layout/components/footer'
+import { PublicLayout } from '@/components/layout/components/public-layout'
 import { RichContent } from '@/components/rich-content'
 import { useTheme } from '@/context/theme-provider'
 import { isLikelyHtml } from '@/lib/content-format'
@@ -123,7 +123,7 @@ export function Home() {
 
   return (
     <PublicLayout showMainContainer={false} showFooter={false}>
-      <div className='vl-public-surface fortune-atmosphere-surface'>
+      <main className='vl-public-surface fortune-atmosphere-surface'>
         <FortuneAtmosphere />
         <div className='fortune-page-content'>
           <Hero isAuthenticated={isAuthenticated} />
@@ -132,7 +132,7 @@ export function Home() {
           <CTA isAuthenticated={isAuthenticated} />
           <Footer />
         </div>
-      </div>
+      </main>
     </PublicLayout>
   )
 }

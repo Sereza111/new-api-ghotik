@@ -250,6 +250,9 @@ func TestWebCacheHeadersDoNotLeakOntoPluginRoutes(t *testing.T) {
 	fallbackResponse := performPluginRequest(outer, http.MethodGet, "/unknown")
 	assert.Equal(t, "max-age=604800", fallbackResponse.Header().Get("Cache-Control"))
 	assert.NotEmpty(t, fallbackResponse.Header().Get("Cache-Version"))
+
+	staticResponse := performPluginRequest(outer, http.MethodGet, "/static/js/app.abc123.js")
+	assert.Equal(t, "public, max-age=31536000, immutable", staticResponse.Header().Get("Cache-Control"))
 }
 
 func TestPluginInnerContextImportsRequestMetadataAndTrustedProxyConfig(t *testing.T) {

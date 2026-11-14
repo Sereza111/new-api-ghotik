@@ -22,5 +22,6 @@ Disallow: /sign-up
 Disallow: /register
 Disallow: /reset
 
-Sitemap: https://new-api.yozik.ru/sitemap.xml
-Host: new-api.yozik.ru
+Sitemap: https://new-api.errorclub.club/sitemap.xml
+Host: new-api.errorclub.club
+Agentmap: https://new-api.errorclub.club/.well-known/ard.json

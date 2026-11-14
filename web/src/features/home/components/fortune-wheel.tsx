@@ -20,12 +20,14 @@ For commercial licensing, please contact support@quantumnous.com
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import fortuneReferenceUrl from '@/assets/fortune-reference.png'
+import fortuneReferenceUrl from '@/assets/fortune-reference.webp'
+import { useTheme } from '@/context/theme-provider'
 
 const ORBIT_MARKERS = Array.from({ length: 4 }, (_, index) => index)
 
 export function FortuneWheel() {
   const { t } = useTranslation()
+  const { resolvedTheme } = useTheme()
   const hostRef = useRef<HTMLElement>(null)
   const artRef = useRef<HTMLCanvasElement>(null)
   const [isReady, setIsReady] = useState(false)
@@ -33,12 +35,23 @@ export function FortuneWheel() {
   useEffect(() => {
     const host = hostRef.current
     const artCanvas = artRef.current
-    if (!host || !artCanvas || typeof WebGL2RenderingContext === 'undefined') {
+    const canAnimate = window.matchMedia(
+      '(min-width: 64rem) and (prefers-reduced-motion: no-preference)'
+    ).matches
+    if (
+      !host ||
+      !artCanvas ||
+      resolvedTheme !== 'dark' ||
+      !canAnimate ||
+      typeof WebGL2RenderingContext === 'undefined'
+    ) {
       return
     }
 
     let cancelled = false
     let started = false
+    let idleId: number | undefined
+    let timeoutId: ReturnType<typeof globalThis.setTimeout> | undefined
     let destroyScene: (() => void) | undefined
 
     const startScene = async () => {
@@ -66,7 +79,16 @@ export function FortuneWheel() {
         : new IntersectionObserver(
             ([entry]) => {
               if (entry?.isIntersecting) {
-                void startScene()
+                if ('requestIdleCallback' in window) {
+                  idleId = window.requestIdleCallback(() => void startScene(), {
+                    timeout: 3000,
+                  })
+                } else {
+                  timeoutId = globalThis.setTimeout(
+                    () => void startScene(),
+                    1200
+                  )
+                }
                 visibilityObserver?.disconnect()
               }
             },
@@ -74,14 +96,22 @@ export function FortuneWheel() {
           )
 
     if (visibilityObserver) visibilityObserver.observe(host)
-    else void startScene()
+    else if ('requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(() => void startScene(), {
+        timeout: 3000,
+      })
+    } else {
+      timeoutId = globalThis.setTimeout(() => void startScene(), 1200)
+    }
 
     return () => {
       cancelled = true
+      if (idleId !== undefined) window.cancelIdleCallback(idleId)
+      if (timeoutId !== undefined) globalThis.clearTimeout(timeoutId)
       visibilityObserver?.disconnect()
       destroyScene?.()
     }
-  }, [])
+  }, [resolvedTheme])
 
   return (
     <figure

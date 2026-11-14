@@ -16,24 +16,39 @@
       name="robots"
       content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
     />
-    <link rel="canonical" href="https://new-api.yozik.ru/" />
+    <link rel="canonical" href="https://new-api.errorclub.club/" />
+    <link rel="ard" href="/.well-known/ard.json" type="application/json" />
+    <link
+      rel="ai-catalog"
+      href="/.well-known/ai-catalog.json"
+      type="application/json"
+    />
 
-    <meta name="theme-color" content="#fff" />
+    <meta name="theme-color" content="#020817" />
     <!-- Resolve the theme before first paint so the page never flashes light
          and one-shot detectors (e.g. Dark Reader) see the real theme.
          Keep in sync with ThemeProvider and THEME_STORAGE_KEYS.mode. -->
     <script>
       ;(function () {
-        var theme = 'system'
+        var theme = 'dark'
         try {
-          theme = localStorage.getItem('newapi:theme:v1:mode') || 'system'
+          theme = localStorage.getItem('newapi:theme:v1:mode') || 'dark'
         } catch (e) {}
-        if (theme !== 'dark' && theme !== 'light') {
+        if (theme === 'system') {
           theme = window.matchMedia('(prefers-color-scheme: dark)').matches
             ? 'dark'
             : 'light'
+        } else if (theme !== 'dark' && theme !== 'light') {
+          theme = 'dark'
         }
         document.documentElement.classList.add(theme)
+        var themeColor = document.querySelector('meta[name="theme-color"]')
+        if (themeColor) {
+          themeColor.setAttribute(
+            'content',
+            theme === 'dark' ? '#020817' : '#fff'
+          )
+        }
       })()
     </script>
     <!--umami-->

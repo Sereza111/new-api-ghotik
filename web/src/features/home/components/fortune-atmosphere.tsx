@@ -19,28 +19,53 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useEffect, useRef } from 'react'
 
+import { useTheme } from '@/context/theme-provider'
+
 export function FortuneAtmosphere() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const { resolvedTheme } = useTheme()
 
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas || typeof WebGL2RenderingContext === 'undefined') return
+    const canAnimate = window.matchMedia(
+      '(min-width: 64rem) and (prefers-reduced-motion: no-preference)'
+    ).matches
+    if (
+      !canvas ||
+      resolvedTheme !== 'dark' ||
+      !canAnimate ||
+      typeof WebGL2RenderingContext === 'undefined'
+    ) {
+      return
+    }
 
     let cancelled = false
+    let idleId: number | undefined
+    let timeoutId: ReturnType<typeof globalThis.setTimeout> | undefined
     let destroyAtmosphere: (() => void) | undefined
 
-    void import('../lib/fortune-wheel-scene')
-      .then(({ createFortuneAtmosphere }) => {
-        if (cancelled) return
-        destroyAtmosphere = createFortuneAtmosphere({ canvas })
-      })
-      .catch(() => undefined)
+    const startAtmosphere = () => {
+      void import('../lib/fortune-wheel-scene')
+        .then(({ createFortuneAtmosphere }) => {
+          if (cancelled) return
+          destroyAtmosphere = createFortuneAtmosphere({ canvas })
+        })
+        .catch(() => undefined)
+    }
+
+    if ('requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(startAtmosphere, { timeout: 3000 })
+    } else {
+      timeoutId = globalThis.setTimeout(startAtmosphere, 1200)
+    }
 
     return () => {
       cancelled = true
+      if (idleId !== undefined) window.cancelIdleCallback(idleId)
+      if (timeoutId !== undefined) globalThis.clearTimeout(timeoutId)
       destroyAtmosphere?.()
     }
-  }, [])
+  }, [resolvedTheme])
 
   return (
     <canvas

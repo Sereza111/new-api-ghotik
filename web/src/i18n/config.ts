@@ -16,37 +16,63 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import i18n from 'i18next'
+import i18n, { type BackendModule } from 'i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import { initReactI18next } from 'react-i18next'
 
-import { convertDetectedLanguage } from './languages'
-import en from './locales/en.json'
-import fr from './locales/fr.json'
-import ja from './locales/ja.json'
-import ru from './locales/ru.json'
-import vi from './locales/vi.json'
-import zhTW from './locales/zh-TW.json'
-import zhCN from './locales/zh.json'
+import {
+  convertDetectedLanguage,
+  INTERFACE_LANGUAGE_OPTIONS,
+  normalizeInterfaceLanguage,
+  type InterfaceLanguageCode,
+} from './languages'
 
-export const resources = {
-  en,
-  zhCN,
-  fr,
-  ru,
-  ja,
-  vi,
-  zhTW,
-} as const
+type LocaleResource = {
+  translation: Record<string, string>
+}
 
-i18n
+const localeLoaders: Record<
+  InterfaceLanguageCode,
+  () => Promise<{ default: LocaleResource }>
+> = {
+  en: () => import('./locales/en.json'),
+  zhCN: () => import('./locales/zh.json'),
+  fr: () => import('./locales/fr.json'),
+  ru: () => import('./locales/ru.json'),
+  ja: () => import('./locales/ja.json'),
+  vi: () => import('./locales/vi.json'),
+  zhTW: () => import('./locales/zh-TW.json'),
+}
+
+const localeBackend: BackendModule = {
+  type: 'backend',
+  init() {},
+  async read(language, _namespace, callback) {
+    const code = normalizeInterfaceLanguage(language) as InterfaceLanguageCode
+    try {
+      const module = await localeLoaders[code]()
+      callback(null, module.default.translation)
+    } catch (error: unknown) {
+      callback(
+        error instanceof Error
+          ? error
+          : new Error(`Unable to load locale: ${code}`),
+        false
+      )
+    }
+  },
+}
+
+export const i18nReady = i18n
   .use(LanguageDetector)
+  .use(localeBackend)
   .use(initReactI18next)
   .init({
-    resources,
     fallbackLng: 'en',
-    supportedLngs: ['en', 'zhCN', 'fr', 'ru', 'ja', 'vi', 'zhTW'],
+    supportedLngs: INTERFACE_LANGUAGE_OPTIONS.map(({ code }) => code),
     load: 'currentOnly',
+    defaultNS: 'translation',
+    ns: ['translation'],
     nsSeparator: false, // Allow literal colons in keys (e.g., URLs, labels)
     debug: import.meta.env.DEV,
     interpolation: {
