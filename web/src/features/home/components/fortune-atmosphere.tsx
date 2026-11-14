@@ -21,9 +21,12 @@ import { useEffect, useRef } from 'react'
 
 import { useTheme } from '@/context/theme-provider'
 
+import { useVisualEffectsReady } from '../hooks/use-visual-effects-ready'
+
 export function FortuneAtmosphere() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const { resolvedTheme } = useTheme()
+  const visualEffectsReady = useVisualEffectsReady()
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -32,6 +35,7 @@ export function FortuneAtmosphere() {
     ).matches
     if (
       !canvas ||
+      !visualEffectsReady ||
       resolvedTheme !== 'dark' ||
       !canAnimate ||
       typeof WebGL2RenderingContext === 'undefined'
@@ -65,7 +69,7 @@ export function FortuneAtmosphere() {
       if (timeoutId !== undefined) globalThis.clearTimeout(timeoutId)
       destroyAtmosphere?.()
     }
-  }, [resolvedTheme])
+  }, [resolvedTheme, visualEffectsReady])
 
   return (
     <canvas

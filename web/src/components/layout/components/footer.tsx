@@ -261,7 +261,7 @@ export function Footer(props: FooterProps) {
             <Link to='/' className='group flex items-center gap-2.5'>
               <img
                 src={displayLogo}
-                alt={displayName}
+                alt=''
                 className='size-7 rounded-lg object-contain'
               />
               <span className='text-sm font-semibold tracking-tight'>

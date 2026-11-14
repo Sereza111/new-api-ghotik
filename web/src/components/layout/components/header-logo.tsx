@@ -32,7 +32,7 @@ interface HeaderLogoProps {
  */
 export function HeaderLogo({
   src,
-  alt = 'logo',
+  alt = '',
   loading,
   logoLoaded,
   className,

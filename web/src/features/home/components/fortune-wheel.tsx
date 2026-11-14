@@ -20,8 +20,11 @@ For commercial licensing, please contact support@quantumnous.com
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import fortuneReferenceAvifUrl from '@/assets/fortune-reference.avif'
 import fortuneReferenceUrl from '@/assets/fortune-reference.webp'
 import { useTheme } from '@/context/theme-provider'
+
+import { useVisualEffectsReady } from '../hooks/use-visual-effects-ready'
 
 const ORBIT_MARKERS = Array.from({ length: 4 }, (_, index) => index)
 
@@ -31,6 +34,7 @@ export function FortuneWheel() {
   const hostRef = useRef<HTMLElement>(null)
   const artRef = useRef<HTMLCanvasElement>(null)
   const [isReady, setIsReady] = useState(false)
+  const visualEffectsReady = useVisualEffectsReady()
 
   useEffect(() => {
     const host = hostRef.current
@@ -41,6 +45,7 @@ export function FortuneWheel() {
     if (
       !host ||
       !artCanvas ||
+      !visualEffectsReady ||
       resolvedTheme !== 'dark' ||
       !canAnimate ||
       typeof WebGL2RenderingContext === 'undefined'
@@ -111,7 +116,7 @@ export function FortuneWheel() {
       visibilityObserver?.disconnect()
       destroyScene?.()
     }
-  }, [resolvedTheme])
+  }, [resolvedTheme, visualEffectsReady])
 
   return (
     <figure
@@ -144,12 +149,17 @@ export function FortuneWheel() {
       </div>
 
       <div className='fortune-living-engraving' aria-hidden='true'>
-        <img
-          data-testid='fortune-wheel-fallback'
-          className='fortune-oracle-fallback'
-          src={fortuneReferenceUrl}
-          alt=''
-        />
+        <picture>
+          <source srcSet={fortuneReferenceAvifUrl} type='image/avif' />
+          <img
+            data-testid='fortune-wheel-fallback'
+            className='fortune-oracle-fallback'
+            src={fortuneReferenceUrl}
+            width='353'
+            height='550'
+            alt=''
+          />
+        </picture>
         <canvas
           ref={artRef}
           data-testid='fortune-wheel-art'
