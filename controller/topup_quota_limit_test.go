@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -92,6 +93,91 @@ func TestValidateTopUpQuotaReturnsMaximumAmount(t *testing.T) {
 	require.NoError(t, err)
 	_, err = validateTopUpQuota(maxAmount + 1)
 	require.EqualError(t, err, fmt.Sprintf("Top-up amount cannot exceed %d", maxAmount))
+}
+
+func TestTopUpPriceAppliesReferralLevelDiscount(t *testing.T) {
+	oldDB := model.DB
+	oldPrice := operation_setting.Price
+	oldCryptoPayUnitPrice := setting.CryptoPayUnitPrice
+	oldWaffoUnitPrice := setting.WaffoUnitPrice
+	oldWaffoPancakeUnitPrice := setting.WaffoPancakeUnitPrice
+	oldUSDExchangeRate := operation_setting.USDExchangeRate
+	oldDisplayType := operation_setting.GetGeneralSetting().QuotaDisplayType
+	oldDiscounts := operation_setting.GetPaymentSetting().AmountDiscount
+	oldGroupRatios := common.TopupGroupRatio2JSONString()
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.ReferralReward{}))
+	model.DB = db
+	operation_setting.Price = 1
+	setting.CryptoPayUnitPrice = 1
+	setting.WaffoUnitPrice = 1
+	setting.WaffoPancakeUnitPrice = 1
+	operation_setting.USDExchangeRate = 1
+	operation_setting.GetGeneralSetting().QuotaDisplayType = operation_setting.QuotaDisplayTypeUSD
+	operation_setting.GetPaymentSetting().AmountDiscount = map[int]float64{}
+	require.NoError(t, common.UpdateTopupGroupRatioByJSONString(`{"default":1}`))
+
+	t.Cleanup(func() {
+		model.DB = oldDB
+		operation_setting.Price = oldPrice
+		setting.CryptoPayUnitPrice = oldCryptoPayUnitPrice
+		setting.WaffoUnitPrice = oldWaffoUnitPrice
+		setting.WaffoPancakeUnitPrice = oldWaffoPancakeUnitPrice
+		operation_setting.USDExchangeRate = oldUSDExchangeRate
+		operation_setting.GetGeneralSetting().QuotaDisplayType = oldDisplayType
+		operation_setting.GetPaymentSetting().AmountDiscount = oldDiscounts
+		require.NoError(t, common.UpdateTopupGroupRatioByJSONString(oldGroupRatios))
+		sqlDB, dbErr := db.DB()
+		if dbErr == nil {
+			require.NoError(t, sqlDB.Close())
+		}
+	})
+
+	const userId = 700
+	priceCalculators := map[string]func(int) float64{
+		"epay": func(id int) float64 {
+			return getPayMoney(100, "default", id)
+		},
+		"crypto pay": func(id int) float64 {
+			return getCryptoPayMoney(100, "default", id)
+		},
+		"platega": func(id int) float64 {
+			price, priceErr := getPlategaMoney(100, "default", id)
+			require.NoError(t, priceErr)
+			return price.InexactFloat64()
+		},
+		"waffo": func(id int) float64 {
+			return getWaffoPayMoney(100, "default", id)
+		},
+		"waffo pancake": func(id int) float64 {
+			return getWaffoPancakePayMoney(100, "default", id)
+		},
+	}
+	for name, calculate := range priceCalculators {
+		t.Run(name+" without referral level", func(t *testing.T) {
+			assert.InDelta(t, 100, calculate(userId), 0.000001)
+		})
+	}
+
+	rewards := make([]model.ReferralReward, 50)
+	for index := range rewards {
+		rewards[index] = model.ReferralReward{
+			InviterId:  userId,
+			InviteeId:  1000 + index,
+			RewardType: model.ReferralRewardTypeTelegramSubscription,
+			SourceId:   2000 + index,
+			Status:     model.ReferralRewardStatusAvailable,
+		}
+	}
+	require.NoError(t, db.Create(&rewards).Error)
+
+	for name, calculate := range priceCalculators {
+		t.Run(name+" with gold referral level", func(t *testing.T) {
+			assert.InDelta(t, 97, calculate(userId), 0.000001)
+		})
+	}
 }
 
 func TestRequestAmountRejectsTopUpThatCannotBeSettled(t *testing.T) {

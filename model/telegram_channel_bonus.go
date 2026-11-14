@@ -54,6 +54,7 @@ func ClaimTelegramChannelBonus(telegramId string, channel string, quota int) (*T
 
 	bonus := &TelegramChannelBonus{}
 	userId := 0
+	alreadyClaimed := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var user User
 		if err := lockForUpdate(tx).Where("telegram_id = ?", telegramId).First(&user).Error; err != nil {
@@ -66,14 +67,18 @@ func ClaimTelegramChannelBonus(telegramId string, channel string, quota int) (*T
 			return ErrTelegramChannelBonusUserDisabled
 		}
 
-		var existing int64
-		if err := tx.Model(&TelegramChannelBonus{}).
+		var existingBonus TelegramChannelBonus
+		if err := lockForUpdate(tx).
 			Where("user_id = ? OR telegram_id = ?", user.Id, telegramId).
-			Count(&existing).Error; err != nil {
+			First(&existingBonus).Error; err == nil {
+			*bonus = existingBonus
+			if err := reconcileTelegramReferralRewardWithTx(tx, &user, bonus); err != nil {
+				return err
+			}
+			alreadyClaimed = true
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
-		}
-		if existing > 0 {
-			return ErrTelegramChannelBonusAlreadyClaimed
 		}
 
 		*bonus = TelegramChannelBonus{
@@ -84,6 +89,9 @@ func ClaimTelegramChannelBonus(telegramId string, channel string, quota int) (*T
 			CreatedAt:    time.Now().Unix(),
 		}
 		if err := tx.Create(bonus).Error; err != nil {
+			return err
+		}
+		if err := createTelegramReferralRewardWithTx(tx, &user, bonus); err != nil {
 			return err
 		}
 
@@ -101,6 +109,9 @@ func ClaimTelegramChannelBonus(telegramId string, channel string, quota int) (*T
 	})
 	if err != nil {
 		return nil, err
+	}
+	if alreadyClaimed {
+		return bonus, ErrTelegramChannelBonusAlreadyClaimed
 	}
 
 	syncCreditUserQuotaCache(userId, quota, "telegram channel bonus")
@@ -135,7 +146,15 @@ func RevokeTelegramChannelBonus(
 			Where("user_id = ? AND channel = ? AND revoked_at = ? AND created_at BETWEEN ? AND ?", user.Id, channel, 0, cutoff, now.Unix()).
 			First(bonus).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil
+				if err := lockForUpdate(tx).
+					Where("user_id = ? AND channel = ? AND revoked_at <> ?", user.Id, channel, 0).
+					First(bonus).Error; err != nil {
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						return nil
+					}
+					return err
+				}
+				return reconcileTelegramReferralRewardWithTx(tx, &user, bonus)
 			}
 			return err
 		}
@@ -152,14 +171,17 @@ func RevokeTelegramChannelBonus(
 		if result.RowsAffected != 1 {
 			return nil
 		}
+		bonus.RevokedAt = now.Unix()
+		bonus.RevocationReason = "left_channel"
+		if err := reconcileTelegramReferralRewardWithTx(tx, &user, bonus); err != nil {
+			return err
+		}
 
 		if err := tx.Model(&User{}).
 			Where("id = ?", user.Id).
 			Update("quota", gorm.Expr("quota - ?", bonus.QuotaAwarded)).Error; err != nil {
 			return err
 		}
-		bonus.RevokedAt = now.Unix()
-		bonus.RevocationReason = "left_channel"
 		userId = user.Id
 		return nil
 	})

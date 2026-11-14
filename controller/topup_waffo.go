@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 	"github.com/thanhpk/randstr"
 	waffo "github.com/waffo-com/waffo-go"
 	"github.com/waffo-com/waffo-go/config"
@@ -86,7 +87,7 @@ func formatWaffoAmount(amount float64, currency string) string {
 // getWaffoPayMoney converts the user-facing amount to USD for Waffo payment.
 // Waffo only accepts USD, so this function handles the conversion from different
 // display types (USD/CNY/TOKENS) to the actual USD amount to charge.
-func getWaffoPayMoney(amount float64, group string) float64 {
+func getWaffoPayMoney(amount float64, group string, userId int) float64 {
 	originalAmount := amount
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
 		amount = amount / common.QuotaPerUnit
@@ -101,7 +102,12 @@ func getWaffoPayMoney(amount float64, group string) float64 {
 			discount = ds
 		}
 	}
-	return amount * setting.WaffoUnitPrice * topupGroupRatio * discount
+	return decimal.NewFromFloat(amount).
+		Mul(decimal.NewFromFloat(setting.WaffoUnitPrice)).
+		Mul(decimal.NewFromFloat(topupGroupRatio)).
+		Mul(decimal.NewFromFloat(discount)).
+		Mul(referralTopUpDiscountMultiplier(userId)).
+		InexactFloat64()
 }
 
 type WaffoPayRequest struct {
@@ -134,7 +140,7 @@ func RequestWaffoAmount(c *gin.Context) {
 		return
 	}
 
-	payMoney := getWaffoPayMoney(float64(req.Amount), group)
+	payMoney := getWaffoPayMoney(float64(req.Amount), group, id)
 	if payMoney <= 0.01 {
 		paymentError(c, common.NewMessage("Payment amount is too low"))
 		return
@@ -204,7 +210,7 @@ func RequestWaffoPay(c *gin.Context) {
 	// resolvedPayMethodType/Name 为空时，Waffo 自动选择支付方式
 
 	group, _ := model.GetUserGroup(id, true)
-	payMoney := getWaffoPayMoney(float64(req.Amount), group)
+	payMoney := getWaffoPayMoney(float64(req.Amount), group, id)
 	if payMoney < 0.01 {
 		paymentError(c, common.NewMessage("Payment amount is too low"))
 		return

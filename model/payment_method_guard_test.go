@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -215,6 +216,56 @@ func TestRechargeEpayCreditsQuotaExactlyOnce(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, alreadyDone)
 	assert.Equal(t, 2*500000, getUserQuotaForPaymentGuardTest(t, user.Id))
+}
+
+func TestRechargeEpayCreditsReferralCommissionExactlyOnce(t *testing.T) {
+	truncateTables(t)
+	enableReferralRewardsForTest(t)
+
+	oldQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 500000
+	t.Cleanup(func() { common.QuotaPerUnit = oldQuotaPerUnit })
+	setting.ReferralTopUpRewardPercent = 5
+
+	inviter := User{
+		Username: "epay-referral-inviter",
+		Status:   common.UserStatusEnabled,
+		AffCode:  "epay-referral-inviter",
+	}
+	require.NoError(t, DB.Create(&inviter).Error)
+	invitee := User{
+		Username:  "epay-referral-invitee",
+		Status:    common.UserStatusEnabled,
+		AffCode:   "epay-referral-invitee",
+		InviterId: inviter.Id,
+	}
+	require.NoError(t, DB.Create(&invitee).Error)
+	order := createEpayTestOrder(t, invitee.Id, "EPAYREFERRALONCE", PaymentProviderEpay, common.TopUpStatusPending)
+
+	alreadyDone, err := RechargeEpay(order.TradeNo, "alipay", "127.0.0.1")
+	require.NoError(t, err)
+	assert.False(t, alreadyDone)
+
+	alreadyDone, err = RechargeEpay(order.TradeNo, "alipay", "127.0.0.1")
+	require.NoError(t, err)
+	assert.True(t, alreadyDone)
+
+	var reloadedInviter User
+	require.NoError(t, DB.First(&reloadedInviter, inviter.Id).Error)
+	assert.Equal(t, 50_000, reloadedInviter.AffQuota)
+	assert.Equal(t, 50_000, reloadedInviter.AffHistoryQuota)
+
+	var rewards []ReferralReward
+	require.NoError(t, DB.Where(
+		"reward_type = ? AND source_id = ?",
+		ReferralRewardTypeTopUpCommission,
+		order.Id,
+	).Find(&rewards).Error)
+	require.Len(t, rewards, 1)
+	assert.Equal(t, invitee.Id, rewards[0].InviteeId)
+	assert.Equal(t, 1_000_000, rewards[0].BasisQuota)
+	assert.Equal(t, 500, rewards[0].RateBps)
+	assert.Equal(t, 50_000, rewards[0].RewardQuota)
 }
 
 func TestRechargeCryptoPayValidatesAmountAndCreditsExactlyOnce(t *testing.T) {

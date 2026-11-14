@@ -97,7 +97,7 @@ func TestGetPlategaMoneyConvertsWalletUSDToRUB(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			actual, err := getPlategaMoney(tc.amount, tc.group)
+			actual, err := getPlategaMoney(tc.amount, tc.group, 0)
 			require.NoError(t, err)
 			assert.True(t, tc.expected.Equal(actual), "expected %s, got %s", tc.expected, actual)
 		})

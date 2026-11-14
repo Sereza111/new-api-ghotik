@@ -44,6 +44,7 @@ function Fixture() {
             QuotaForNewUser: 0,
             QuotaForInviter: 0,
             QuotaForInvitee: 0,
+            ReferralTopUpRewardPercent: 5,
             TopUpLink: '',
             quota_setting: {
               enable_free_model_pre_consume: true,
@@ -128,6 +129,24 @@ test('zero threshold disables bypass and saves as zero', async () => {
     expect(api.put).toHaveBeenCalledWith('/api/option/', {
       key: 'quota_setting.trust_quota_usd',
       value: 0,
+    })
+  )
+})
+
+test('referral top-up reward accepts a decimal percentage and saves it', async () => {
+  const user = userEvent.setup()
+  await renderSettings()
+  const input = screen.getByRole('spinbutton', {
+    name: 'Referral top-up reward (%)',
+  })
+  expect(input).toHaveValue(5)
+  await user.clear(input)
+  await user.type(input, '7.5')
+  await user.click(screen.getByRole('button', { name: 'Save Changes' }))
+  await waitFor(() =>
+    expect(api.put).toHaveBeenCalledWith('/api/option/', {
+      key: 'ReferralTopUpRewardPercent',
+      value: 7.5,
     })
   )
 })

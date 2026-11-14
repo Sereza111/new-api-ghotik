@@ -194,7 +194,28 @@ func GetEpayClient() *epay.Client {
 	return withUrl
 }
 
-func getPayMoney(amount int64, group string) float64 {
+func referralTopUpDiscountMultiplier(userId int) decimal.Decimal {
+	if userId <= 0 {
+		return decimal.NewFromInt(1)
+	}
+	level, err := model.GetUserReferralLevel(userId)
+	if err != nil {
+		common.SysError(common.LogText("failed to resolve referral level for top-up user_id=%d: %s", userId, err.Error()))
+		return decimal.NewFromInt(1)
+	}
+	discount := level.TopUpFeeDiscountPercent
+	if discount <= 0 {
+		return decimal.NewFromInt(1)
+	}
+	if discount >= 100 {
+		return decimal.Zero
+	}
+	return decimal.NewFromInt(100).
+		Sub(decimal.NewFromFloat(discount)).
+		Div(decimal.NewFromInt(100))
+}
+
+func getPayMoney(amount int64, group string, userId int) float64 {
 	dAmount := decimal.NewFromInt(amount)
 	// 充值金额以“展示类型”为准：
 	// - USD/CNY: 前端传 amount 为金额单位；TOKENS: 前端传 tokens，需要换成 USD 金额
@@ -219,7 +240,11 @@ func getPayMoney(amount int64, group string) float64 {
 	}
 	dDiscount := decimal.NewFromFloat(discount)
 
-	payMoney := dAmount.Mul(dPrice).Mul(dTopupGroupRatio).Mul(dDiscount)
+	payMoney := dAmount.
+		Mul(dPrice).
+		Mul(dTopupGroupRatio).
+		Mul(dDiscount).
+		Mul(referralTopUpDiscountMultiplier(userId))
 
 	return payMoney.InexactFloat64()
 }
@@ -347,7 +372,7 @@ func RequestEpay(c *gin.Context) {
 		paymentError(c, common.NewMessage("Failed to get the user group"))
 		return
 	}
-	payMoney := getPayMoney(req.Amount, group)
+	payMoney := getPayMoney(req.Amount, group, id)
 	if payMoney < 0.01 {
 		paymentError(c, common.NewMessage("Payment amount is too low"))
 		return
@@ -563,7 +588,7 @@ func RequestAmount(c *gin.Context) {
 		paymentError(c, common.NewMessage("Failed to get the user group"))
 		return
 	}
-	payMoney := getPayMoney(req.Amount, group)
+	payMoney := getPayMoney(req.Amount, group, id)
 	if payMoney <= 0.01 {
 		paymentError(c, common.NewMessage("Payment amount is too low"))
 		return

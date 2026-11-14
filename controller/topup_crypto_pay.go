@@ -93,7 +93,7 @@ func normalizeCryptoPayAssets(value string) string {
 	return strings.Join(assets, ",")
 }
 
-func getCryptoPayMoney(amount int64, group string) float64 {
+func getCryptoPayMoney(amount int64, group string, userId int) float64 {
 	if common.QuotaPerUnit <= 0 || setting.CryptoPayUnitPrice <= 0 ||
 		math.IsNaN(setting.CryptoPayUnitPrice) || math.IsInf(setting.CryptoPayUnitPrice, 0) {
 		return 0
@@ -115,6 +115,7 @@ func getCryptoPayMoney(amount int64, group string) float64 {
 		Mul(decimal.NewFromFloat(setting.CryptoPayUnitPrice)).
 		Mul(decimal.NewFromFloat(topupGroupRatio)).
 		Mul(decimal.NewFromFloat(discount)).
+		Mul(referralTopUpDiscountMultiplier(userId)).
 		Round(2).
 		InexactFloat64()
 }
@@ -173,7 +174,7 @@ func RequestCryptoPayAmount(c *gin.Context) {
 		common.ApiErrorMsg(c, "Failed to get user group")
 		return
 	}
-	payMoney := getCryptoPayMoney(req.Amount, group)
+	payMoney := getCryptoPayMoney(req.Amount, group, id)
 	if payMoney < 0.01 {
 		common.ApiErrorMsg(c, "Payment amount is too low")
 		return
@@ -204,7 +205,7 @@ func RequestCryptoPay(c *gin.Context) {
 		common.ApiErrorMsg(c, "Failed to get user group")
 		return
 	}
-	payMoney := getCryptoPayMoney(req.Amount, group)
+	payMoney := getCryptoPayMoney(req.Amount, group, id)
 	if payMoney < 0.01 {
 		common.ApiErrorMsg(c, "Payment amount is too low")
 		return

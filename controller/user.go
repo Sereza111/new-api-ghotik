@@ -464,6 +464,27 @@ func GetAffCode(c *gin.Context) {
 	return
 }
 
+func GetReferralOverview(c *gin.Context) {
+	overview, err := model.GetReferralOverview(c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, overview)
+}
+
+func GetReferralRewards(c *gin.Context) {
+	page := common.GetPageQuery(c)
+	items, total, err := model.ListReferralRewards(c.GetInt("id"), page.GetStartIdx(), page.GetPageSize())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	page.SetItems(items)
+	page.SetTotal(total)
+	common.ApiSuccess(c, page)
+}
+
 func GetSelf(c *gin.Context) {
 	id := c.GetInt("id")
 	userRole := c.GetInt("role")

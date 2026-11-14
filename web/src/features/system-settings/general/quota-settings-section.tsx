@@ -55,6 +55,7 @@ const quotaSchema = z.object({
   QuotaForNewUser: z.coerce.number().min(0),
   QuotaForInviter: z.coerce.number().min(0),
   QuotaForInvitee: z.coerce.number().min(0),
+  ReferralTopUpRewardPercent: z.coerce.number().min(0).max(100),
   TopUpLink: z.string(),
   quota_setting: z.object({
     enable_free_model_pre_consume: z.boolean(),
@@ -242,10 +243,39 @@ export function QuotaSettingsSection({
                   </FormControl>
                   <FormDescription>
                     {t(
-                      'Quota given to users who invite others ({{formattedQuota}})',
+                      'Reward available to the inviter after the invited user confirms the required Telegram channel subscription ({{formattedQuota}})',
                       {
                         formattedQuota: formatQuotaInputValue(field.value),
                       }
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='ReferralTopUpRewardPercent'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Referral top-up reward (%)')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      min={0}
+                      max={100}
+                      step='any'
+                      value={field.value ?? ''}
+                      onChange={field.onChange}
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      ref={field.ref}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      "Percentage of an invited user's successful wallet top-up credited to the inviter."
                     )}
                   </FormDescription>
                   <FormMessage />

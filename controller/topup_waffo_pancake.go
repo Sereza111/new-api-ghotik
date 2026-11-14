@@ -44,7 +44,7 @@ func RequestWaffoPancakeAmount(c *gin.Context) {
 		return
 	}
 
-	payMoney := getWaffoPancakePayMoney(req.Amount, group)
+	payMoney := getWaffoPancakePayMoney(req.Amount, group, id)
 	if payMoney <= 0.01 {
 		paymentError(c, common.NewMessage("Payment amount is too low"))
 		return
@@ -53,7 +53,7 @@ func RequestWaffoPancakeAmount(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "success", "data": fmt.Sprintf("%.2f", payMoney)})
 }
 
-func getWaffoPancakePayMoney(amount int64, group string) float64 {
+func getWaffoPancakePayMoney(amount int64, group string, userId int) float64 {
 	dAmount := decimal.NewFromInt(amount)
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
 		dAmount = dAmount.Div(decimal.NewFromFloat(common.QuotaPerUnit))
@@ -72,7 +72,8 @@ func getWaffoPancakePayMoney(amount int64, group string) float64 {
 	payMoney := dAmount.
 		Mul(decimal.NewFromFloat(setting.WaffoPancakeUnitPrice)).
 		Mul(decimal.NewFromFloat(topupGroupRatio)).
-		Mul(decimal.NewFromFloat(discount))
+		Mul(decimal.NewFromFloat(discount)).
+		Mul(referralTopUpDiscountMultiplier(userId))
 
 	return payMoney.InexactFloat64()
 }
@@ -371,7 +372,7 @@ func RequestWaffoPancakePay(c *gin.Context) {
 		return
 	}
 
-	payMoney := getWaffoPancakePayMoney(req.Amount, group)
+	payMoney := getWaffoPancakePayMoney(req.Amount, group, id)
 	if payMoney < 0.01 {
 		paymentError(c, common.NewMessage("Payment amount is too low"))
 		return

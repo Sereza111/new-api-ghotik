@@ -211,8 +211,13 @@ func UpdateOption(c *gin.Context) {
 			"message": "reseller commercial settings must be updated together through /api/option/reseller",
 		})
 		return
-	case "QuotaForInviter", "QuotaForInvitee":
-		if isPositiveOptionValue(option.Value.(string)) && !operation_setting.IsPaymentComplianceConfirmed() {
+	case "QuotaForInviter", "QuotaForInvitee", "ReferralTopUpRewardPercent":
+		positive := isPositiveOptionValue(option.Value.(string))
+		if option.Key == "ReferralTopUpRewardPercent" {
+			percent, parseErr := strconv.ParseFloat(strings.TrimSpace(option.Value.(string)), 64)
+			positive = parseErr == nil && percent > 0
+		}
+		if positive && !operation_setting.IsPaymentComplianceConfirmed() {
 			common.ApiErrorT(c, "Payment, redemption, subscription, and invitation reward features are disabled. The administrator must confirm compliance terms before enabling them.")
 			return
 		}

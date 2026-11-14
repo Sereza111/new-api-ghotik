@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -8,13 +9,17 @@ import (
 	"testing"
 
 	"github.com/Calcium-Ion/go-epay/epay"
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stripe/stripe-go/v81/webhook"
+	"gorm.io/gorm"
 )
 
 func confirmPaymentComplianceForTest(t *testing.T) {
@@ -51,6 +56,62 @@ func TestStripeWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 
 	setting.StripePriceId = ""
 	require.False(t, isStripeWebhookEnabled())
+}
+
+func TestStripeWebhookRequestsRetryWhenReferralSettlementRollsBack(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	confirmPaymentComplianceForTest(t)
+	originalDB := model.DB
+	originalAPISecret := setting.StripeApiSecret
+	originalWebhookSecret := setting.StripeWebhookSecret
+	originalPriceID := setting.StripePriceId
+	t.Cleanup(func() {
+		model.DB = originalDB
+		setting.StripeApiSecret = originalAPISecret
+		setting.StripeWebhookSecret = originalWebhookSecret
+		setting.StripePriceId = originalPriceID
+	})
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.TopUp{}, &model.SubscriptionOrder{}, &model.ReferralReward{}))
+	model.DB = db
+	setting.StripeApiSecret = "sk_test_referral"
+	setting.StripeWebhookSecret = "whsec_referral"
+	setting.StripePriceId = "price_referral"
+
+	inviter := model.User{Username: "stripe-inviter", Status: common.UserStatusEnabled, AffCode: "stripe-inviter"}
+	require.NoError(t, db.Create(&inviter).Error)
+	invitee := model.User{Username: "stripe-invitee", Status: common.UserStatusEnabled, AffCode: "stripe-invitee", InviterId: inviter.Id}
+	require.NoError(t, db.Create(&invitee).Error)
+	topUp := model.TopUp{
+		UserId: invitee.Id, Amount: 1, Money: 1, TradeNo: "stripe-referral-retry",
+		PaymentProvider: model.PaymentProviderStripe, Status: common.TopUpStatusPending,
+	}
+	require.NoError(t, db.Create(&topUp).Error)
+
+	callbackName := "test:stripe-referral-ledger-failure"
+	require.NoError(t, db.Callback().Create().Before("gorm:create").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "referral_rewards" {
+			tx.AddError(errors.New("referral ledger unavailable"))
+		}
+	}))
+	t.Cleanup(func() { _ = db.Callback().Create().Remove(callbackName) })
+
+	payload := []byte(`{"id":"evt_referral","type":"checkout.session.completed","data":{"object":{"client_reference_id":"stripe-referral-retry","customer":"cus_referral","status":"complete","payment_status":"paid","amount_total":100,"currency":"usd"}}}`)
+	signed := webhook.GenerateTestSignedPayload(&webhook.UnsignedPayload{Payload: payload, Secret: setting.StripeWebhookSecret})
+	request := httptest.NewRequest(http.MethodPost, "/api/stripe/webhook", strings.NewReader(string(payload)))
+	request.Header.Set("Stripe-Signature", signed.Header)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = request
+
+	StripeWebhook(context)
+
+	assert.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	var reloaded model.TopUp
+	require.NoError(t, db.First(&reloaded, topUp.Id).Error)
+	assert.Equal(t, common.TopUpStatusPending, reloaded.Status)
 }
 
 func TestCreemWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {

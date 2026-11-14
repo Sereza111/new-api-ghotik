@@ -69,7 +69,7 @@ func plategaPaymentMethodName(methodID int) string {
 	return ""
 }
 
-func getPlategaMoney(amount int64, group string) (decimal.Decimal, error) {
+func getPlategaMoney(amount int64, group string, userId int) (decimal.Decimal, error) {
 	if operation_setting.USDExchangeRate <= 0 ||
 		math.IsNaN(operation_setting.USDExchangeRate) ||
 		math.IsInf(operation_setting.USDExchangeRate, 0) {
@@ -96,6 +96,7 @@ func getPlategaMoney(amount int64, group string) (decimal.Decimal, error) {
 	amountRUB := amountUSD.
 		Mul(decimal.NewFromFloat(topupGroupRatio)).
 		Mul(decimal.NewFromFloat(discount)).
+		Mul(referralTopUpDiscountMultiplier(userId)).
 		Mul(decimal.NewFromFloat(operation_setting.USDExchangeRate)).
 		Round(2)
 	if amountRUB.LessThan(decimal.NewFromInt(1)) {
@@ -157,7 +158,7 @@ func RequestPlategaAmount(c *gin.Context) {
 		common.ApiErrorMsg(c, "Failed to get user group")
 		return
 	}
-	amountRUB, err := getPlategaMoney(req.Amount, group)
+	amountRUB, err := getPlategaMoney(req.Amount, group, userID)
 	if err != nil {
 		common.ApiErrorMsg(c, err.Error())
 		return
@@ -195,7 +196,7 @@ func RequestPlatega(c *gin.Context) {
 		common.ApiErrorMsg(c, "Failed to get user group")
 		return
 	}
-	amountRUB, err := getPlategaMoney(req.Amount, group)
+	amountRUB, err := getPlategaMoney(req.Amount, group, userID)
 	if err != nil {
 		common.ApiErrorMsg(c, err.Error())
 		return

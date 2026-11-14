@@ -91,6 +91,8 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"POST /api/user/passkey/verify/finish":          accessTokenAnyRule,
 	"DELETE /api/user/passkey":                      accessTokenScopeRule("account_security:write"),
 	"GET /api/user/aff":                             accessTokenScopeRule("wallet:read"),
+	"GET /api/user/referral/overview":               accessTokenScopeRule("wallet:read"),
+	"GET /api/user/referral/rewards":                accessTokenScopeRule("wallet:read"),
 	"GET /api/user/topup/info":                      accessTokenScopeRule("wallet:read"),
 	"GET /api/user/topup/self":                      accessTokenScopeRule("wallet:read"),
 	"POST /api/user/topup":                          accessTokenScopeRule("wallet:write"),

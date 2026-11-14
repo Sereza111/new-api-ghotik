@@ -370,6 +370,7 @@ func migrateDB() error {
 		&TwoFABackupCode{},
 		&Checkin{},
 		&TelegramChannelBonus{},
+		&ReferralReward{},
 		&SubscriptionOrder{},
 		&UserSubscription{},
 		&SubscriptionPreConsumeRecord{},
