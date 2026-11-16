@@ -230,6 +230,8 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
         id: 'actions',
         header: () => t('Actions'),
         cell: ({ row }) => <DataTableRowActions row={row} />,
+        size: 260,
+        minSize: 260,
         meta: { pinned: 'right' as const },
       },
     ],

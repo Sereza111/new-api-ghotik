@@ -39,6 +39,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 
 import { getCodexSetup, type SetupFile } from './codex-setup'
+import { ConnectionQuickstart } from './connection-quickstart'
 
 const CLIENTS = ['codex', 'cursor', 'openai-sdk', 'curl'] as const
 
@@ -215,6 +216,8 @@ print(response.output_text)`,
             )}
           </p>
         </header>
+
+        <ConnectionQuickstart />
 
         <section className='grid border-b py-10 lg:grid-cols-[15rem_minmax(0,1fr)] lg:gap-12'>
           <nav aria-label={t('Applications')} className='mb-6 lg:mb-0'>

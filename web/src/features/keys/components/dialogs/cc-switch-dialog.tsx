@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { Dialog } from '@/components/dialog'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
 import { Input } from '@/components/ui/input'
@@ -165,6 +166,27 @@ export function CCSwitchDialog(props: Props) {
       }
     >
       <div className='space-y-4'>
+        <Alert role='note'>
+          <AlertDescription className='space-y-2'>
+            <div>
+              {t(
+                'Install CC Switch on this device first, then choose your app and primary model below.'
+              )}
+            </div>
+            <div className='flex flex-wrap gap-x-4 gap-y-2'>
+              <a
+                href='https://github.com/farion1231/cc-switch/releases/latest'
+                target='_blank'
+                rel='noopener noreferrer'
+              >
+                {t('Download CC Switch')}
+              </a>
+              <a href='/docs' target='_blank' rel='noopener noreferrer'>
+                {t('Manual connection guide')}
+              </a>
+            </div>
+          </AlertDescription>
+        </Alert>
         <div className='space-y-2'>
           <Label>{t('Application')}</Label>
           <RadioGroup

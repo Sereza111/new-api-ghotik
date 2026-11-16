@@ -37,6 +37,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { useApiInfo } from '@/features/dashboard/hooks/use-status-data'
+import { useConnectionTour } from '@/features/onboarding/store'
 import { useStatus } from '@/hooks/use-status'
 
 import { useApiKeys } from './api-keys-provider'
@@ -44,6 +45,7 @@ import { useApiKeys } from './api-keys-provider'
 export function ApiKeysPrimaryButtons() {
   const { t } = useTranslation()
   const { setOpen } = useApiKeys()
+  const isCreateStep = useConnectionTour((state) => state.phase === 'keys')
   const { status, loading } = useStatus()
   const { items } = useApiInfo()
   const serverAddress =
@@ -112,7 +114,16 @@ export function ApiKeysPrimaryButtons() {
           )}
         </PopoverContent>
       </Popover>
-      <Button size='sm' onClick={() => setOpen('create')}>
+      <Button
+        size='sm'
+        onClick={() => setOpen('create')}
+        data-onboarding='create-key'
+        className={
+          isCreateStep
+            ? 'ring-primary/40 ring-offset-background ring-4 ring-offset-2'
+            : undefined
+        }
+      >
         <Plus className='h-4 w-4' />
         {t('Create API Key')}
       </Button>

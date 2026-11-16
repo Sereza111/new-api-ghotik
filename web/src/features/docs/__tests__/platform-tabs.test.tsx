@@ -18,14 +18,25 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { PropsWithChildren } from 'react'
+import type { ComponentProps, PropsWithChildren } from 'react'
 import { describe, expect, it, vi } from 'vitest'
+
+import { useConnectionTour } from '@/features/onboarding/store'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { Docs } from '../index'
 
 vi.mock('@tanstack/react-router', () => ({
-  Link: (props: PropsWithChildren<{ to: string }>) => (
-    <a href={props.to}>{props.children}</a>
+  Link: (props: PropsWithChildren<{ to: string } & ComponentProps<'a'>>) => (
+    <a
+      href={props.to}
+      onClick={(event) => {
+        event.preventDefault()
+        props.onClick?.(event)
+      }}
+    >
+      {props.children}
+    </a>
   ),
 }))
 
@@ -40,6 +51,25 @@ vi.mock('@/components/page-transition', () => ({
 }))
 
 describe('Codex platform guides', () => {
+  it('starts the connection tutorial from the written guide for the signed-in user', async () => {
+    useAuthStore
+      .getState()
+      .auth.setUser({ id: 908, username: 'reader', role: 1 })
+    const user = userEvent.setup()
+    render(<Docs />)
+    const start = screen.getByRole('link', {
+      name: 'Start interactive tutorial',
+    })
+    expect(start).toHaveAttribute('href', '/keys')
+    await user.click(start)
+    expect(useConnectionTour.getState()).toMatchObject({
+      userId: 908,
+      phase: 'welcome',
+    })
+    useAuthStore.getState().auth.setUser(null)
+    useConnectionTour.getState().initialize(null, undefined, 0)
+  })
+
   it('switches from Windows paths to the macOS and Linux setup', async () => {
     const user = userEvent.setup()
     render(<Docs />)

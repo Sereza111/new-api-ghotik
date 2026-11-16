@@ -43,8 +43,11 @@ import { I18nextProvider } from 'react-i18next'
 import { Toaster, toast } from 'sonner'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
+import { KeysTourPanel } from '@/features/onboarding/keys-tour-panel'
+import { useConnectionTour } from '@/features/onboarding/store'
 import zh from '@/i18n/locales/zh.json'
 import { api } from '@/lib/api'
+import { useAuthStore } from '@/stores/auth-store'
 import {
   DEFAULT_CURRENCY_CONFIG,
   useSystemConfigStore,
@@ -53,8 +56,9 @@ import {
 import { apiKeySchema, type ApiKey } from '../../types'
 import { ApiKeyQuotaCell } from '../api-key-quota-cell'
 import { useApiKeysColumns } from '../api-keys-columns'
-import { ApiKeysProvider } from '../api-keys-provider'
+import { ApiKeysProvider, useApiKeys } from '../api-keys-provider'
 import { ApiKeysTable } from '../api-keys-table'
+import { CCSwitchDialog } from '../dialogs/cc-switch-dialog'
 
 const now = 1_700_000_000_000
 const key = apiKeySchema.parse({
@@ -143,6 +147,8 @@ function renderQuota(apiKey: ApiKey = key) {
 beforeEach(() => {
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
   localStorage.clear()
+  useConnectionTour.setState({ userId: null, phase: 'idle', assessed: false })
+  useAuthStore.getState().auth.setUser(null)
   useSystemConfigStore
     .getState()
     .setConfig({ currency: { ...DEFAULT_CURRENCY_CONFIG } })
@@ -150,6 +156,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   cleanup()
+  useAuthStore.getState().auth.setUser(null)
   toast.dismiss()
   localStorage.clear()
   clients.splice(0).forEach((client) => client.clear())
@@ -308,10 +315,23 @@ it('keeps a long amount within its column while showing the full amount in detai
   ).toHaveLength(2)
 })
 
+function ConnectionDialog() {
+  const { open, setOpen, resolvedKey } = useApiKeys()
+  return (
+    <CCSwitchDialog
+      open={open === 'cc-switch'}
+      onOpenChange={() => setOpen(null)}
+      tokenKey={resolvedKey}
+    />
+  )
+}
+
 function KeysPage() {
   return (
     <ApiKeysProvider>
+      <KeysTourPanel />
       <ApiKeysTable />
+      <ConnectionDialog />
       <Toaster />
     </ApiKeysProvider>
   )
@@ -320,6 +340,9 @@ function KeysPage() {
 async function renderKeysPage(status = 1, overrides: Partial<ApiKey> = {}) {
   let currentKey = { ...key, status, ...overrides }
   vi.mocked(api.get).mockImplementation(async (url) => {
+    if (url === '/api/user/models') {
+      return { data: { success: true, data: ['test-model'] } }
+    }
     if (url.startsWith('/api/token/')) {
       return {
         data: { success: true, data: { items: [currentKey], total: 1 } },
@@ -380,6 +403,13 @@ it('combines creation and last use while keeping expiry, models and IP restricti
   })
   expect(quotaHeader).not.toHaveClass('pr-8')
   expect(quotaTrigger.closest('td')).not.toHaveClass('pr-8')
+  expect(screen.getByRole('columnheader', { name: 'Actions' })).toHaveClass(
+    'w-65',
+    'min-w-65'
+  )
+  expect(
+    screen.getByRole('button', { name: 'Connect' }).closest('td')
+  ).toHaveClass('w-65', 'min-w-65')
 })
 
 it('restores dates hidden by the old default and preserves unrelated column preferences', async () => {
@@ -435,6 +465,102 @@ it('keeps expired status when the server refuses reactivation', async () => {
 })
 
 it.each([true, false])(
+  'opens the existing connection setup only after an explicit click and authorized key response success=%s',
+  async (success) => {
+    useAuthStore
+      .getState()
+      .auth.setUser({ id: 1, username: 'new-user', role: 1 })
+    useConnectionTour.setState({ userId: 1, phase: 'keys', assessed: true })
+    const { post } = await renderKeysPage()
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    post.mockResolvedValue(
+      success
+        ? { data: { success: true, data: { key: 'fake-key-for-test-only' } } }
+        : { data: { success: false, message: 'Verification required' } }
+    )
+    const connect = screen.getByRole('button', { name: 'Connect' })
+    expect(connect).toBeVisible()
+    expect(post).not.toHaveBeenCalled()
+    expect(screen.getByText('Connect your app')).toHaveAttribute(
+      'aria-current',
+      'step'
+    )
+    expect(
+      screen.queryByRole('dialog', { name: 'Import to CC Switch' })
+    ).not.toBeInTheDocument()
+
+    await userEvent.click(connect)
+
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/api/token/7/key'))
+    if (success) {
+      const dialog = await screen.findByRole('dialog', {
+        name: 'Import to CC Switch',
+      })
+      expect(
+        within(dialog).getByRole('radio', { name: 'Claude' })
+      ).toBeVisible()
+      expect(
+        within(dialog).getByRole('combobox', { name: 'Primary Model' })
+      ).toBeVisible()
+      expect(
+        within(dialog).getByRole('link', { name: 'Manual connection guide' })
+      ).toHaveAttribute('href', '/docs')
+      expect(document.body).not.toHaveTextContent('fake-key-for-test-only')
+      expect(localStorage.getItem('connection-tour:v1:1')).not.toBe('completed')
+      await userEvent.click(
+        within(dialog).getByRole('button', { name: 'Cancel' })
+      )
+      expect(screen.getByText('Try your first request')).toHaveAttribute(
+        'aria-current',
+        'step'
+      )
+      expect(
+        screen.getByRole('button', { name: 'I received a response' })
+      ).toBeVisible()
+    } else {
+      await screen.findByText('Verification required')
+      expect(
+        screen.queryByRole('dialog', { name: 'Import to CC Switch' })
+      ).not.toBeInTheDocument()
+      expect(screen.getByText('Connect your app')).toHaveAttribute(
+        'aria-current',
+        'step'
+      )
+    }
+    expect(open).not.toHaveBeenCalled()
+  }
+)
+
+it.each([
+  ['disabled', { status: 2 }],
+  ['expired', { expired_time: 1_700_000_000 }],
+  ['exhausted', { remain_quota: 0 }],
+] as const)(
+  'does not advance the tutorial when the selected key is %s',
+  async (_condition, overrides) => {
+    useAuthStore
+      .getState()
+      .auth.setUser({ id: 1, username: 'new-user', role: 1 })
+    useConnectionTour.setState({ userId: 1, phase: 'connect', assessed: true })
+    await renderKeysPage(1, overrides)
+    await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Import to CC Switch',
+    })
+    await userEvent.click(
+      within(dialog).getByRole('button', { name: 'Cancel' })
+    )
+    expect(screen.getByText('Connect your app')).toHaveAttribute(
+      'aria-current',
+      'step'
+    )
+    expect(
+      screen.queryByRole('button', { name: 'I received a response' })
+    ).not.toBeInTheDocument()
+  }
+)
+
+it.each([true, false])(
   'fetches a full key only on explicit copy and honors permission success=%s',
   async (success) => {
     const user = userEvent.setup()
@@ -471,6 +597,11 @@ it('keeps full mobile information without group or quota section headings', asyn
   try {
     await renderKeysPage()
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', {
+        name: zh.translation['Connect'],
+      })
+    ).toBeVisible()
     expect(screen.queryByText('额度 ($)')).not.toBeInTheDocument()
     expect(screen.getByText('($)')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /剩余 80;/ })).toBeInTheDocument()

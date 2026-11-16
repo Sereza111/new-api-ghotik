@@ -40,6 +40,7 @@ import {
 } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useConnectionTour } from '@/features/onboarding/store'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import { createServerError } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
@@ -168,8 +169,8 @@ function ApiKeysMobileList({
               )}
             </div>
 
-            <div className='flex min-w-0 items-center justify-between gap-2'>
-              <div className='min-w-0 flex-1 [&_button:first-child]:max-w-full [&_button:first-child]:truncate [&_button:first-child]:px-0'>
+            <div className='flex min-w-0 flex-col items-start gap-2'>
+              <div className='w-full min-w-0 [&_button:first-child]:max-w-full [&_button:first-child]:truncate [&_button:first-child]:px-0'>
                 <ApiKeyCell apiKey={apiKey} />
               </div>
               <DataTableRowActions row={row} />
@@ -219,6 +220,7 @@ export function ApiKeysTable() {
   const { t } = useTranslation()
   const { refreshTrigger } = useApiKeys()
   const [now, setNow] = useState(() => Date.now())
+  const tourPhase = useConnectionTour((state) => state.phase)
   const columns = useApiKeysColumns(now)
 
   useEffect(() => {
@@ -304,6 +306,17 @@ export function ApiKeysTable() {
 
   const apiKeys = data?.items || []
 
+  useEffect(() => {
+    if (tourPhase !== 'keys' || isFetching) return
+    const hasUsableKey = data?.items.some(
+      (key) =>
+        key.status === API_KEY_STATUS.ENABLED &&
+        (key.expired_time === -1 || key.expired_time * 1000 > now) &&
+        (key.unlimited_quota || key.remain_quota > 0)
+    )
+    if (hasUsableKey) useConnectionTour.getState().keyReady()
+  }, [data, isFetching, now, tourPhase])
+
   const { table } = useDataTable({
     data: apiKeys,
     columns,
@@ -350,6 +363,9 @@ export function ApiKeysTable() {
       )}
       skeletonKeyPrefix='api-keys-skeleton'
       applyHeaderSize
+      getColumnClassName={(columnId) =>
+        columnId === 'actions' ? 'w-65 min-w-65' : undefined
+      }
       toolbarProps={{
         searchPlaceholder: t('Filter by name...'),
         searchDebounceMs: 500,

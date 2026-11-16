@@ -26,6 +26,7 @@ import { NotificationPopover } from '@/components/notification-popover'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { Search } from '@/components/search'
 import { Button } from '@/components/ui/button'
+import { ConnectionTutorialButton } from '@/features/onboarding/connection-tour'
 import { SystemUpdateAction } from '@/features/system-update/system-update-action'
 import { useNotifications } from '@/hooks/use-notifications'
 import { useTopNavLinks } from '@/hooks/use-top-nav-links'
@@ -158,6 +159,7 @@ export function AppHeader({
             </div>
           )}
           <HeaderBalance />
+          <ConnectionTutorialButton />
           {showSearch && (
             <Search className='w-8 flex-none [&>span]:hidden sm:[&>span]:inline' />
           )}
