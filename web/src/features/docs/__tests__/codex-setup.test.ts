@@ -20,6 +20,12 @@ import { describe, expect, it } from 'vitest'
 
 import { getCodexSetup } from '../codex-setup'
 
+it('uses the explicitly selected model and escapes values in the copied configuration', () => {
+  const setup = getCodexSetup('https://example.com/v1', 'unix', 'model"\\name')
+  expect(setup.files[0].snippet).toContain('model = "model\\"\\\\name"')
+  expect(setup.files[0].snippet).toContain('review_model = "model\\"\\\\name"')
+})
+
 describe('Codex setup guide', () => {
   it('uses the Responses provider, production base URL, and default model', () => {
     const setup = getCodexSetup('https://new-api.yozik.ru/v1', 'windows')

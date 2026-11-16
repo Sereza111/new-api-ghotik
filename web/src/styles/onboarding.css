@@ -1,0 +1,106 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+.connection-tour-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.connection-tour-shade {
+  position: fixed;
+  background: rgb(0 0 0 / 76%);
+  pointer-events: auto;
+}
+
+.connection-tour-ring {
+  position: fixed;
+  border: 2px solid var(--primary);
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 5px color-mix(in oklch, var(--primary) 16%, transparent),
+    0 0 32px color-mix(in oklch, var(--primary) 25%, transparent);
+}
+
+.connection-tour-arrow {
+  position: fixed;
+  inset: 0;
+  color: var(--primary);
+  overflow: visible;
+}
+
+.connection-tour-coach {
+  position: fixed;
+  pointer-events: auto;
+  border-radius: 8px;
+  border-color: color-mix(in oklch, var(--primary) 38%, var(--border));
+  box-shadow: 0 24px 80px rgb(0 0 0 / 35%);
+  overflow-y: auto;
+  outline: none;
+}
+
+.connection-tour-welcome {
+  border-radius: 8px;
+  border-color: color-mix(in oklch, var(--primary) 35%, var(--border));
+}
+
+@media (max-width: 767px) {
+  .connection-tour-layer {
+    --connection-tour-reserve: min(275px, 45dvh);
+  }
+
+  .connection-manual-tour {
+    --tw-translate-x: 0px !important;
+    --tw-translate-y: 0px !important;
+    top: max(12px, env(safe-area-inset-top));
+    transform: translateX(-50%) !important;
+    max-height: calc(100dvh - min(275px, 45dvh));
+  }
+  .connection-tour-form {
+    bottom: min(275px, 45dvh);
+    height: calc(100dvh - min(275px, 45dvh));
+  }
+  .connection-tour-coach {
+    gap: 10px;
+    max-height: calc(var(--connection-tour-reserve) - 12px) !important;
+    padding-top: 12px;
+  }
+  .connection-tour-coach [data-slot='card-header'],
+  .connection-tour-coach [data-slot='card-content'],
+  .connection-tour-coach [data-slot='card-footer'] {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .connection-tour-coach {
+    animation: connection-coach-in 180ms ease-out;
+  }
+  @keyframes connection-coach-in {
+    from {
+      opacity: 0;
+      margin-top: 6px;
+    }
+    to {
+      opacity: 1;
+      margin-top: 0;
+    }
+  }
+}

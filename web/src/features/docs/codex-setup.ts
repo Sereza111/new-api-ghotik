@@ -31,7 +31,8 @@ export type CodexSetup = {
 
 export function getCodexSetup(
   baseUrl: string,
-  platform: CodexPlatform
+  platform: CodexPlatform,
+  model?: string
 ): CodexSetup {
   const isWindows = platform === 'windows'
   const configPath = isWindows
@@ -51,15 +52,15 @@ export function getCodexSetup(
       {
         filename: configPath,
         snippet: `model_provider = "OpenAI"
-model = "gpt-5.6-sol"
-review_model = "gpt-5.5"
+model = ${JSON.stringify(model || 'gpt-5.6-sol')}
+review_model = ${JSON.stringify(model || 'gpt-5.5')}
 model_reasoning_effort = "xhigh"
 disable_response_storage = true
 network_access = "enabled"${windowsConfig}
 
 [model_providers.OpenAI]
 name = "OpenAI"
-base_url = "${baseUrl}"
+base_url = ${JSON.stringify(baseUrl)}
 wire_api = "responses"
 requires_openai_auth = true
 

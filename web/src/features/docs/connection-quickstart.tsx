@@ -37,19 +37,19 @@ export function ConnectionQuickstart() {
     {
       title: t('Connect'),
       text: t(
-        'Find your key in the list and click Connect on its row. This opens the client setup window; you do not need to search the three-dot menu.'
+        'Click Connect beside your key to open the manual setup instructions.'
       ),
     },
     {
-      title: t('Choose your application'),
+      title: t('Configure your application'),
       text: t(
-        'For Claude Code, Codex, or Gemini CLI, install CC Switch, choose the application and an available primary model, then click Open CC Switch and confirm the import there.'
+        'Choose your app, copy the API key and API address, then select a model. Follow the instructions to paste these values into your app settings.'
       ),
     },
     {
       title: t('Send a test message'),
       text: t(
-        'Make sure your wallet has credits, open the configured client, and send a short message. Check Usage Logs to confirm the request. Importing settings alone does not verify the connection.'
+        'Check your wallet balance, send a short message in your app, and look for the request in Usage Logs.'
       ),
     },
   ]
@@ -69,7 +69,7 @@ export function ConnectionQuickstart() {
           </h2>
           <p className='text-muted-foreground text-sm leading-6'>
             {t(
-              'The Connect button next to your API key is the quickest way to set up a client.'
+              'Connect your app manually, or follow the highlighted buttons in the interactive tutorial.'
             )}
           </p>
         </div>
@@ -107,7 +107,7 @@ export function ConnectionQuickstart() {
       </ol>
       <p className='text-muted-foreground text-sm leading-6'>
         {t(
-          'Using another client or no CC Switch? Follow the manual setup below: copy your API key and the API address into the client settings. Never use your account password as an API key.'
+          'Detailed setup examples for each client are below. Use your API key, not your account password.'
         )}
       </p>
       <p className='text-muted-foreground text-sm leading-6'>

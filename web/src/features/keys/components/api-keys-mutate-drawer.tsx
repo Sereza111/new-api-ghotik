@@ -64,6 +64,7 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { useConnectionTour } from '@/features/onboarding/store'
 import { RelatedPolicyLink } from '@/features/system-settings/request-policies/related-policy-link'
 import { useStatus } from '@/hooks/use-status'
 import { toIntlLocale } from '@/i18n/languages'
@@ -117,6 +118,7 @@ export function ApiKeysMutateDrawer({
   onOpenChange,
   currentRow,
 }: ApiKeyMutateDrawerProps) {
+  const isCreateTour = useConnectionTour((state) => state.phase === 'keys')
   const { t, i18n } = useTranslation()
   const isUpdate = !!currentRow
   const currentRowId = currentRow?.id
@@ -588,9 +590,17 @@ export function ApiKeysMutateDrawer({
 
   return (
     <>
-      <Sheet open={open} onOpenChange={onOpenChange}>
+      <Sheet
+        open={open}
+        onOpenChange={onOpenChange}
+        modal={!isCreateTour}
+        disablePointerDismissal={isCreateTour}
+      >
         <SheetContent
-          className={sideDrawerContentClassName('max-w-none sm:!max-w-[620px]')}
+          className={cn(
+            sideDrawerContentClassName('max-w-none sm:!max-w-[620px]'),
+            isCreateTour && 'connection-tour-form'
+          )}
         >
           <SheetHeader className={sideDrawerHeaderClassName()}>
             <SheetTitle>
@@ -605,6 +615,7 @@ export function ApiKeysMutateDrawer({
           <Form {...form}>
             <form
               id='api-key-form'
+              data-onboarding='key-form'
               onSubmit={form.handleSubmit(onSubmit, onInvalid)}
               aria-busy={!isFormInitialized}
               inert={!isFormInitialized || isSubmitting ? true : undefined}

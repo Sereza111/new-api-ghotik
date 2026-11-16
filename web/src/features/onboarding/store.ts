@@ -25,6 +25,9 @@ export type ConnectionTourPhase =
   | 'welcome'
   | 'keys'
   | 'connect'
+  | 'manual-key'
+  | 'manual-address'
+  | 'manual-model'
   | 'verify'
 
 type ConnectionTourState = {
@@ -41,6 +44,11 @@ type ConnectionTourState = {
   dismiss: () => void
   keyReady: () => void
   connectionOpened: () => void
+  keyCopied: () => void
+  addressCopied: () => void
+  modelConfirmed: () => void
+  connectionClosed: () => void
+  back: () => void
   finish: () => void
 }
 
@@ -84,7 +92,9 @@ export const useConnectionTour = create<ConnectionTourState>((set, get) => ({
     set({ userId, assessed: true, phase: 'welcome' })
   },
   start() {
-    if (get().userId !== null) set({ phase: 'keys' })
+    if (get().userId !== null && get().phase === 'welcome') {
+      set({ phase: 'keys' })
+    }
   },
   dismiss() {
     const userId = get().userId
@@ -95,7 +105,35 @@ export const useConnectionTour = create<ConnectionTourState>((set, get) => ({
     if (get().phase === 'keys') set({ phase: 'connect' })
   },
   connectionOpened() {
-    if (get().phase === 'connect') set({ phase: 'verify' })
+    if (get().phase === 'connect') set({ phase: 'manual-key' })
+  },
+  keyCopied() {
+    if (get().phase === 'manual-key') set({ phase: 'manual-address' })
+  },
+  addressCopied() {
+    if (get().phase === 'manual-address') set({ phase: 'manual-model' })
+  },
+  modelConfirmed() {
+    if (get().phase === 'manual-model') set({ phase: 'verify' })
+  },
+  connectionClosed() {
+    const phase = get().phase
+    if (phase.startsWith('manual-') || phase === 'verify') {
+      set({ phase: 'connect' })
+    }
+  },
+  back() {
+    switch (get().phase) {
+      case 'manual-address':
+        set({ phase: 'manual-key' })
+        break
+      case 'manual-model':
+        set({ phase: 'manual-address' })
+        break
+      case 'verify':
+        set({ phase: 'manual-model' })
+        break
+    }
   },
   finish() {
     const state = get()

@@ -16,269 +16,359 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import {
-  createMemoryHistory,
-  createRootRoute,
-  createRoute,
-  createRouter,
-  Outlet,
-  RouterProvider,
-} from '@tanstack/react-router'
-import {
-  act,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from '@testing-library/react'
-import { StrictMode } from 'react'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { ROLE } from '@/lib/roles'
-import { type AuthUser, useAuthStore } from '@/stores/auth-store'
 
-import { ConnectionTour, ConnectionTutorialButton } from '../connection-tour'
-import { KeysTourPanel } from '../keys-tour-panel'
-import { useConnectionTour } from '../store'
+let ConnectionSpotlight: typeof import('../connection-spotlight').ConnectionSpotlight
+let useConnectionTour: typeof import('../store').useConnectionTour
+let spotlightFixture: HTMLDivElement
 
-function renderTutorial(user: AuthUser) {
-  useAuthStore.getState().auth.setUser(user)
-  const root = createRootRoute({
-    component: () => (
-      <>
-        <ConnectionTour />
-        <ConnectionTutorialButton />
-        <Outlet />
-      </>
-    ),
-  })
-  const routeTree = root.addChildren([
-    createRoute({
-      getParentRoute: () => root,
-      path: '/',
-      component: () => <p>Account home</p>,
-    }),
-    createRoute({
-      getParentRoute: () => root,
-      path: '/keys',
-      component: KeysTourPanel,
-    }),
-    createRoute({
-      getParentRoute: () => root,
-      path: '/usage-logs',
-      component: () => <p>Request history</p>,
-    }),
-  ])
-  const router = createRouter({
-    routeTree,
-    history: createMemoryHistory({ initialEntries: ['/'] }),
-  })
-  const view = render(
-    <StrictMode>
-      <RouterProvider router={router} />
-    </StrictMode>
-  )
-  return { ...view, router }
+function SpotlightHarness() {
+  const phase = useConnectionTour((state) => state.phase)
+  if (phase === 'idle' || phase === 'welcome') return null
+  return <ConnectionSpotlight phase={phase} />
 }
 
-function setUser(user: AuthUser | null) {
-  act(() => useAuthStore.getState().auth.setUser(user))
+function addSpotlightButton(
+  onboarding: string,
+  label: string,
+  rect = { left: 120, top: 80, width: 180, height: 40 }
+) {
+  const button = document.createElement('button')
+  const box = {
+    x: rect.left,
+    y: rect.top,
+    left: rect.left,
+    top: rect.top,
+    right: rect.left + rect.width,
+    bottom: rect.top + rect.height,
+    width: rect.width,
+    height: rect.height,
+    toJSON: () => ({}),
+  } as DOMRect
+  const rects = Object.assign([box], {
+    item: (index: number) => (index === 0 ? box : null),
+  }) as DOMRectList
+
+  button.type = 'button'
+  button.dataset.onboarding = onboarding
+  button.textContent = label
+  vi.spyOn(button, 'getBoundingClientRect').mockReturnValue(box)
+  vi.spyOn(button, 'getClientRects').mockReturnValue(rects)
+  spotlightFixture.append(button)
+  return button
 }
 
-beforeEach(() => {
-  vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
+function advanceToVerification() {
+  const tour = useConnectionTour.getState()
+  tour.keyReady()
+  tour.connectionOpened()
+  tour.keyCopied()
+  tour.addressCopied()
+  tour.modelConfirmed()
+}
+
+beforeEach(async () => {
   localStorage.clear()
-  useConnectionTour.getState().initialize(null, undefined, 0)
+  vi.resetModules()
+  useConnectionTour = (await import('../store')).useConnectionTour
 })
 
-afterEach(() => {
-  vi.restoreAllMocks()
-})
+describe('connection tutorial lifecycle', () => {
+  test('offers a new user setup once and permits replay after dismissal', () => {
+    const tour = useConnectionTour.getState()
+    tour.initialize(8101, 0, ROLE.USER)
+    tour.initialize(8101, 0, ROLE.USER)
+    expect(useConnectionTour.getState().phase).toBe('welcome')
 
-describe('connection tutorial', () => {
-  test('welcomes a new user once, survives StrictMode and can be replayed after skipping', async () => {
-    const account = {
-      id: 8101,
-      username: 'new-user',
-      role: ROLE.USER,
-      request_count: 0,
-    }
-    const view = renderTutorial(account)
-    expect(
-      await screen.findByRole('dialog', {
-        name: 'Let us connect your first app',
-      })
-    ).toBeVisible()
-    fireEvent.click(screen.getByRole('button', { name: 'Maybe later' }))
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    )
-    view.unmount()
+    tour.dismiss()
+    tour.initialize(null, undefined, 0)
+    tour.initialize(8101, 0, ROLE.USER)
+    expect(useConnectionTour.getState().phase).toBe('idle')
 
-    // A new layout visit must not automatically reopen the dismissed tutorial.
-    useConnectionTour.getState().initialize(null, undefined, 0)
-    const replay = renderTutorial(account)
-    await screen.findByRole('button', { name: 'Connection tutorial' })
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Connection tutorial' }))
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Start walkthrough' })
-    )
-    const panel = await screen.findByRole('region', {
-      name: 'Connection tutorial',
-    })
-    expect(replay.router.state.location.pathname).toBe('/keys')
-    expect(
-      within(panel).getByText('Create your API key').closest('li')
-    ).toHaveAttribute('aria-current', 'step')
-    expect(
-      screen.queryByRole('button', { name: 'I received a response' })
-    ).not.toBeInTheDocument()
+    tour.showWelcome(8101)
+    tour.start()
+    expect(useConnectionTour.getState().phase).toBe('keys')
   })
 
-  test('waits for confirmed request count before automatically offering setup', async () => {
-    const account = { id: 8102, username: 'loading-user', role: ROLE.USER }
-    renderTutorial(account)
-    await screen.findByText('Account home')
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    setUser({ ...account, request_count: 0 })
-    expect(
-      await screen.findByRole('dialog', {
-        name: 'Let us connect your first app',
-      })
-    ).toBeVisible()
+  test('waits for a confirmed request count before offering setup', () => {
+    const tour = useConnectionTour.getState()
+    tour.initialize(8102, undefined, ROLE.USER)
+    expect(useConnectionTour.getState().phase).toBe('idle')
+    tour.initialize(8102, 0, ROLE.USER)
+    expect(useConnectionTour.getState().phase).toBe('welcome')
   })
 
   test.each([
-    { id: 8103, username: 'existing-user', role: ROLE.USER, request_count: 3 },
-    { id: 8104, username: 'admin-user', role: ROLE.ADMIN, request_count: 0 },
+    { userId: 8103, role: ROLE.USER, requests: 3, account: 'experienced user' },
+    { userId: 8104, role: ROLE.ADMIN, requests: 0, account: 'administrator' },
   ])(
-    'does not interrupt $username but keeps manual replay available',
-    async (account) => {
-      renderTutorial(account)
-      const replay = await screen.findByRole('button', {
-        name: 'Connection tutorial',
-      })
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-      fireEvent.click(replay)
-      expect(
-        await screen.findByRole('dialog', {
-          name: 'Let us connect your first app',
-        })
-      ).toBeVisible()
+    'does not interrupt an $account but permits manual replay',
+    ({ userId, role, requests }) => {
+      const tour = useConnectionTour.getState()
+      tour.initialize(userId, requests, role)
+      expect(useConnectionTour.getState().phase).toBe('idle')
+      tour.showWelcome(userId)
+      expect(useConnectionTour.getState().phase).toBe('welcome')
     }
   )
 
-  test('resets active steps on identity changes and sign-out without sharing completion', async () => {
-    const first = {
-      id: 8105,
-      username: 'first-user',
-      role: ROLE.USER,
-      request_count: 0,
-    }
-    renderTutorial(first)
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Start walkthrough' })
-    )
-    await screen.findByRole('region', { name: 'Connection tutorial' })
-    act(() => useConnectionTour.getState().keyReady())
-    expect(screen.getByText('Connect your app').closest('li')).toHaveAttribute(
-      'aria-current',
-      'step'
-    )
+  test('resets an active walkthrough on account changes and sign-out', () => {
+    const tour = useConnectionTour.getState()
+    tour.initialize(8105, 0, ROLE.USER)
+    tour.start()
+    tour.keyReady()
+    tour.connectionOpened()
+    tour.keyCopied()
 
-    setUser({ ...first, id: 8106, username: 'second-user' })
-    expect(
-      await screen.findByRole('dialog', {
-        name: 'Let us connect your first app',
-      })
-    ).toBeVisible()
-    expect(
-      screen.queryByRole('region', { name: 'Connection tutorial' })
-    ).not.toBeInTheDocument()
-    setUser(first)
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    )
-    expect(
-      screen.queryByRole('region', { name: 'Connection tutorial' })
-    ).not.toBeInTheDocument()
-    setUser(null)
-    expect(
-      screen.queryByRole('button', { name: 'Connection tutorial' })
-    ).not.toBeInTheDocument()
+    tour.initialize(8106, 0, ROLE.USER)
+    expect(useConnectionTour.getState()).toMatchObject({
+      userId: 8106,
+      phase: 'welcome',
+    })
+    tour.initialize(8105, 0, ROLE.USER)
+    expect(useConnectionTour.getState()).toMatchObject({
+      userId: 8105,
+      phase: 'idle',
+    })
+    tour.initialize(null, undefined, 0)
+    tour.keyCopied()
+    tour.modelConfirmed()
+    tour.finish()
+    expect(useConnectionTour.getState()).toMatchObject({
+      userId: null,
+      phase: 'idle',
+    })
+    expect(localStorage.getItem('connection-tour:v1:8105')).toBe('seen')
   })
 
-  test('keeps setup usable with unavailable browser storage and remembers dismissal within the session', async () => {
+  test('remembers dismissal within the session when browser storage is unavailable', () => {
     vi.spyOn(localStorage, 'getItem').mockImplementation(() => {
       throw new Error('Storage unavailable')
     })
     vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
       throw new Error('Storage unavailable')
     })
-    const account = {
-      id: 8107,
-      username: 'private-user',
-      role: ROLE.USER,
-      request_count: 0,
-    }
-    renderTutorial(account)
-    fireEvent.click(await screen.findByRole('button', { name: 'Maybe later' }))
-    setUser(null)
-    setUser(account)
-    await screen.findByRole('button', { name: 'Connection tutorial' })
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Connection tutorial' }))
-    expect(
-      await screen.findByRole('dialog', {
-        name: 'Let us connect your first app',
-      })
-    ).toBeVisible()
+    const tour = useConnectionTour.getState()
+    tour.initialize(8107, 0, ROLE.USER)
+    expect(useConnectionTour.getState().phase).toBe('welcome')
+    tour.dismiss()
+    tour.initialize(null, undefined, 0)
+    tour.initialize(8107, 0, ROLE.USER)
+    expect(useConnectionTour.getState().phase).toBe('idle')
+    tour.showWelcome(8107)
+    expect(useConnectionTour.getState().phase).toBe('welcome')
   })
 
-  test('advances from actual key and connection events, supports checking logs, and finishes only on explicit confirmation', async () => {
-    const account = {
-      id: 8108,
-      username: 'connecting-user',
-      role: ROLE.USER,
-      request_count: 0,
+  test('ignores a delayed start after the user has dismissed the welcome', () => {
+    const tour = useConnectionTour.getState()
+    tour.initialize(8108, 0, ROLE.USER)
+    tour.dismiss()
+    tour.start()
+    expect(useConnectionTour.getState().phase).toBe('idle')
+  })
+
+  test.each(['seen', 'completed'])(
+    'does not prompt again after a saved %s status on a fresh page',
+    (status) => {
+      localStorage.setItem('connection-tour:v1:8109', status)
+      useConnectionTour.getState().initialize(8109, 0, ROLE.USER)
+      expect(useConnectionTour.getState().phase).toBe('idle')
     }
-    const { router } = renderTutorial(account)
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Start walkthrough' })
-    )
-    await screen.findByRole('region', { name: 'Connection tutorial' })
-    act(() => useConnectionTour.getState().keyReady())
-    expect(screen.getByText('Connect your app').closest('li')).toHaveAttribute(
-      'aria-current',
-      'step'
-    )
+  )
+})
+
+describe('manual connection progress', () => {
+  beforeEach(() => {
+    const tour = useConnectionTour.getState()
+    tour.initialize(8110, 0, ROLE.USER)
+    tour.start()
+    tour.keyReady()
+    tour.connectionOpened()
+  })
+
+  test('requires copying the key and address and confirming the model before verification', () => {
+    const tour = useConnectionTour.getState()
+    expect(useConnectionTour.getState().phase).toBe('manual-key')
+    tour.addressCopied()
+    tour.modelConfirmed()
+    tour.finish()
+    expect(useConnectionTour.getState().phase).toBe('manual-key')
+    tour.keyCopied()
+    expect(useConnectionTour.getState().phase).toBe('manual-address')
+    tour.modelConfirmed()
+    expect(useConnectionTour.getState().phase).toBe('manual-address')
+    tour.addressCopied()
+    expect(useConnectionTour.getState().phase).toBe('manual-model')
+    tour.finish()
+    expect(localStorage.getItem('connection-tour:v1:8110')).toBe('seen')
+    tour.modelConfirmed()
+    expect(useConnectionTour.getState().phase).toBe('verify')
+    expect(localStorage.getItem('connection-tour:v1:8110')).toBe('seen')
+    tour.finish()
+    expect(useConnectionTour.getState().phase).toBe('idle')
+    expect(localStorage.getItem('connection-tour:v1:8110')).toBe('completed')
+  })
+
+  test('returns through previous manual steps without marking setup completed', () => {
+    const tour = useConnectionTour.getState()
+    tour.keyCopied()
+    tour.addressCopied()
+    tour.modelConfirmed()
+    tour.back()
+    expect(useConnectionTour.getState().phase).toBe('manual-model')
+    tour.back()
+    expect(useConnectionTour.getState().phase).toBe('manual-address')
+    tour.back()
+    expect(useConnectionTour.getState().phase).toBe('manual-key')
+    tour.back()
+    expect(useConnectionTour.getState().phase).toBe('manual-key')
+    expect(localStorage.getItem('connection-tour:v1:8110')).toBe('seen')
+  })
+
+  test('returns to key selection after closing setup and ignores late clipboard events', () => {
+    const tour = useConnectionTour.getState()
+    tour.keyCopied()
+    tour.connectionClosed()
+    tour.addressCopied()
+    expect(useConnectionTour.getState().phase).toBe('connect')
+    tour.connectionOpened()
+    expect(useConnectionTour.getState().phase).toBe('manual-key')
+    tour.keyCopied()
+    tour.addressCopied()
+    tour.modelConfirmed()
+    tour.connectionClosed()
+    expect(useConnectionTour.getState().phase).toBe('connect')
+    expect(localStorage.getItem('connection-tour:v1:8110')).toBe('seen')
+  })
+
+  test('does not resume or complete a tutorial after the user stops it', () => {
+    const tour = useConnectionTour.getState()
+    tour.dismiss()
+    tour.keyCopied()
+    tour.addressCopied()
+    tour.modelConfirmed()
+    tour.connectionClosed()
+    tour.finish()
+    expect(useConnectionTour.getState().phase).toBe('idle')
+    expect(localStorage.getItem('connection-tour:v1:8110')).toBe('seen')
+  })
+})
+
+describe('connection spotlight', () => {
+  beforeEach(async () => {
+    ConnectionSpotlight = (await import('../connection-spotlight'))
+      .ConnectionSpotlight
+    spotlightFixture = document.createElement('div')
+    document.body.append(spotlightFixture)
+    Object.defineProperty(document.documentElement, 'clientWidth', {
+      configurable: true,
+      value: 1024,
+    })
+
+    const tour = useConnectionTour.getState()
+    tour.initialize(8120, 0, ROLE.USER)
+    tour.start()
+  })
+
+  afterEach(() => {
+    spotlightFixture.remove()
+  })
+
+  test('shows a loading coach until the current phase target appears, then focuses it', async () => {
+    render(<SpotlightHarness />)
+
+    expect(
+      await screen.findByRole('region', { name: 'Finding the next step' })
+    ).toBeVisible()
+
+    const createKey = addSpotlightButton('create-key', 'Create API key')
+
+    expect(
+      await screen.findByRole('region', { name: 'Start with this button' })
+    ).toBeVisible()
+    await waitFor(() => expect(createKey).toHaveFocus())
+    expect(document.querySelector('.connection-tour-ring')).toBeInTheDocument()
+    expect(screen.getByText('Step 1 of 6')).toBeVisible()
+  })
+
+  test('keeps the connect phase on key creation until a usable key action appears', async () => {
+    useConnectionTour.getState().keyReady()
+    const createKey = addSpotlightButton('create-key', 'Create API key')
+    const connectKey = addSpotlightButton('connect-key', 'Connect key', {
+      left: 720,
+      top: 160,
+      width: 120,
+      height: 32,
+    })
+    connectKey.dataset.onboardingUsable = 'false'
+    render(<SpotlightHarness />)
+
+    expect(
+      await screen.findByRole('region', { name: 'Start with this button' })
+    ).toBeVisible()
+    await waitFor(() => expect(createKey).toHaveFocus())
+
+    connectKey.dataset.onboardingUsable = 'true'
+
+    expect(
+      await screen.findByRole('region', { name: 'Open manual setup here' })
+    ).toBeVisible()
+    await waitFor(() => expect(connectKey).toHaveFocus())
+    expect(screen.getByText('Step 2 of 6')).toBeVisible()
+  })
+
+  test('returns from verification to the model spotlight through Back', async () => {
+    advanceToVerification()
+    const model = addSpotlightButton('manual-model', 'Choose model')
+    addSpotlightButton('manual-verify', 'Verify connection', {
+      left: 520,
+      top: 280,
+      width: 240,
+      height: 120,
+    })
+    const user = userEvent.setup()
+    render(<SpotlightHarness />)
+
+    expect(
+      await screen.findByRole('region', { name: 'Make your first connection' })
+    ).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+
+    expect(useConnectionTour.getState().phase).toBe('manual-model')
+    expect(
+      await screen.findByRole('region', {
+        name: 'Choose the model you will use',
+      })
+    ).toBeVisible()
+    await waitFor(() => expect(model).toHaveFocus())
     expect(
       screen.queryByRole('button', { name: 'I received a response' })
     ).not.toBeInTheDocument()
-    act(() => useConnectionTour.getState().connectionOpened())
-    expect(
-      screen.getByText('Try your first request').closest('li')
-    ).toHaveAttribute('aria-current', 'step')
-    expect(localStorage.getItem('connection-tour:v1:8108')).toBe('seen')
+  })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Usage Logs' }))
-    await screen.findByText('Request history')
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Continue connection tutorial' })
+  test('completes the tutorial only from the verification confirmation', async () => {
+    advanceToVerification()
+    addSpotlightButton('manual-verify', 'Verify connection', {
+      left: 520,
+      top: 280,
+      width: 240,
+      height: 120,
+    })
+    const user = userEvent.setup()
+    render(<SpotlightHarness />)
+
+    await user.click(
+      await screen.findByRole('button', { name: 'I received a response' })
     )
-    await screen.findByRole('region', { name: 'Connection tutorial' })
-    expect(router.state.location.pathname).toBe('/keys')
-    fireEvent.click(
-      screen.getByRole('button', { name: 'I received a response' })
+
+    await waitFor(() =>
+      expect(screen.queryByRole('region')).not.toBeInTheDocument()
     )
-    expect(
-      screen.queryByRole('region', { name: 'Connection tutorial' })
-    ).not.toBeInTheDocument()
-    expect(localStorage.getItem('connection-tour:v1:8108')).toBe('completed')
-    setUser(null)
-    setUser(account)
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(useConnectionTour.getState().phase).toBe('idle')
+    expect(localStorage.getItem('connection-tour:v1:8120')).toBe('completed')
   })
 })

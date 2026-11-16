@@ -109,7 +109,7 @@ export function DataTableRowActions<TData>({
     if (!realKey) return
     setResolvedKey(realKey)
     setCurrentRow(apiKey)
-    setOpen('cc-switch')
+    setOpen('manual-connect')
     if (isUsable) useConnectionTour.getState().connectionOpened()
   }
 
@@ -196,6 +196,7 @@ export function DataTableRowActions<TData>({
         onClick={handleConnect}
         disabled={isRealKeyLoading}
         data-onboarding='connect-key'
+        data-onboarding-usable={isUsable ? 'true' : undefined}
         className={cn(
           'shrink-0',
           isConnectStep &&
@@ -289,7 +290,16 @@ export function DataTableRowActions<TData>({
           </DropdownMenuShortcut>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem disabled={isRealKeyLoading} onClick={handleConnect}>
+        <DropdownMenuItem
+          disabled={isRealKeyLoading}
+          onClick={async () => {
+            const realKey = await resolveRealKey(apiKey.id)
+            if (!realKey) return
+            setResolvedKey(realKey)
+            setCurrentRow(apiKey)
+            setOpen('cc-switch')
+          }}
+        >
           {t('CC Switch')}
           <DropdownMenuShortcut>
             <ArrowRightLeft size={16} />

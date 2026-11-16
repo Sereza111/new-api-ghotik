@@ -16,13 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useNavigate } from '@tanstack/react-router'
+import { useNavigate, useRouterState } from '@tanstack/react-router'
 import {
   ArrowRight,
-  CheckCircle2,
+  GraduationCap,
   KeyRound,
-  PlugZap,
-  Rocket,
+  Link2,
+  MessageCircle,
 } from 'lucide-react'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -31,11 +31,17 @@ import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
 import { useAuthStore } from '@/stores/auth-store'
 
+import '@/styles/onboarding.css'
+
+import { ConnectionSpotlight } from './connection-spotlight'
 import { useConnectionTour } from './store'
 
 export function ConnectionTour() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const onKeysPage = useRouterState({
+    select: (state) => /^\/keys\/?$/.test(state.location.pathname),
+  })
   const user = useAuthStore((state) => state.auth.user)
   const tourUserId = useConnectionTour((state) => state.userId)
   const phase = useConnectionTour((state) => state.phase)
@@ -58,73 +64,62 @@ export function ConnectionTour() {
     })
   }, [initialize])
 
-  const steps = [
-    {
-      icon: KeyRound,
-      title: t('Create your API key'),
-      description: t('We will show you the exact button and the key settings.'),
-    },
-    {
-      icon: PlugZap,
-      title: t('Connect your app'),
-      description: t('Use Connect beside your key to open the client setup.'),
-    },
-    {
-      icon: CheckCircle2,
-      title: t('Try your first request'),
-      description: t(
-        'Send a short message in your app and check that it responds.'
-      ),
-    },
-  ]
+  useEffect(() => {
+    if (!onKeysPage && (phase.startsWith('manual-') || phase === 'verify')) {
+      useConnectionTour.getState().connectionClosed()
+    }
+  }, [onKeysPage, phase])
 
+  if (!user || tourUserId !== user.id) return null
+  if (phase !== 'idle' && phase !== 'welcome' && onKeysPage) {
+    return <ConnectionSpotlight phase={phase} />
+  }
   return (
     <Dialog
-      open={Boolean(user && tourUserId === user.id && phase === 'welcome')}
+      open={phase === 'welcome'}
       onOpenChange={(open) => {
         if (!open) dismiss()
       }}
-      title={t('Let us connect your first app')}
-      description={t(
-        'A short walkthrough on the real screens. You can stop at any time and replay it from Connection tutorial.'
-      )}
+      title={t('Your first connection, together')}
+      description={t('Follow the highlights. One click at a time.')}
+      showCloseButton={false}
+      contentClassName='connection-tour-welcome sm:max-w-lg'
+      titleClassName='font-serif text-3xl leading-tight'
+      descriptionClassName='text-base'
       footer={
         <>
           <Button variant='ghost' onClick={dismiss}>
             {t('Maybe later')}
           </Button>
           <Button
+            size='lg'
             onClick={async () => {
               await navigate({ to: '/keys' })
               start()
             }}
           >
-            {t('Start walkthrough')}
+            {t('Show me how')}
             <ArrowRight aria-hidden='true' />
           </Button>
         </>
       }
     >
-      <div className='flex flex-col gap-5'>
-        <div className='bg-primary/10 text-primary flex size-12 items-center justify-center rounded-2xl'>
-          <Rocket className='size-6' aria-hidden='true' />
+      <div className='flex flex-col gap-6 py-3'>
+        <div
+          aria-hidden='true'
+          className='bg-primary/10 text-primary flex h-24 items-center justify-center gap-5 rounded-lg'
+        >
+          <KeyRound className='size-8' />
+          <ArrowRight className='size-4 opacity-50' />
+          <Link2 className='size-8' />
+          <ArrowRight className='size-4 opacity-50' />
+          <MessageCircle className='size-8' />
         </div>
-        <ol className='flex flex-col gap-4'>
-          {steps.map((step) => (
-            <li key={step.title} className='flex items-start gap-3'>
-              <step.icon
-                className='text-primary mt-0.5 size-5 shrink-0'
-                aria-hidden='true'
-              />
-              <div>
-                <p className='font-medium'>{step.title}</p>
-                <p className='text-muted-foreground mt-1 text-sm'>
-                  {step.description}
-                </p>
-              </div>
-            </li>
-          ))}
-        </ol>
+        <p className='text-muted-foreground text-sm leading-6'>
+          {t(
+            'We will copy your key and API address, choose a model, and enter the settings in your app manually.'
+          )}
+        </p>
       </div>
     </Dialog>
   )
@@ -139,7 +134,7 @@ export function ConnectionTutorialButton() {
   const showWelcome = useConnectionTour((state) => state.showWelcome)
   if (!user) return null
   const active =
-    tourUserId === user.id && ['keys', 'connect', 'verify'].includes(phase)
+    tourUserId === user.id && phase !== 'idle' && phase !== 'welcome'
   return (
     <Button
       variant={active ? 'secondary' : 'ghost'}
@@ -154,7 +149,7 @@ export function ConnectionTutorialButton() {
         else showWelcome(user.id)
       }}
     >
-      <PlugZap aria-hidden='true' />
+      <GraduationCap aria-hidden='true' />
       <span className='hidden min-[1600px]:inline'>
         {t('Connection tutorial')}
       </span>

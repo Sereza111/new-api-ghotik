@@ -43,10 +43,10 @@ import { I18nextProvider } from 'react-i18next'
 import { Toaster, toast } from 'sonner'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
-import { KeysTourPanel } from '@/features/onboarding/keys-tour-panel'
 import { useConnectionTour } from '@/features/onboarding/store'
 import zh from '@/i18n/locales/zh.json'
 import { api } from '@/lib/api'
+import * as clipboard from '@/lib/copy-to-clipboard'
 import { useAuthStore } from '@/stores/auth-store'
 import {
   DEFAULT_CURRENCY_CONFIG,
@@ -58,7 +58,7 @@ import { ApiKeyQuotaCell } from '../api-key-quota-cell'
 import { useApiKeysColumns } from '../api-keys-columns'
 import { ApiKeysProvider, useApiKeys } from '../api-keys-provider'
 import { ApiKeysTable } from '../api-keys-table'
-import { CCSwitchDialog } from '../dialogs/cc-switch-dialog'
+import { ManualConnectionDialog } from '../dialogs/manual-connection-dialog'
 
 const now = 1_700_000_000_000
 const key = apiKeySchema.parse({
@@ -316,20 +316,19 @@ it('keeps a long amount within its column while showing the full amount in detai
 })
 
 function ConnectionDialog() {
-  const { open, setOpen, resolvedKey } = useApiKeys()
-  return (
-    <CCSwitchDialog
-      open={open === 'cc-switch'}
+  const { open, setOpen, resolvedKey, currentRow } = useApiKeys()
+  return open === 'manual-connect' && currentRow ? (
+    <ManualConnectionDialog
       onOpenChange={() => setOpen(null)}
       tokenKey={resolvedKey}
+      apiKey={currentRow}
     />
-  )
+  ) : null
 }
 
 function KeysPage() {
   return (
     <ApiKeysProvider>
-      <KeysTourPanel />
       <ApiKeysTable />
       <ConnectionDialog />
       <Toaster />
@@ -454,6 +453,78 @@ it.each([
   }
 )
 
+it('advances manual steps only after successful copying and confirms a selected model without launching a client', async () => {
+  useAuthStore.getState().auth.setUser({ id: 1, username: 'new-user', role: 1 })
+  useConnectionTour.setState({ userId: 1, phase: 'keys', assessed: true })
+  await renderKeysPage()
+  const user = userEvent.setup()
+  const copy = vi.spyOn(clipboard, 'copyToClipboard').mockResolvedValue(false)
+  const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+  await user.click(screen.getByRole('button', { name: 'Connect' }))
+  const dialog = await screen.findByRole('dialog', {
+    name: 'Connect your application manually',
+  })
+  const copyKey = within(dialog).getByRole('button', { name: 'Copy API key' })
+  await user.click(copyKey)
+  expect(useConnectionTour.getState().phase).toBe('manual-key')
+  copy.mockResolvedValue(true)
+  await user.click(copyKey)
+  await waitFor(() =>
+    expect(useConnectionTour.getState().phase).toBe('manual-address')
+  )
+  expect(copy).toHaveBeenLastCalledWith('sk-fake-key-for-test-only')
+  await user.click(within(dialog).getByRole('button', { name: 'Copy API URL' }))
+  await waitFor(() =>
+    expect(useConnectionTour.getState().phase).toBe('manual-model')
+  )
+  expect(copy).toHaveBeenLastCalledWith(`${window.location.origin}/v1`)
+  expect(
+    within(dialog).getByRole('button', { name: 'Use this model' })
+  ).toBeDisabled()
+  await user.click(within(dialog).getByRole('combobox', { name: 'Model' }))
+  await user.click(await screen.findByRole('option', { name: 'test-model' }))
+  await user.click(
+    within(dialog).getByRole('button', { name: 'Use this model' })
+  )
+  expect(useConnectionTour.getState().phase).toBe('verify')
+  expect(within(dialog).getByText('Finish setup in your app')).toBeVisible()
+  expect(document.body).not.toHaveTextContent('sk-fake-key-for-test-only')
+  expect(JSON.stringify(localStorage)).not.toContain('fake-key-for-test-only')
+  expect(open).not.toHaveBeenCalled()
+})
+
+it('provides platform-specific manual Codex and Claude configuration with placeholders, respecting key model restrictions', async () => {
+  await renderKeysPage(1, {
+    model_limits_enabled: true,
+    model_limits: 'test-model',
+  })
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('button', { name: 'Connect' }))
+  const dialog = await screen.findByRole('dialog', {
+    name: 'Connect your application manually',
+  })
+  await user.click(within(dialog).getByRole('button', { name: 'Codex' }))
+  await user.click(within(dialog).getByRole('combobox', { name: 'Model' }))
+  await user.click(await screen.findByRole('option', { name: 'test-model' }))
+  expect(within(dialog).getByText(/model = "test-model"/)).toBeVisible()
+  expect(
+    within(dialog).getByText('%USERPROFILE%\\.codex\\config.toml')
+  ).toBeVisible()
+  await user.click(
+    within(dialog).getByRole('button', { name: 'macOS / Linux' })
+  )
+  expect(within(dialog).getByText('~/.codex/config.toml')).toBeVisible()
+  await user.click(within(dialog).getByRole('button', { name: 'Claude Code' }))
+  expect(within(dialog).getByText('~/.claude/settings.json')).toBeVisible()
+  expect(within(dialog).getByText(/"ANTHROPIC_BASE_URL"/)).toHaveTextContent(
+    window.location.origin
+  )
+  expect(within(dialog).getByText(/"ANTHROPIC_AUTH_TOKEN"/)).toHaveTextContent(
+    'sk-your-api-key'
+  )
+  expect(document.body).not.toHaveTextContent('fake-key-for-test-only')
+})
+
 it('keeps expired status when the server refuses reactivation', async () => {
   const { put, post } = await renderKeysPage(3)
   put.mockResolvedValue({ data: { success: false, message: 'Token expired' } })
@@ -465,7 +536,7 @@ it('keeps expired status when the server refuses reactivation', async () => {
 })
 
 it.each([true, false])(
-  'opens the existing connection setup only after an explicit click and authorized key response success=%s',
+  'opens manual connection setup only after an explicit click and authorized key response success=%s',
   async (success) => {
     useAuthStore
       .getState()
@@ -481,10 +552,6 @@ it.each([true, false])(
     const connect = screen.getByRole('button', { name: 'Connect' })
     expect(connect).toBeVisible()
     expect(post).not.toHaveBeenCalled()
-    expect(screen.getByText('Connect your app')).toHaveAttribute(
-      'aria-current',
-      'step'
-    )
     expect(
       screen.queryByRole('dialog', { name: 'Import to CC Switch' })
     ).not.toBeInTheDocument()
@@ -494,38 +561,31 @@ it.each([true, false])(
     await waitFor(() => expect(post).toHaveBeenCalledWith('/api/token/7/key'))
     if (success) {
       const dialog = await screen.findByRole('dialog', {
-        name: 'Import to CC Switch',
+        name: 'Connect your application manually',
       })
       expect(
-        within(dialog).getByRole('radio', { name: 'Claude' })
+        within(dialog).getByRole('button', { name: 'Claude Code' })
       ).toBeVisible()
       expect(
-        within(dialog).getByRole('combobox', { name: 'Primary Model' })
+        within(dialog).getByRole('combobox', { name: 'Model' })
       ).toBeVisible()
       expect(
-        within(dialog).getByRole('link', { name: 'Manual connection guide' })
-      ).toHaveAttribute('href', '/docs')
+        within(dialog).getByRole('button', { name: 'Copy API key' })
+      ).toBeVisible()
       expect(document.body).not.toHaveTextContent('fake-key-for-test-only')
       expect(localStorage.getItem('connection-tour:v1:1')).not.toBe('completed')
       await userEvent.click(
-        within(dialog).getByRole('button', { name: 'Cancel' })
-      )
-      expect(screen.getByText('Try your first request')).toHaveAttribute(
-        'aria-current',
-        'step'
+        within(dialog).getAllByRole('button', { name: 'Close' })[0]
       )
       expect(
-        screen.getByRole('button', { name: 'I received a response' })
-      ).toBeVisible()
+        screen.queryByRole('button', { name: 'I received a response' })
+      ).not.toBeInTheDocument()
     } else {
       await screen.findByText('Verification required')
       expect(
         screen.queryByRole('dialog', { name: 'Import to CC Switch' })
       ).not.toBeInTheDocument()
-      expect(screen.getByText('Connect your app')).toHaveAttribute(
-        'aria-current',
-        'step'
-      )
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     }
     expect(open).not.toHaveBeenCalled()
   }
@@ -545,15 +605,12 @@ it.each([
     await renderKeysPage(1, overrides)
     await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
     const dialog = await screen.findByRole('dialog', {
-      name: 'Import to CC Switch',
+      name: 'Connect your application manually',
     })
     await userEvent.click(
-      within(dialog).getByRole('button', { name: 'Cancel' })
+      within(dialog).getAllByRole('button', { name: 'Close' })[0]
     )
-    expect(screen.getByText('Connect your app')).toHaveAttribute(
-      'aria-current',
-      'step'
-    )
+    expect(useConnectionTour.getState().phase).toBe('connect')
     expect(
       screen.queryByRole('button', { name: 'I received a response' })
     ).not.toBeInTheDocument()

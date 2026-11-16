@@ -51,6 +51,24 @@ vi.mock('@/components/page-transition', () => ({
 }))
 
 describe('Codex platform guides', () => {
+  it('explains manual connection without requiring an automatic import tool', () => {
+    render(<Docs />)
+    const quickstart = screen.getByRole('region', {
+      name: 'First connection, step by step',
+    })
+    expect(
+      within(quickstart).getByText(
+        'Click Connect beside your key to open the manual setup instructions.'
+      )
+    ).toBeVisible()
+    expect(
+      within(quickstart).getByRole('heading', {
+        name: 'Configure your application',
+      })
+    ).toBeVisible()
+    expect(quickstart).not.toHaveTextContent('CC Switch')
+  })
+
   it('starts the connection tutorial from the written guide for the signed-in user', async () => {
     useAuthStore
       .getState()
